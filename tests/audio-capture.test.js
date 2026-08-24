@@ -627,6 +627,114 @@ s.test('index.html ships the #mic-help panel and #btn-record control with access
   assert.ok(/id="mic-help"[\s\S]{0,200}hidden/.test(html), '#mic-help should start hidden');
 });
 
+/* --- pitch / analysis formatting ------------------------------------------ */
+
+s.test('noteNameFromMidi is a top-level function mapping MIDI numbers to 12-TET names', () => {
+  const app = loadAppSandbox();
+  assert.strictEqual(
+    typeof app.sandbox.noteNameFromMidi,
+    'function',
+    'noteNameFromMidi must be a top-level `function` declaration'
+  );
+  const noteNameFromMidi = app.sandbox.noteNameFromMidi;
+
+  assert.strictEqual(noteNameFromMidi(69), 'A4', 'MIDI 69 (concert pitch anchor) must be "A4"');
+  assert.strictEqual(noteNameFromMidi(60), 'C4', 'MIDI 60 (middle C) must be "C4"');
+  assert.strictEqual(noteNameFromMidi(0), 'C-1', 'MIDI 0 must be "C-1"');
+  assert.strictEqual(noteNameFromMidi(127), 'G9', 'MIDI 127 (top of range) must be "G9"');
+  assert.strictEqual(noteNameFromMidi(61), 'C#4', 'MIDI 61 must be the sharp "C#4"');
+  assert.strictEqual(noteNameFromMidi(70), 'A#4', 'MIDI 70 must be the sharp "A#4"');
+  assert.strictEqual(noteNameFromMidi(21), 'A0', 'MIDI 21 (lowest piano key) must be "A0"');
+  assert.strictEqual(noteNameFromMidi(108), 'C8', 'MIDI 108 (highest piano key) must be "C8"');
+
+  for (const bad of [-1, 128, NaN, Infinity, 'abc', null, undefined]) {
+    assert.strictEqual(
+      noteNameFromMidi(bad),
+      null,
+      `noteNameFromMidi(${String(bad)}) must return null, not a fabricated name`
+    );
+  }
+});
+
+s.test('noteNameFromMidi octave rolls over exactly at every C', () => {
+  const app = loadAppSandbox();
+  const noteNameFromMidi = app.sandbox.noteNameFromMidi;
+  const noteNames = app.evaluate('NOTE_NAMES');
+  assert.ok(Array.isArray(noteNames) && noteNames.length === 12, 'NOTE_NAMES must be a 12-entry top-level const');
+
+  for (let n = 0; n <= 127; n += 1) {
+    const name = noteNameFromMidi(n);
+    const expectedOctave = Math.floor(n / 12) - 1;
+    const expectedLetter = noteNames[n % 12];
+    assert.strictEqual(
+      name,
+      expectedLetter + expectedOctave,
+      `MIDI ${n} should be "${expectedLetter}${expectedOctave}", got "${name}"`
+    );
+    assert.ok(
+      name.endsWith(String(expectedOctave)),
+      `MIDI ${n} name "${name}" does not end with expected octave ${expectedOctave}`
+    );
+    if (n % 12 === 0) {
+      assert.ok(
+        name.startsWith('C') && !name.startsWith('C#'),
+        `MIDI ${n} is a C-boundary and must start with a plain "C", got "${name}"`
+      );
+    }
+  }
+});
+
+s.test('formatAnalysis renders a voiced frame as Hz + note name, 2-decimal rms and rounded bpm', () => {
+  const app = loadAppSandbox();
+  const formatAnalysis = app.sandbox.formatAnalysis;
+  const result = formatAnalysis({ rms: 0.1234, gated: false, pitchHz: 440.0, midiNote: 69, bpm: 123.6 });
+
+  assert.strictEqual(result.pitch, '440.0 Hz A4', `voiced pitch should read "440.0 Hz A4", got "${result.pitch}"`);
+  assert.strictEqual(result.rms, '0.12', `rms should be rounded to 2 decimals, got "${result.rms}"`);
+  assert.strictEqual(result.bpm, '124', `bpm should be rounded to the nearest integer string, got "${result.bpm}"`);
+  assert.strictEqual(result.gated, false, 'a voiced frame must report gated: false');
+});
+
+s.test('formatAnalysis reports a gated frame as "gated" and never invents a pitch or tempo', () => {
+  const app = loadAppSandbox();
+  const formatAnalysis = app.sandbox.formatAnalysis;
+
+  const gatedResult = formatAnalysis({ rms: 0.004, gated: true, pitchHz: null, midiNote: null, bpm: null });
+  assert.strictEqual(gatedResult.rms, 'gated', `a gated frame must report rms as the literal "gated", got "${gatedResult.rms}"`);
+  assert.strictEqual(gatedResult.pitch, '—', 'a gated frame must never show a pitch');
+  assert.strictEqual(gatedResult.bpm, '—', 'a gated frame with no bpm must show an em dash, not 0 or null');
+  assert.strictEqual(gatedResult.gated, true, 'gated:true input must round-trip as gated:true output');
+
+  // Loud but unvoiced (no pitch detected): rms is real, pitch must still be absent.
+  const unvoicedResult = formatAnalysis({ rms: 0.5, gated: false, pitchHz: null, midiNote: null, bpm: null });
+  assert.strictEqual(unvoicedResult.pitch, '—', 'an unvoiced frame must show an em dash pitch even when loud');
+  assert.strictEqual(unvoicedResult.rms, '0.50', `an unvoiced-but-loud frame must still report a real rms, got "${unvoicedResult.rms}"`);
+
+  let nullResult;
+  assert.doesNotThrow(() => {
+    nullResult = formatAnalysis(null);
+  }, 'formatAnalysis(null) must not throw');
+  assert.strictEqual(nullResult.pitch, '—', 'formatAnalysis(null) pitch must degrade to an em dash');
+  assert.strictEqual(nullResult.rms, '—', 'formatAnalysis(null) rms must degrade to an em dash');
+  assert.strictEqual(nullResult.bpm, '—', 'formatAnalysis(null) bpm must degrade to an em dash');
+
+  let undefinedResult;
+  assert.doesNotThrow(() => {
+    undefinedResult = formatAnalysis(undefined);
+  }, 'formatAnalysis(undefined) must not throw');
+  assert.strictEqual(undefinedResult.pitch, '—', 'formatAnalysis(undefined) pitch must degrade to an em dash');
+  assert.strictEqual(undefinedResult.rms, '—', 'formatAnalysis(undefined) rms must degrade to an em dash');
+  assert.strictEqual(undefinedResult.bpm, '—', 'formatAnalysis(undefined) bpm must degrade to an em dash');
+});
+
+s.test('index.html ships the live analysis metric chips', () => {
+  const fs = require('node:fs');
+  const html = fs.readFileSync(INDEX, 'utf8');
+  for (const id of ['metric-pitch', 'metric-rms', 'metric-bpm', 'capture-metrics']) {
+    assert.ok(new RegExp(`id="${id}"`).test(html), `index.html is missing an element with id="${id}"`);
+  }
+});
+
 /* ------------------------------------------------------------------------ *
  * TODO: coverage that activates with later features.
  * ------------------------------------------------------------------------ */

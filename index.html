@@ -183,6 +183,45 @@
     color: var(--text-dim);
   }
 
+  /* Live analysis readout — one chip per quantity the worker measures.
+     Values land ~21x/second, so this row is deliberately NOT an aria-live
+     region: #capture-readout above already announces capture progress, and a
+     second frame-rate live region would flood a screen reader. */
+  .capture-metrics {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .metric {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+  }
+
+  .metric-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .metric-value {
+    min-width: 4.5ch;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--accent-cyan);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .metric-value.is-idle { color: var(--text-dim); }
+  .metric-value.is-gated { color: var(--warning-amber); }
+
   .mic-help {
     margin-top: 18px;
     padding: 16px 18px;
@@ -265,6 +304,20 @@
           chunks 0 · last ack —
         </span>
       </div>
+      <div id="capture-metrics" class="capture-metrics">
+        <span class="metric">
+          <span class="metric-label">pitch</span>
+          <span class="metric-value is-idle" id="metric-pitch">—</span>
+        </span>
+        <span class="metric">
+          <span class="metric-label">rms</span>
+          <span class="metric-value is-idle" id="metric-rms">—</span>
+        </span>
+        <span class="metric">
+          <span class="metric-label">bpm</span>
+          <span class="metric-value is-idle" id="metric-bpm">—</span>
+        </span>
+      </div>
       <div id="mic-help" class="mic-help" role="region" aria-label="Microphone troubleshooting" hidden>
         <h3 class="mic-help-title">Microphone unavailable</h3>
         <p id="mic-help-lead" class="mic-help-lead"></p>
@@ -316,19 +369,57 @@
  * Message protocol (main -> worker):
  *   { type: 'ping' }
  *   { type: 'audio-chunk', seq: number, sampleRate: number, samples: Float32Array }
+ *   { type: 'analyze',     seq: number, sampleRate: number, samples: Float32Array }
  * Message protocol (worker -> main):
  *   { type: 'pong', engine: 'dsp', version }
  *   { type: 'chunk-ack', seq, samples }      // samples = frame count received
+ *   { type: 'analysis', seq, samples, rms, gated, pitchHz, midiNote, snappedHz,
+ *                       bpm, onsets }
  *   { type: 'error', error }
  *
  * 'audio-chunk' is the transport half of the capture pipeline: it proves the
  * live AnalyserNode frames arrive intact (and, with a transferable buffer,
- * without a copy). The analysis reply ({type:'analysis', pitchHz, rms, bpm})
- * is deliberately NOT emitted yet — no fabricated numbers. It lands together
- * with the YIN/RMS/onset implementations (PLANNING.md ## NEXT).
+ * without a copy). It is kept as-is so the transport can be exercised on its
+ * own. 'analyze' is the full DSP pass over the same payload.
+ *
+ * ANTI-SIMULATION: every reported number is measured from the caller's samples.
+ * A gated (too quiet), unvoiced or ambiguous frame reports `null` — never a
+ * plausible-looking Hz or tempo. There is no Math.random() anywhere below.
+ *
+ * STATE POLICY (documented choice): every DSP routine here is a pure function.
+ * Tempo is the one quantity that needs history across chunks, so that history
+ * lives in a tracker object built by `createBpmTracker(sampleRate)`.
+ * `handleMessage(msg, tracker)` takes it as an explicit second argument and
+ * never touches a module-level mutable — which keeps the handler unit-testable
+ * and deterministic. The `self.onmessage` closure at the bottom owns the single
+ * live tracker instance and passes it in (rebuilding it when the sample rate
+ * changes, resetting it when a new capture session starts at seq 0). Called
+ * WITHOUT a tracker, 'analyze' still reports rms/pitch and reports `bpm: null`,
+ * because without cross-chunk history there is no measured tempo to report.
  */
 
-const DSP_ENGINE_VERSION = '0.2.0';
+const DSP_ENGINE_VERSION = '0.3.0';
+
+/* --- Algorithm contracts (docs/FEATURE-MECHANICS.md §1.2-§1.4) ------------ */
+
+/** YIN absolute threshold: the first CMND dip below this is the period. */
+const YIN_THRESHOLD = 0.1;
+/** F0 search band in Hz — tau spans ceil(sr/F0_MAX_HZ) .. floor(sr/F0_MIN_HZ). */
+const F0_MIN_HZ = 65;
+const F0_MAX_HZ = 1050;
+/** RMS noise gate: frames quieter than this are not pitch-analysed at all. */
+const RMS_GATE = 0.015;
+/** Onset envelope hop (sub-frame length in samples) and its peak-pick rules. */
+const ONSET_HOP = 256;
+const ONSET_THRESHOLD_FACTOR = 1.5;
+const ONSET_LOCAL_HALF = 8;
+/** Two onsets closer than this are one transient (caps at 1000 BPM). */
+const ONSET_DEBOUNCE_MS = 60;
+/** Sliding window the median inter-beat interval is taken over. */
+const BPM_WINDOW_MS = 4000;
+/** Outside this band an "estimate" is not a tempo; report null instead. */
+const BPM_MIN = 40;
+const BPM_MAX = 240;
 
 /**
  * True for anything indexable with a numeric `.length` — Float32Array, plain
@@ -345,7 +436,495 @@ function isArrayLike(value) {
   );
 }
 
-function handleMessage(msg) {
+/** A finite, strictly positive number (sample rates, frequencies, periods). */
+function isPositiveNumber(value) {
+  return typeof value === 'number' && isFinite(value) && value > 0;
+}
+
+/* ------------------------------------------------------------------------- *
+ * RMS + noise gate (docs/FEATURE-MECHANICS.md §1.2, ENGINEERING-STANDARD §1.2)
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Root mean square of a buffer: sqrt(mean(x^2)). For a sine of amplitude A
+ * this is exactly A/sqrt(2). An empty buffer has no energy, so: 0.
+ * @param {ArrayLike<number>} samples
+ * @returns {number}
+ */
+function rms(samples) {
+  if (!isArrayLike(samples) || samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const v = samples[i];
+    sum += v * v;
+  }
+  return Math.sqrt(sum / samples.length);
+}
+
+/**
+ * The noise gate itself. `true` means "too quiet to analyse" — the frame is
+ * dropped before any pitch work happens, so silence can never be mistaken for
+ * a very low-confidence pitch.
+ * @param {number} level an RMS value
+ * @param {number} [threshold] defaults to RMS_GATE (0.015)
+ * @returns {boolean}
+ */
+function isGated(level, threshold) {
+  const gate = isPositiveNumber(threshold) ? threshold : RMS_GATE;
+  if (typeof level !== 'number' || !isFinite(level)) return true;
+  // Boundary rule: exactly at the threshold PASSES (gate is a strict "below").
+  return level < gate;
+}
+
+/* ------------------------------------------------------------------------- *
+ * YIN pitch detection (docs/FEATURE-MECHANICS.md §1.2)
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Parabolic interpolation of the minimum of `curve` around integer index `tau`.
+ * Returns a fractional index with sub-sample precision, which is what lifts a
+ * 2048-sample frame from ~1 Hz granularity (at 440 Hz) to well under 0.1%.
+ *
+ * @param {Float64Array} curve
+ * @param {number} tau integer index of the local minimum
+ * @param {number} lo lowest usable index
+ * @param {number} hi highest usable index
+ * @returns {number} refined, possibly fractional, tau
+ */
+function parabolicMinimum(curve, tau, lo, hi) {
+  if (tau <= lo || tau >= hi) return tau;
+  const s0 = curve[tau - 1];
+  const s1 = curve[tau];
+  const s2 = curve[tau + 1];
+  const denom = 2 * (2 * s1 - s2 - s0);
+  if (denom === 0 || !isFinite(denom)) return tau;
+  const shift = (s2 - s0) / denom;
+  // A well-formed parabola through three samples cannot move the peak by more
+  // than half a bin; anything else is numerical noise, so keep the integer.
+  if (!isFinite(shift) || shift < -1 || shift > 1) return tau;
+  return tau + shift;
+}
+
+/**
+ * Full YIN pass over one buffer.
+ *
+ * Step 1  difference function      d(tau) = sum_j (x[j] - x[j+tau])^2, evaluated
+ *         via the algebraically identical power-sum/correlation form so the
+ *         inner loop is a single multiply-accumulate.
+ * Step 2  cumulative mean normalised difference (CMND), d'(0) = 1.
+ * Step 3  absolute threshold: the FIRST tau with d'(tau) < 0.1, then descend
+ *         into the local minimum that dip belongs to.
+ * Step 4  parabolic interpolation around that minimum.
+ *
+ * @param {ArrayLike<number>} samples time-domain frame (2048 @ 44.1kHz)
+ * @param {number} [sampleRate] defaults to 44100
+ * @param {number} [threshold] defaults to YIN_THRESHOLD (0.1)
+ * @returns {null|{hz:number, hzRaw:number, tau:number, tauRaw:number,
+ *                 cmnd:number, tauMin:number, tauMax:number}}
+ *          `null` for silence, noise, or any frame with no qualifying dip.
+ */
+function yinDetect(samples, sampleRate, threshold) {
+  if (!isArrayLike(samples)) return null;
+  const n = samples.length | 0;
+  const sr = isPositiveNumber(sampleRate) ? sampleRate : 44100;
+  const thr = isPositiveNumber(threshold) ? threshold : YIN_THRESHOLD;
+
+  const tauMin = Math.max(1, Math.ceil(sr / F0_MAX_HZ));
+  const tauMax = Math.min(n - 2, Math.floor(sr / F0_MIN_HZ));
+  if (tauMax <= tauMin) return null;
+
+  // Constant integration window for every lag, so the CMND curve is not biased
+  // by a shrinking sum at long lags. tau + w <= n holds for every tau <= tauMax.
+  const w = n - tauMax;
+  if (w < 2) return null;
+
+  // prefix[i] = sum of x[0..i-1]^2 — turns the two square terms of d(tau) into
+  // O(1) lookups, leaving one multiply-add per inner iteration.
+  const prefix = new Float64Array(n + 1);
+  for (let i = 0; i < n; i += 1) {
+    const v = samples[i];
+    prefix[i + 1] = prefix[i] + v * v;
+  }
+  const headPower = prefix[w];
+  if (headPower === 0) return null; // digital silence: no difference curve at all
+
+  const diff = new Float64Array(tauMax + 1);
+  for (let tau = 1; tau <= tauMax; tau += 1) {
+    let corr = 0;
+    for (let j = 0; j < w; j += 1) corr += samples[j] * samples[j + tau];
+    const d = headPower + (prefix[tau + w] - prefix[tau]) - 2 * corr;
+    diff[tau] = d > 0 ? d : 0; // float cancellation can dip a true zero negative
+  }
+
+  const cmnd = new Float64Array(tauMax + 1);
+  cmnd[0] = 1;
+  let running = 0;
+  for (let tau = 1; tau <= tauMax; tau += 1) {
+    running += diff[tau];
+    cmnd[tau] = running > 0 ? (diff[tau] * tau) / running : 1;
+  }
+
+  let tauRaw = -1;
+  for (let tau = tauMin; tau <= tauMax; tau += 1) {
+    if (cmnd[tau] >= thr) continue;
+    // First qualifying dip found — walk down to the bottom of THIS dip so the
+    // parabola is fitted to a real minimum, not to its rising flank.
+    let at = tau;
+    while (at + 1 <= tauMax && cmnd[at + 1] < cmnd[at]) at += 1;
+    tauRaw = at;
+    break;
+  }
+  if (tauRaw < 0) return null;
+
+  // The CMND curve is populated from tau 1 upward, so a dip sitting exactly on
+  // tauMin can still be interpolated against its lower neighbour — without that
+  // the top of the search band would quantise hard to sr/tauMin.
+  const tau = parabolicMinimum(cmnd, tauRaw, 1, tauMax);
+  if (!isPositiveNumber(tau)) return null;
+  const hz = sr / tau;
+  if (!isPositiveNumber(hz)) return null;
+
+  return {
+    hz: hz,
+    hzRaw: sr / tauRaw,
+    tau: tau,
+    tauRaw: tauRaw,
+    cmnd: cmnd[tauRaw],
+    tauMin: tauMin,
+    tauMax: tauMax,
+  };
+}
+
+/**
+ * Fundamental frequency of one frame, in Hz, or `null` when there is none.
+ * @param {ArrayLike<number>} samples
+ * @param {number} [sampleRate]
+ * @param {number} [threshold]
+ * @returns {number|null}
+ */
+function yinPitch(samples, sampleRate, threshold) {
+  const found = yinDetect(samples, sampleRate, threshold);
+  return found ? found.hz : null;
+}
+
+/* ------------------------------------------------------------------------- *
+ * Pitch mapping + 12-TET snapping (docs/FEATURE-MECHANICS.md §1.1, §1.4)
+ * ------------------------------------------------------------------------- */
+
+/**
+ * MIDI note number for a frequency: n = round(69 + 12 * log2(F0 / 440)).
+ * @param {number} f0
+ * @returns {number|null} null for a non-positive / non-finite input
+ */
+function midiNoteFromHz(f0) {
+  if (!isPositiveNumber(f0)) return null;
+  return Math.round(69 + 12 * Math.log2(f0 / 440));
+}
+
+/** Exact 12-TET frequency of a MIDI note number: 440 * 2^((n-69)/12). */
+function hzFromMidiNote(note) {
+  if (typeof note !== 'number' || !isFinite(note)) return null;
+  return 440 * Math.pow(2, (note - 69) / 12);
+}
+
+/**
+ * Pitch sanitizer: snap a microtonal hum to the nearest 12-TET frequency so the
+ * cents deviation is dropped before valence mapping (§1.4).
+ * @param {number} f0
+ * @returns {number|null}
+ */
+function snapHzToSemitone(f0) {
+  const note = midiNoteFromHz(f0);
+  return note === null ? null : hzFromMidiNote(note);
+}
+
+/** Cents between a raw frequency and its snapped 12-TET neighbour. */
+function centsFromSemitone(f0) {
+  const snapped = snapHzToSemitone(f0);
+  if (snapped === null || !isPositiveNumber(f0)) return null;
+  return 1200 * Math.log2(f0 / snapped);
+}
+
+/* ------------------------------------------------------------------------- *
+ * Onset detection + BPM (docs/FEATURE-MECHANICS.md §1.3)
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Energy envelope: mean square of each `hop`-sample sub-frame. Trailing samples
+ * that do not fill a whole hop are left for the next chunk's envelope.
+ * @param {ArrayLike<number>} samples
+ * @param {number} [hop] defaults to ONSET_HOP (256)
+ * @returns {Float64Array} one energy value per sub-frame
+ */
+function energyEnvelope(samples, hop) {
+  const h = isPositiveNumber(hop) ? Math.floor(hop) : ONSET_HOP;
+  if (!isArrayLike(samples) || samples.length < h) return new Float64Array(0);
+  const frames = Math.floor(samples.length / h);
+  const env = new Float64Array(frames);
+  for (let k = 0; k < frames; k += 1) {
+    const start = k * h;
+    let sum = 0;
+    for (let i = 0; i < h; i += 1) {
+      const v = samples[start + i];
+      sum += v * v;
+    }
+    env[k] = sum / h;
+  }
+  return env;
+}
+
+/** Mean of `values` over the +/- `half` neighbourhood of index `k`. */
+function localMean(values, k, half) {
+  const lo = Math.max(0, k - half);
+  const hi = Math.min(values.length - 1, k + half);
+  let sum = 0;
+  for (let i = lo; i <= hi; i += 1) sum += values[i];
+  return sum / (hi - lo + 1);
+}
+
+/**
+ * Peak-pick the positive first derivative (rising energy) of an envelope.
+ *
+ * A hop qualifies when it (a) actually rises, (b) is loud enough to clear the
+ * same noise gate the pitch path uses — a beat cannot live inside silence,
+ * (c) beats the dynamic threshold 1.5 * local_mean of the rise curve, and
+ * (d) is the local maximum of that rise, so one transient smeared across two
+ * hops still yields one onset.
+ *
+ * @param {Float64Array} env
+ * @param {number} [priorEnergy] last envelope value of the PREVIOUS chunk, so a
+ *        transient sitting on a chunk boundary is not lost. Passing 0 states
+ *        "silence came before this" and lets the very first hop be an onset;
+ *        OMITTING it means "no context", and the first hop then compares
+ *        against itself so no onset is invented at t=0.
+ * @returns {number[]} hop indices
+ */
+function onsetHopIndices(env, priorEnergy) {
+  const out = [];
+  const n = env ? env.length : 0;
+  if (n === 0) return out;
+
+  const hasPrior = typeof priorEnergy === 'number' && isFinite(priorEnergy) && priorEnergy >= 0;
+  const seed = hasPrior ? priorEnergy : env[0];
+  const rise = new Float64Array(n);
+  for (let k = 0; k < n; k += 1) {
+    const before = k === 0 ? seed : env[k - 1];
+    const delta = env[k] - before;
+    rise[k] = delta > 0 ? delta : 0;
+  }
+
+  const energyFloor = RMS_GATE * RMS_GATE;
+  for (let k = 0; k < n; k += 1) {
+    if (rise[k] <= 0) continue;
+    if (env[k] < energyFloor) continue;
+    if (rise[k] <= ONSET_THRESHOLD_FACTOR * localMean(rise, k, ONSET_LOCAL_HALF)) continue;
+    if (k > 0 && rise[k - 1] > rise[k]) continue;
+    if (k + 1 < n && rise[k + 1] > rise[k]) continue;
+    out.push(k);
+  }
+  return out;
+}
+
+/**
+ * Refine an onset from hop resolution to sample resolution: inside the hop that
+ * fired, take the first sample whose magnitude reaches half the hop's peak.
+ * Hop resolution alone is 5.8 ms at 44.1kHz, which is ~1.5 BPM of quantisation
+ * error around 124 BPM — far too coarse to honour the +/-1 BPM contract.
+ *
+ * @returns {number} absolute sample index of the attack
+ */
+function refineOnsetSample(samples, hopIndex, hop) {
+  const h = isPositiveNumber(hop) ? Math.floor(hop) : ONSET_HOP;
+  const start = hopIndex * h;
+  const end = Math.min(start + h, samples.length);
+  let peak = 0;
+  for (let i = start; i < end; i += 1) {
+    const a = Math.abs(samples[i]);
+    if (a > peak) peak = a;
+  }
+  if (peak <= 0) return start;
+  const gate = peak * 0.5;
+  for (let i = start; i < end; i += 1) {
+    if (Math.abs(samples[i]) >= gate) return i;
+  }
+  return start;
+}
+
+/**
+ * Onset times inside one buffer, in milliseconds from its first sample.
+ * @param {ArrayLike<number>} samples
+ * @param {number} [sampleRate]
+ * @param {{priorEnergy?:number, hop?:number}} [opts]
+ * @returns {number[]} ascending, debounced
+ */
+function detectOnsets(samples, sampleRate, opts) {
+  const o = opts || {};
+  if (!isArrayLike(samples)) return [];
+  const sr = isPositiveNumber(sampleRate) ? sampleRate : 44100;
+  const hop = isPositiveNumber(o.hop) ? Math.floor(o.hop) : ONSET_HOP;
+  const env = energyEnvelope(samples, hop);
+  const hops = onsetHopIndices(env, o.priorEnergy);
+
+  const out = [];
+  let last = null;
+  for (let i = 0; i < hops.length; i += 1) {
+    const ms = (refineOnsetSample(samples, hops[i], hop) / sr) * 1000;
+    if (last !== null && ms - last < ONSET_DEBOUNCE_MS) continue;
+    last = ms;
+    out.push(ms);
+  }
+  return out;
+}
+
+/**
+ * Median of a numeric list. Median — not mean — is what makes the tempo survive
+ * a dropped or spurious onset (§1.3 step 5).
+ * @param {ArrayLike<number>} values
+ * @returns {number|null}
+ */
+function medianOf(values) {
+  if (!isArrayLike(values) || values.length === 0) return null;
+  const sorted = [];
+  for (let i = 0; i < values.length; i += 1) {
+    if (typeof values[i] === 'number' && isFinite(values[i])) sorted.push(values[i]);
+  }
+  if (sorted.length === 0) return null;
+  sorted.sort(function (a, b) {
+    return a - b;
+  });
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Tempo tracker: the ONE stateful object in this worker.
+ *
+ * Chunks arrive one at a time and a beat interval is longer than a chunk, so
+ * tempo cannot be derived from a single frame. The tracker accumulates onset
+ * timestamps on its own sample clock, keeps a 4-second sliding window, and
+ * reports 60000 / median(IBI). Fewer than two onsets in the window means there
+ * is nothing to measure — it reports null rather than inventing a tempo.
+ *
+ * @param {number} sampleRate
+ * @returns {{push:Function, bpm:Function, reset:Function, onsetTimes:Function,
+ *            onsetCount:Function, elapsedMs:Function, sampleRate:number}}
+ */
+function createBpmTracker(sampleRate) {
+  const sr = isPositiveNumber(sampleRate) ? sampleRate : 44100;
+  let elapsedSamples = 0;
+  let priorEnergy = 0;
+  let onsets = [];
+
+  function nowMs() {
+    return (elapsedSamples / sr) * 1000;
+  }
+
+  function prune() {
+    const cutoff = nowMs() - BPM_WINDOW_MS;
+    let drop = 0;
+    while (drop < onsets.length && onsets[drop] < cutoff) drop += 1;
+    if (drop > 0) onsets = onsets.slice(drop);
+  }
+
+  function estimate() {
+    if (onsets.length < 2) return null;
+    const ibis = [];
+    for (let i = 1; i < onsets.length; i += 1) ibis.push(onsets[i] - onsets[i - 1]);
+    const median = medianOf(ibis);
+    if (!isPositiveNumber(median)) return null;
+    const bpm = 60000 / median;
+    if (bpm < BPM_MIN || bpm > BPM_MAX) return null;
+    return bpm;
+  }
+
+  return {
+    sampleRate: sr,
+
+    /**
+     * Consume one chunk: advance the clock, collect its onsets, re-estimate.
+     * @param {ArrayLike<number>} samples
+     * @returns {{bpm:number|null, onsets:number[]}} onsets are absolute ms
+     */
+    push: function (samples) {
+      const found = [];
+      if (isArrayLike(samples) && samples.length > 0) {
+        const startMs = nowMs();
+        const env = energyEnvelope(samples, ONSET_HOP);
+        const hops = onsetHopIndices(env, priorEnergy);
+        for (let i = 0; i < hops.length; i += 1) {
+          const ms = startMs + (refineOnsetSample(samples, hops[i], ONSET_HOP) / sr) * 1000;
+          const last = onsets.length > 0 ? onsets[onsets.length - 1] : null;
+          if (last !== null && ms - last < ONSET_DEBOUNCE_MS) continue;
+          onsets.push(ms);
+          found.push(ms);
+        }
+        if (env.length > 0) priorEnergy = env[env.length - 1];
+        elapsedSamples += samples.length;
+      }
+      prune();
+      return { bpm: estimate(), onsets: found };
+    },
+
+    bpm: function () {
+      return estimate();
+    },
+    onsetTimes: function () {
+      return onsets.slice();
+    },
+    onsetCount: function () {
+      return onsets.length;
+    },
+    elapsedMs: function () {
+      return nowMs();
+    },
+    reset: function () {
+      elapsedSamples = 0;
+      priorEnergy = 0;
+      onsets = [];
+    },
+  };
+}
+
+/* ------------------------------------------------------------------------- *
+ * Message protocol
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Full analysis of one frame. Pure: everything it reports comes from `samples`
+ * plus the (optional) caller-owned tempo tracker.
+ *
+ * @param {ArrayLike<number>} samples
+ * @param {number} sampleRate
+ * @param {object} [tracker] a createBpmTracker() instance
+ */
+function analyzeFrame(samples, sampleRate, tracker) {
+  const level = rms(samples);
+  const gated = isGated(level);
+
+  let pitchHz = null;
+  if (!gated) pitchHz = yinPitch(samples, sampleRate);
+
+  const bpmSource = tracker && typeof tracker.push === 'function' ? tracker.push(samples) : null;
+
+  return {
+    rms: level,
+    gated: gated,
+    pitchHz: pitchHz,
+    midiNote: pitchHz === null ? null : midiNoteFromHz(pitchHz),
+    snappedHz: pitchHz === null ? null : snapHzToSemitone(pitchHz),
+    bpm: bpmSource ? bpmSource.bpm : null,
+    onsets: bpmSource ? bpmSource.onsets.length : 0,
+  };
+}
+
+/**
+ * Translate one inbound message into exactly one reply. Pure — the only state
+ * it can touch is the tracker handed to it (see STATE POLICY at the top).
+ *
+ * @param {*} msg
+ * @param {object} [tracker] tempo tracker owned by the caller
+ */
+function handleMessage(msg, tracker) {
   if (!msg || typeof msg.type !== 'string') {
     return { type: 'error', error: 'malformed message' };
   }
@@ -361,14 +940,57 @@ function handleMessage(msg) {
       }
       return { type: 'chunk-ack', seq: msg.seq, samples: msg.samples.length };
     }
+    case 'analyze': {
+      if (typeof msg.seq !== 'number' || !isFinite(msg.seq)) {
+        return { type: 'error', error: 'analyze: missing or non-numeric seq' };
+      }
+      if (!isArrayLike(msg.samples)) {
+        return { type: 'error', error: 'analyze: samples must be array-like' };
+      }
+      if (msg.samples.length === 0) {
+        return { type: 'error', error: 'analyze: samples must not be empty' };
+      }
+      if (msg.sampleRate !== undefined && !isPositiveNumber(msg.sampleRate)) {
+        return { type: 'error', error: 'analyze: sampleRate must be a positive number' };
+      }
+      const sr = isPositiveNumber(msg.sampleRate) ? msg.sampleRate : 44100;
+      const result = analyzeFrame(msg.samples, sr, tracker);
+      return {
+        type: 'analysis',
+        seq: msg.seq,
+        sampleRate: sr,
+        samples: msg.samples.length,
+        rms: result.rms,
+        gated: result.gated,
+        pitchHz: result.pitchHz,
+        midiNote: result.midiNote,
+        snappedHz: result.snappedHz,
+        bpm: result.bpm,
+        onsets: result.onsets,
+      };
+    }
     default:
       return { type: 'error', error: 'unknown message type: ' + msg.type };
   }
 }
 
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
+  // The closure owns the single live tracker; handleMessage stays pure.
+  let sessionTracker = null;
+
   self.onmessage = function (e) {
-    self.postMessage(handleMessage(e.data));
+    const msg = e.data;
+    if (msg && msg.type === 'analyze') {
+      const sr = isPositiveNumber(msg.sampleRate) ? msg.sampleRate : 44100;
+      if (!sessionTracker || sessionTracker.sampleRate !== sr) {
+        sessionTracker = createBpmTracker(sr);
+      } else if (msg.seq === 0) {
+        // seq restarts at 0 for every capture session (see #app-main), so the
+        // previous session's beats must not leak into this one's tempo.
+        sessionTracker.reset();
+      }
+    }
+    self.postMessage(handleMessage(msg, sessionTracker));
   };
 }
 </script>
@@ -384,13 +1006,59 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
  * clamped so an exotic sample rate can never spin the timer faster than 50 Hz. */
 const CAPTURE_FFT_SIZE = 2048;
 const MIN_POLL_MS = 20;
+
+/* 12-TET note names, sharps only, index = MIDI note number modulo 12. */
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+/**
+ * Scientific pitch notation for a MIDI note number: C-1 is MIDI 0, so
+ * octave = floor(n / 12) - 1. MIDI 69 -> "A4", MIDI 60 -> "C4".
+ * @param {number} note
+ * @returns {string|null} null for anything that is not a real note number
+ */
+function noteNameFromMidi(note) {
+  if (typeof note !== 'number' || !isFinite(note)) return null;
+  const n = Math.round(note);
+  if (n < 0 || n > 127) return null;
+  return NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
+}
+
+/**
+ * Format the worker's 'analysis' reply for the live capture panel.
+ * Every field degrades to an em dash rather than to a plausible-looking
+ * number: a gated or unvoiced frame has no pitch, and no tempo exists until
+ * the worker has seen at least two onsets (docs/ENGINEERING-STANDARD.md §1.2).
+ *
+ * @param {{rms?:number, gated?:boolean, pitchHz?:number|null,
+ *          midiNote?:number|null, bpm?:number|null}} analysis
+ * @returns {{pitch:string, rms:string, bpm:string, gated:boolean}}
+ */
+function formatAnalysis(analysis) {
+  const a = analysis || {};
+  const gated = a.gated === true;
+
+  let pitch = '—';
+  if (!gated && typeof a.pitchHz === 'number' && isFinite(a.pitchHz) && a.pitchHz > 0) {
+    const name = noteNameFromMidi(a.midiNote);
+    pitch = a.pitchHz.toFixed(1) + ' Hz' + (name ? ' ' + name : '');
+  }
+
+  let level = '—';
+  if (gated) level = 'gated';
+  else if (typeof a.rms === 'number' && isFinite(a.rms)) level = a.rms.toFixed(2);
+
+  const bpm =
+    typeof a.bpm === 'number' && isFinite(a.bpm) && a.bpm > 0 ? String(Math.round(a.bpm)) : '—';
+
+  return { pitch: pitch, rms: level, bpm: bpm, gated: gated };
+}
 
 /**
  * Ordered, actually-actionable recovery steps for a microphone that will not
@@ -736,6 +1404,9 @@ function createAudioCapture(deps) {
     const recordBtn = $('btn-record');
     const recordLabel = $('btn-record-label');
     const readout = $('capture-readout');
+    const metricPitch = $('metric-pitch');
+    const metricRms = $('metric-rms');
+    const metricBpm = $('metric-bpm');
     const micHelp = $('mic-help');
     const micHelpLead = $('mic-help-lead');
     const micHelpDetail = $('mic-help-detail');
@@ -747,6 +1418,24 @@ function createAudioCapture(deps) {
     function renderReadout() {
       readout.textContent =
         'chunks ' + sentChunks + ' · last ack ' + (lastAck === null ? '—' : lastAck);
+    }
+
+    /** Paint one metric chip, dimming it whenever there is nothing to report. */
+    function setMetric(el, text, tone) {
+      el.textContent = text;
+      el.className = 'metric-value' + (tone ? ' ' + tone : '');
+    }
+
+    /** Live pitch / level / tempo, straight from the worker's 'analysis' reply. */
+    function renderAnalysis(analysis) {
+      const view = formatAnalysis(analysis);
+      setMetric(metricPitch, view.pitch, view.pitch === '—' ? 'is-idle' : '');
+      setMetric(metricRms, view.rms, view.gated ? 'is-gated' : view.rms === '—' ? 'is-idle' : '');
+      setMetric(metricBpm, view.bpm, view.bpm === '—' ? 'is-idle' : '');
+    }
+
+    function clearAnalysis() {
+      renderAnalysis(null);
     }
 
     try {
@@ -765,6 +1454,11 @@ function createAudioCapture(deps) {
         } else if (data.type === 'chunk-ack') {
           lastAck = data.seq;
           renderReadout();
+        } else if (data.type === 'analysis') {
+          // An analysis reply IS the ack for that frame — same seq, same trip.
+          lastAck = data.seq;
+          renderReadout();
+          renderAnalysis(data);
         } else if (data.type === 'error') {
           workerStatus.textContent = 'DSP worker: ' + data.error;
           workerStatus.className = 'err';
@@ -863,10 +1557,12 @@ function createAudioCapture(deps) {
           if (!dspWorker) return;
           try {
             // Transfer the buffer: zero-copy handoff, and the engine already
-            // allocated a fresh frame for the next poll.
+            // allocated a fresh frame for the next poll. 'analyze' runs the
+            // full YIN / RMS-gate / onset pass off the UI thread and answers
+            // with an 'analysis' reply carrying this same seq.
             dspWorker.postMessage(
               {
-                type: 'audio-chunk',
+                type: 'analyze',
                 seq: chunk.seq,
                 sampleRate: chunk.sampleRate,
                 samples: chunk.samples,
@@ -883,6 +1579,10 @@ function createAudioCapture(deps) {
             sentChunks = 0;
             lastAck = null;
             renderReadout();
+            clearAnalysis();
+          } else if (state !== 'live') {
+            // Nothing is being measured any more; keep no stale numbers on screen.
+            clearAnalysis();
           }
           renderMic(state, detail);
         },
@@ -906,6 +1606,7 @@ function createAudioCapture(deps) {
     });
 
     renderReadout();
+    clearAnalysis();
     renderMic(capture.getState());
   }
 
