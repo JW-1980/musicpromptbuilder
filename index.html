@@ -29,7 +29,10 @@
        var CLOUD_API_PRESETS registry, which is the ONLY place in this file
        allowed to hold a remote URL (tests/verify-single-file.js enforces it)
     4. the studio shell (createViewManager, tabKeyTarget, createThemePrefs)
-    5. the boot IIFE
+    5. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
+       the pure mesh/level/colour helpers (buildRibbonGeometry, downsampleBuffer,
+       valenceToColor, pushRibbonRow, perspectiveMatrix4) plus createRibbonRenderer
+    6. the boot IIFE
 -->
 <style>
   /* ==========================================================================
@@ -404,6 +407,43 @@
 
   .metric-value.is-idle { color: var(--text-dim); }
   .metric-value.is-gated { color: var(--warning-amber); }
+
+  /* --- 3D frequency ribbon (docs/FEATURE-MECHANICS.md §1.5, FDD #11) ------ */
+
+  /* Deliberately NOT hidden in High-Contrast mode: the ribbon is content — it
+     is the visualiser the user came for — not decorative chrome. Its surface
+     is token-driven, so the card around it goes solid black with everything
+     else while the canvas keeps rendering. */
+  .viz-card { margin-top: 20px; }
+
+  .viz-heading {
+    margin: 0 0 8px;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .viz-canvas {
+    display: block;
+    width: 100%;
+    height: 190px;
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+  }
+
+  /* The element sets display:block, so [hidden] needs to win explicitly. */
+  .viz-canvas[hidden] { display: none; }
+
+  .viz-note {
+    margin: 10px 0 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--warning-amber);
+  }
+
+  .viz-note[hidden] { display: none; }
 
   .mic-help {
     margin-top: 18px;
@@ -991,12 +1031,28 @@
           <span class="metric-label">bpm</span>
           <span class="metric-value is-idle" id="metric-bpm">—</span>
         </span>
+        <span class="metric">
+          <span class="metric-label">key</span>
+          <span class="metric-value is-idle" id="metric-valence">—</span>
+        </span>
       </div>
       <p class="panel-note metrics-note">
         One chip per quantity the worker actually measures. A dash means the frame carried no
-        answer — a gated or unvoiced frame has no pitch, and no tempo exists until two onsets
-        have been seen. Nothing here is ever estimated to fill a gap.
+        answer — a gated or unvoiced frame has no pitch, no tempo exists until two onsets
+        have been seen, and a key needs a measured third before it is called major or minor.
+        Nothing here is ever estimated to fill a gap.
       </p>
+
+      <div class="viz-card">
+        <h4 class="viz-heading">Frequency ribbon</h4>
+        <canvas id="viz-ribbon" class="viz-canvas" role="img"
+                aria-label="Live 3D frequency ribbon. It twists with the level of your hum and shifts toward cyan for a major key or violet for a minor one. The pitch, level, tempo and key chips above carry the same measurements as text.">
+          A WebGL2 3D frequency ribbon renders here while the microphone is live. Your browser
+          shows this text instead because it cannot draw it — the pitch, level, tempo and key
+          readouts above carry exactly the same measurements.
+        </canvas>
+        <p id="viz-note" class="viz-note" role="status" hidden></p>
+      </div>
     </section>
     </div>
   </section>
@@ -1138,7 +1194,7 @@
  *   { type: 'pong', engine: 'dsp', version }
  *   { type: 'chunk-ack', seq, samples }      // samples = frame count received
  *   { type: 'analysis', seq, samples, rms, gated, pitchHz, midiNote, snappedHz,
- *                       bpm, onsets }
+ *                       bpm, onsets, valence }
  *   { type: 'error', error }
  *
  * 'audio-chunk' is the transport half of the capture pipeline: it proves the
@@ -1151,18 +1207,19 @@
  * plausible-looking Hz or tempo. There is no Math.random() anywhere below.
  *
  * STATE POLICY (documented choice): every DSP routine here is a pure function.
- * Tempo is the one quantity that needs history across chunks, so that history
- * lives in a tracker object built by `createBpmTracker(sampleRate)`.
- * `handleMessage(msg, tracker)` takes it as an explicit second argument and
- * never touches a module-level mutable — which keeps the handler unit-testable
- * and deterministic. The `self.onmessage` closure at the bottom owns the single
- * live tracker instance and passes it in (rebuilding it when the sample rate
- * changes, resetting it when a new capture session starts at seq 0). Called
- * WITHOUT a tracker, 'analyze' still reports rms/pitch and reports `bpm: null`,
- * because without cross-chunk history there is no measured tempo to report.
+ * Two quantities need history across chunks — tempo and harmonic valence — so
+ * each owns a tracker object: `createBpmTracker(sampleRate)` and
+ * `createValenceTracker()`. `handleMessage(msg, tracker, valence)` takes both
+ * as explicit arguments and never touches a module-level mutable, which keeps
+ * the handler unit-testable and deterministic. The `self.onmessage` closure at
+ * the bottom owns the single live pair and passes them in (rebuilding on a
+ * sample-rate change, resetting when a new capture session starts at seq 0).
+ * Called WITHOUT them, 'analyze' still reports rms/pitch and reports
+ * `bpm: null` / `valence: null`, because without cross-chunk history there is
+ * no measured tempo and no accumulated pitch-class histogram to report.
  */
 
-const DSP_ENGINE_VERSION = '0.3.0';
+const DSP_ENGINE_VERSION = '0.4.0';
 
 /* --- Algorithm contracts (docs/FEATURE-MECHANICS.md §1.2-§1.4) ------------ */
 
@@ -1184,6 +1241,27 @@ const BPM_WINDOW_MS = 4000;
 /** Outside this band an "estimate" is not a tempo; report null instead. */
 const BPM_MIN = 40;
 const BPM_MAX = 240;
+
+/* --- Harmonic valence contracts (docs/FDD.md §2, Domain A #3) ------------- */
+
+/** Sliding window the pitch-class histogram is taken over. Long enough to hold
+ *  a phrase, short enough that a deliberate key change registers within it. */
+const VALENCE_WINDOW_MS = 8000;
+/** Fewer voiced frames than this in the window is not evidence of a key. */
+const VALENCE_MIN_FRAMES = 10;
+/** A perfect fifth reinforces its own root: mass at pc+7 counts this much
+ *  toward pc's claim to be the tonic. It breaks the C/G ambiguity of a bare
+ *  C-G drone toward C without ever outvoting real mass on the root itself. */
+const VALENCE_FIFTH_WEIGHT = 0.5;
+/** Third evidence below this share of the window is stray noise, not a mode. */
+const VALENCE_THIRD_MIN_SHARE = 0.05;
+/** Third evidence at or above this many frames counts as full support. */
+const VALENCE_THIRD_FULL_SUPPORT = 3;
+/** Hard cap on retained notes, so a caller that never advances the clock still
+ *  cannot grow the window without bound. */
+const VALENCE_MAX_NOTES = 2048;
+/** Pitch-class names, index = MIDI note number modulo 12. */
+const PITCH_CLASS_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 /**
  * True for anything indexable with a numeric `.length` — Float32Array, plain
@@ -1650,34 +1728,248 @@ function createBpmTracker(sampleRate) {
 }
 
 /* ------------------------------------------------------------------------- *
+ * Harmonic Valence & Mode Classifier (docs/FDD.md §2, Domain A #3)
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Harmonic valence tracker: the SECOND (and last) stateful object here.
+ *
+ * It accumulates a 12-bin pitch-class histogram from SNAPPED MIDI note numbers
+ * — i.e. from the 12-TET output of the §1.4 pitch sanitizer, never from raw
+ * microtonal Hz — over a sliding window of the last VALENCE_WINDOW_MS of
+ * capture. The window is the decay: a key the singer has left behind falls out
+ * of it on its own, so a modulation registers instead of being averaged away
+ * forever.
+ *
+ * The window runs on the CAPTURE clock, not on note arrivals: `advance(ms)` is
+ * called for every analysed frame, voiced or not, so eight seconds of silence
+ * really does empty the histogram. Only frames that passed the RMS gate AND
+ * produced a real pitch may call `addNote` (see analyzeFrame) — a gated or
+ * unvoiced frame contributes nothing at all.
+ *
+ * CLASSIFICATION (FDD §2: "Major 3rd maps to euphoric anthem; Minor 3rd maps
+ * to melancholic depth"):
+ *   root  = argmax over pc of  hist[pc] + 0.5 * hist[(pc + 7) % 12]
+ *           (the fifth reinforces its own root, which is what disambiguates a
+ *            bare root-fifth drone; ties fall to the larger own-mass, then to
+ *            the lower pitch class, so the answer is deterministic)
+ *   mode  = 'major' when hist[root + 4] > hist[root + 3]
+ *           'minor' when hist[root + 3] > hist[root + 4]
+ *           null     when they are equal, when the two thirds together hold
+ *                    less than VALENCE_THIRD_MIN_SHARE of the window, or when
+ *                    neither is present at all
+ *
+ * ANTI-SIMULATION: fewer than VALENCE_MIN_FRAMES voiced frames in the window
+ * returns `null` outright — no root, no mode, no strength. A mode is NEVER
+ * inferred from anything but measured mass on the actual third. Silence and
+ * monotone humming both produce "no answer", which is the honest answer.
+ *
+ * `strength` (0..1) reports how decisive that measurement was:
+ *   decisiveness = |major - minor| / (major + minor)   how one-sided the third
+ *   support      = min(1, (major + minor) / 3)         how much of it there was
+ *   strength     = decisiveness * support
+ * so a single stray third cannot dress itself up as a confident key.
+ *
+ * @param {{windowMs?:number, minFrames?:number}} [options]
+ * @returns {{addNote:Function, classify:Function, advance:Function,
+ *            histogram:Function, frames:Function, nowMs:Function,
+ *            reset:Function, windowMs:number, minFrames:number}}
+ */
+function createValenceTracker(options) {
+  const o = options || {};
+  const windowMs = isPositiveNumber(o.windowMs) ? o.windowMs : VALENCE_WINDOW_MS;
+  const minFrames = isPositiveNumber(o.minFrames) ? Math.floor(o.minFrames) : VALENCE_MIN_FRAMES;
+
+  /** @type {Array<{pc:number, at:number}>} */
+  let notes = [];
+  let clock = 0;
+
+  /** Drop everything older than the window. Filtered (not shifted) so an
+   *  out-of-order timestamp cannot leave stale notes stranded at the front. */
+  function prune() {
+    const cutoff = clock - windowMs;
+    let stale = 0;
+    for (let i = 0; i < notes.length; i += 1) {
+      if (notes[i].at < cutoff) stale += 1;
+    }
+    if (stale === 0 && notes.length <= VALENCE_MAX_NOTES) return;
+    const kept = [];
+    for (let i = 0; i < notes.length; i += 1) {
+      if (notes[i].at >= cutoff) kept.push(notes[i]);
+    }
+    notes = kept.length > VALENCE_MAX_NOTES ? kept.slice(kept.length - VALENCE_MAX_NOTES) : kept;
+  }
+
+  function buildHistogram() {
+    const hist = new Float64Array(12);
+    for (let i = 0; i < notes.length; i += 1) hist[notes[i].pc] += 1;
+    return hist;
+  }
+
+  return {
+    windowMs: windowMs,
+    minFrames: minFrames,
+
+    /**
+     * Advance the capture clock by one frame's worth of time. Called for EVERY
+     * analysed frame — that is what makes the window wall-clock rather than
+     * note-count based.
+     * @param {number} ms
+     * @returns {number} the clock now
+     */
+    advance: function (ms) {
+      if (isPositiveNumber(ms)) {
+        clock += ms;
+        prune();
+      }
+      return clock;
+    },
+
+    /**
+     * Record one voiced frame's snapped note.
+     * @param {number} midiNote integer MIDI note number (0-127)
+     * @param {number} [timestampMs] defaults to the tracker's own clock
+     * @returns {boolean} false when the note was not usable, so nothing counted
+     */
+    addNote: function (midiNote, timestampMs) {
+      if (typeof midiNote !== 'number' || !isFinite(midiNote)) return false;
+      const n = Math.round(midiNote);
+      if (n < 0 || n > 127) return false;
+      const at =
+        typeof timestampMs === 'number' && isFinite(timestampMs) ? timestampMs : clock;
+      if (at > clock) clock = at;
+      notes.push({ pc: ((n % 12) + 12) % 12, at: at });
+      prune();
+      return true;
+    },
+
+    /** Copy of the current 12-bin histogram (index = pitch class). */
+    histogram: function () {
+      prune();
+      const hist = buildHistogram();
+      const out = [];
+      for (let i = 0; i < 12; i += 1) out.push(hist[i]);
+      return out;
+    },
+
+    /** Voiced frames currently inside the window. */
+    frames: function () {
+      prune();
+      return notes.length;
+    },
+
+    nowMs: function () {
+      return clock;
+    },
+
+    reset: function () {
+      notes = [];
+      clock = 0;
+    },
+
+    /**
+     * @returns {null|{root:number, rootName:string, mode:('major'|'minor'|null),
+     *                 strength:number, frames:number}}
+     */
+    classify: function () {
+      prune();
+      const total = notes.length;
+      if (total < minFrames) return null;
+
+      const hist = buildHistogram();
+      let root = -1;
+      let best = -1;
+      for (let pc = 0; pc < 12; pc += 1) {
+        const score = hist[pc] + VALENCE_FIFTH_WEIGHT * hist[(pc + 7) % 12];
+        if (root === -1 || score > best || (score === best && hist[pc] > hist[root])) {
+          best = score;
+          root = pc;
+        }
+      }
+      // Cannot happen with total > 0 (the pitch class holding the maximum mass
+      // always outscores every empty one), but a root with no mass of its own
+      // would be an invented tonic, so refuse it rather than report it.
+      if (root === -1 || hist[root] <= 0) return null;
+
+      const majorMass = hist[(root + 4) % 12];
+      const minorMass = hist[(root + 3) % 12];
+      const thirdMass = majorMass + minorMass;
+
+      let mode = null;
+      let strength = 0;
+      if (
+        thirdMass > 0 &&
+        thirdMass / total >= VALENCE_THIRD_MIN_SHARE &&
+        majorMass !== minorMass
+      ) {
+        const decisiveness = Math.abs(majorMass - minorMass) / thirdMass;
+        const support = Math.min(1, thirdMass / VALENCE_THIRD_FULL_SUPPORT);
+        mode = majorMass > minorMass ? 'major' : 'minor';
+        strength = decisiveness * support;
+      }
+
+      return {
+        root: root,
+        rootName: PITCH_CLASS_NAMES[root],
+        mode: mode,
+        strength: strength,
+        frames: total,
+      };
+    },
+  };
+}
+
+/* ------------------------------------------------------------------------- *
  * Message protocol
  * ------------------------------------------------------------------------- */
 
 /**
  * Full analysis of one frame. Pure: everything it reports comes from `samples`
- * plus the (optional) caller-owned tempo tracker.
+ * plus the (optional) caller-owned trackers.
  *
  * @param {ArrayLike<number>} samples
  * @param {number} sampleRate
  * @param {object} [tracker] a createBpmTracker() instance
+ * @param {object} [valenceTracker] a createValenceTracker() instance
  */
-function analyzeFrame(samples, sampleRate, tracker) {
+function analyzeFrame(samples, sampleRate, tracker, valenceTracker) {
   const level = rms(samples);
   const gated = isGated(level);
 
   let pitchHz = null;
   if (!gated) pitchHz = yinPitch(samples, sampleRate);
+  const midiNote = pitchHz === null ? null : midiNoteFromHz(pitchHz);
 
   const bpmSource = tracker && typeof tracker.push === 'function' ? tracker.push(samples) : null;
+
+  let valence = null;
+  if (valenceTracker && typeof valenceTracker.classify === 'function') {
+    // Every frame advances the window, voiced or not: the histogram decays on
+    // the capture clock, so a key really does fade during silence.
+    if (typeof valenceTracker.advance === 'function' && isArrayLike(samples) && samples.length > 0) {
+      const sr = isPositiveNumber(sampleRate) ? sampleRate : 44100;
+      valenceTracker.advance((samples.length / sr) * 1000);
+    }
+    // Only a frame that cleared the gate AND resolved to a real 12-TET note may
+    // vote. Gated and unvoiced frames are never counted. The two conditions are
+    // redundant TODAY (a gated frame is never pitch-analysed, so its midiNote is
+    // already null) and both are written out on purpose: if a future edit ever
+    // moves the pitch call above the gate, silence still cannot vote on a key.
+    if (!gated && midiNote !== null && typeof valenceTracker.addNote === 'function') {
+      valenceTracker.addNote(midiNote);
+    }
+    valence = valenceTracker.classify();
+  }
 
   return {
     rms: level,
     gated: gated,
     pitchHz: pitchHz,
-    midiNote: pitchHz === null ? null : midiNoteFromHz(pitchHz),
+    midiNote: midiNote,
     snappedHz: pitchHz === null ? null : snapHzToSemitone(pitchHz),
     bpm: bpmSource ? bpmSource.bpm : null,
     onsets: bpmSource ? bpmSource.onsets.length : 0,
+    valence: valence,
   };
 }
 
@@ -1687,8 +1979,9 @@ function analyzeFrame(samples, sampleRate, tracker) {
  *
  * @param {*} msg
  * @param {object} [tracker] tempo tracker owned by the caller
+ * @param {object} [valenceTracker] valence tracker owned by the caller
  */
-function handleMessage(msg, tracker) {
+function handleMessage(msg, tracker, valenceTracker) {
   if (!msg || typeof msg.type !== 'string') {
     return { type: 'error', error: 'malformed message' };
   }
@@ -1718,7 +2011,7 @@ function handleMessage(msg, tracker) {
         return { type: 'error', error: 'analyze: sampleRate must be a positive number' };
       }
       const sr = isPositiveNumber(msg.sampleRate) ? msg.sampleRate : 44100;
-      const result = analyzeFrame(msg.samples, sr, tracker);
+      const result = analyzeFrame(msg.samples, sr, tracker, valenceTracker);
       return {
         type: 'analysis',
         seq: msg.seq,
@@ -1731,6 +2024,7 @@ function handleMessage(msg, tracker) {
         snappedHz: result.snappedHz,
         bpm: result.bpm,
         onsets: result.onsets,
+        valence: result.valence,
       };
     }
     default:
@@ -1739,8 +2033,9 @@ function handleMessage(msg, tracker) {
 }
 
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
-  // The closure owns the single live tracker; handleMessage stays pure.
+  // The closure owns the live trackers; handleMessage stays pure.
   let sessionTracker = null;
+  let sessionValence = null;
 
   self.onmessage = function (e) {
     const msg = e.data;
@@ -1748,13 +2043,16 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
       const sr = isPositiveNumber(msg.sampleRate) ? msg.sampleRate : 44100;
       if (!sessionTracker || sessionTracker.sampleRate !== sr) {
         sessionTracker = createBpmTracker(sr);
+        sessionValence = createValenceTracker();
       } else if (msg.seq === 0) {
         // seq restarts at 0 for every capture session (see #app-main), so the
-        // previous session's beats must not leak into this one's tempo.
+        // previous session's beats and key must not leak into this one.
         sessionTracker.reset();
+        if (sessionValence) sessionValence.reset();
+        else sessionValence = createValenceTracker();
       }
     }
-    self.postMessage(handleMessage(msg, sessionTracker));
+    self.postMessage(handleMessage(msg, sessionTracker, sessionValence));
   };
 }
 </script>
@@ -1770,7 +2068,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -1801,8 +2099,9 @@ function noteNameFromMidi(note) {
  * the worker has seen at least two onsets (docs/ENGINEERING-STANDARD.md §1.2).
  *
  * @param {{rms?:number, gated?:boolean, pitchHz?:number|null,
- *          midiNote?:number|null, bpm?:number|null}} analysis
- * @returns {{pitch:string, rms:string, bpm:string, gated:boolean}}
+ *          midiNote?:number|null, bpm?:number|null,
+ *          valence?:{rootName?:string, mode?:string|null, strength?:number}|null}} analysis
+ * @returns {{pitch:string, rms:string, bpm:string, valence:string, gated:boolean}}
  */
 function formatAnalysis(analysis) {
   const a = analysis || {};
@@ -1821,7 +2120,21 @@ function formatAnalysis(analysis) {
   const bpm =
     typeof a.bpm === 'number' && isFinite(a.bpm) && a.bpm > 0 ? String(Math.round(a.bpm)) : '—';
 
-  return { pitch: pitch, rms: level, bpm: bpm, gated: gated };
+  // Harmonic valence (docs/FDD.md §2). Three honest states, never a guess:
+  // no reading at all, a root whose third the classifier would not call, or a
+  // measured key with the confidence that backs it.
+  let valence = '—';
+  const v = a.valence;
+  if (v && typeof v === 'object' && typeof v.rootName === 'string' && v.rootName) {
+    if (v.mode === 'major' || v.mode === 'minor') {
+      const strength = typeof v.strength === 'number' && isFinite(v.strength) ? v.strength : 0;
+      valence = v.rootName + ' ' + v.mode + ' ' + Math.round(Math.max(0, Math.min(1, strength)) * 100) + '%';
+    } else {
+      valence = v.rootName + ' · no third';
+    }
+  }
+
+  return { pitch: pitch, rms: level, bpm: bpm, valence: valence, gated: gated };
 }
 
 /**
@@ -4423,6 +4736,19 @@ var UI_PREFS_KEY = 'suno_ui_prefs';
  * @param {number} count how many tabs there are
  * @returns {number} index to move to, or -1 when the key is not ours to handle
  */
+/**
+ * Attach a no-op rejection handler to a promise whose outcome nobody waits on,
+ * so a rejection cannot escape as an unhandled promise rejection.
+ * @param {*} promise anything; non-promises are ignored
+ */
+function ignoreRejection(promise) {
+  if (promise && typeof promise.then === 'function' && typeof promise.catch === 'function') {
+    promise.catch(function () {
+      /* deliberately swallowed — see the call site for why */
+    });
+  }
+}
+
 function tabKeyTarget(key, index, count) {
   var n = typeof count === 'number' && isFinite(count) ? Math.floor(count) : 0;
   if (n <= 0) return -1;
@@ -4571,6 +4897,19 @@ function createViewManager(deps) {
           commit();
           return Promise.resolve(settled(id, false, true));
         }
+        // A ViewTransition exposes several promises (ready / updateCallbackDone
+        // / finished) and a skipped or aborted transition REJECTS all of them —
+        // which happens for real whenever the document is not compositing, e.g.
+        // a background tab. Only one of them is awaited below, and any rejected
+        // promise nobody observes surfaces as "Uncaught (in promise)" in the
+        // console: precisely the unhandled rejection ENGINEERING-STANDARD.md
+        // §2.3 forbids. A cancelled animation is a presentation detail, not a
+        // failed navigation, so every one of them is explicitly ignored.
+        if (transition) {
+          ignoreRejection(transition.ready);
+          ignoreRejection(transition.updateCallbackDone);
+          ignoreRejection(transition.finished);
+        }
         var done = transition && (transition.finished || transition.updateCallbackDone);
         if (done && typeof done.then === 'function') {
           return done.then(
@@ -4682,6 +5021,736 @@ function createThemePrefs(deps) {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* 3D WebGL frequency ribbon — docs/FEATURE-MECHANICS.md §1.5, FDD.md #11      */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * RAW WebGL 2.0. No Three.js, no helper library, no external anything — the
+ * whole renderer is the two GLSL 300 es sources below plus the projection
+ * matrix built by perspectiveMatrix4().
+ *
+ * GEOMETRY / TRANSPORT (documented choice — the amplitude gets to the GPU as a
+ * per-vertex FLOAT ARRAY BUFFER, not as a texture):
+ *   The ribbon is a cols x rows grid. One column = one time-domain bucket
+ *   across the ribbon's width; one row = one captured frame, and rows march
+ *   backwards along +Z as time passes. `history` holds exactly cols*rows
+ *   levels — a 1:1 mapping onto the grid's vertices — so the level can travel
+ *   as an ordinary vertex buffer that is re-uploaded with bufferSubData once
+ *   per frame (128*96 floats = 48 KB at ~21 frames/second). A float texture
+ *   would need a sampler in the VERTEX stage plus format/filtering capability
+ *   checks for no gain at this size, so the buffer wins on simplicity.
+ *
+ * COLOUR CONTRACT (§1.5, exact values, duplicated in the fragment shader as the
+ * palette anchors the aged rows decay toward):
+ *   major -> vec3(0.0, 0.94, 1.0)   neon cyan
+ *   minor -> vec3(0.54, 0.17, 0.89) electric violet
+ * The live colour is lerped toward the classifier's target ~5% per frame, so a
+ * key change reads as a slow wash rather than a strobe.
+ *
+ * ANTI-SIMULATION: every displacement on screen is a measured sample and every
+ * hue is a measured mode. A null valence paints the dim neutral blend — the
+ * colour of "not known yet" — and never a plausible-looking major or minor.
+ */
+
+/** Ribbon grid: columns across the width, rows of history into the depth. */
+var RIBBON_COLS = 128;
+var RIBBON_ROWS = 96;
+/** Hard ceiling on either axis, so a bad caller cannot ask for 4 GB of mesh. */
+var RIBBON_MAX_GRID = 512;
+
+/** docs/FEATURE-MECHANICS.md §1.5 — these two values are the contract. */
+var RIBBON_MINOR_RGB = [0.54, 0.17, 0.89];
+var RIBBON_MAJOR_RGB = [0.0, 0.94, 1.0];
+/** "No mode measured" is the midpoint of the two, dimmed by this factor. */
+var RIBBON_NEUTRAL_DIM = 0.55;
+
+/** Per-frame smoothing: colour toward the valence target, level toward peak. */
+var RIBBON_COLOR_LERP = 0.05;
+var RIBBON_ENERGY_LERP = 0.25;
+/** Radians of twist at full level, and Y displacement at |sample| == 1. */
+var RIBBON_MAX_TWIST = 0.85;
+var RIBBON_LIFT = 0.45;
+/** Camera. A hand-written perspective, since there is no matrix library. */
+var RIBBON_FOV = 0.9;
+var RIBBON_NEAR = 0.1;
+var RIBBON_FAR = 12;
+/** Retina is worth it; 3x on a phone is not. */
+var RIBBON_MAX_DPR = 2;
+
+/**
+ * Vertex stage: Y comes from the per-vertex level, Z from the row's age, and
+ * the whole cross-section rotates by an angle that grows with the smoothed
+ * level — the "ribbon twists" of §1.5. Written as an array of lines so
+ * `#version 300 es` is guaranteed to be the very first characters of the
+ * source, which the GLSL spec requires.
+ *
+ * The camera sits ABOVE the ribbon and pitches down onto it (CAMERA_HEIGHT /
+ * CAMERA_PITCH). That is not decoration: an eye level with the plane sees a
+ * silent ribbon exactly edge-on, i.e. as nothing at all, and the panel would
+ * look broken until someone hummed. Looking down means the resting grid is
+ * visible and the level lifts out of it.
+ */
+var RIBBON_VERTEX_SOURCE = [
+  '#version 300 es',
+  'precision highp float;',
+  '',
+  'in vec3 aPosition;',
+  'in vec2 aUv;',
+  'in float aLevel;',
+  '',
+  'uniform mat4 uProjection;',
+  'uniform float uLift;',
+  'uniform float uTwist;',
+  '',
+  'out vec2 vUv;',
+  'out float vLevel;',
+  '',
+  '',
+  'const float RIBBON_DEPTH = 2.9;',
+  'const float CAMERA_BACK = 1.25;',
+  'const float CAMERA_HEIGHT = 0.55;',
+  'const float CAMERA_PITCH = 0.32;',
+  '',
+  'void main() {',
+  '  float depth = aPosition.z;',
+  '  float height = aLevel * uLift;',
+  '  float angle = uTwist * (0.35 + 0.65 * depth);',
+  '  float ca = cos(angle);',
+  '  float sa = sin(angle);',
+  '  vec2 section = vec2(aPosition.x * ca - height * sa, aPosition.x * sa + height * ca);',
+  '  vec3 placed = vec3(section.x, section.y, -depth * RIBBON_DEPTH);',
+  '  vec3 rel = vec3(placed.x, placed.y - CAMERA_HEIGHT, placed.z - CAMERA_BACK);',
+  '  float cp = cos(CAMERA_PITCH);',
+  '  float sp = sin(CAMERA_PITCH);',
+  '  vec3 eyePos = vec3(rel.x, rel.y * cp - rel.z * sp, rel.y * sp + rel.z * cp);',
+  '  vUv = aUv;',
+  '  vLevel = aLevel;',
+  '  gl_Position = uProjection * vec4(eyePos, 1.0);',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * Fragment stage: uColor is the smoothed valence colour; the grid lines are
+ * derived from the UV so the ribbon reads as the wireframe of FDD #11 without
+ * a second draw call. MODE_MINOR / MODE_MAJOR are the §1.5 anchors, and older
+ * rows decay toward their dimmed midpoint — the same "no mode measured" colour
+ * valenceToColor() returns for a null valence, because history that has fallen
+ * out of the classifier window no longer supports a mode claim.
+ */
+var RIBBON_FRAGMENT_SOURCE = [
+  '#version 300 es',
+  'precision highp float;',
+  '',
+  'const vec3 MODE_MINOR = vec3(0.54, 0.17, 0.89);',
+  'const vec3 MODE_MAJOR = vec3(0.0, 0.94, 1.0);',
+  'const vec3 MODE_NEUTRAL = (MODE_MINOR + MODE_MAJOR) * 0.5;',
+  'const vec2 WIRE_DENSITY = vec2(56.0, 34.0);',
+  '',
+  'in vec2 vUv;',
+  'in float vLevel;',
+  '',
+  'uniform vec3 uColor;',
+  'uniform float uDim;',
+  '',
+  'out vec4 fragColor;',
+  '',
+  'void main() {',
+  '  vec2 cell = vUv * WIRE_DENSITY;',
+  '  vec2 edge = abs(fract(cell) - 0.5);',
+  '  vec2 wide = max(fwidth(cell), vec2(0.0001));',
+  '  float wire = 1.0 - clamp(min(edge.x / wide.x, edge.y / wide.y) - 0.5, 0.0, 1.0);',
+  '  float energy = clamp(abs(vLevel) * 2.4, 0.0, 1.0);',
+  '  vec3 aged = mix(uColor, MODE_NEUTRAL * uDim, vUv.y * 0.6);',
+  '  float depthFade = 1.0 - 0.55 * vUv.y;',
+  '  float lit = (0.10 + 0.90 * wire) * (0.30 + 0.70 * energy) * depthFade;',
+  '  fragColor = vec4(aged * lit, 1.0);',
+  '}',
+  '',
+].join('\n');
+
+/** Clamp a requested grid axis into [2, RIBBON_MAX_GRID]. */
+function ribbonGridSize(value, fallback) {
+  var n = typeof value === 'number' && isFinite(value) ? Math.floor(value) : Math.floor(fallback);
+  if (!(n >= 2)) return 2;
+  return n > RIBBON_MAX_GRID ? RIBBON_MAX_GRID : n;
+}
+
+/**
+ * Build the ribbon mesh: a cols x rows lattice of vertices plus the index list
+ * that stitches it into triangles.
+ *
+ * INDEXED TRIANGLES, NOT A TRIANGLE STRIP — deliberately. A strip walking a 2D
+ * grid has to emit degenerate (zero-area) triangles at every row turn to jump
+ * back to the far edge; indexed triangles need none, so every triangle in the
+ * list is a real one. Cost is 6 indices per quad instead of ~2.
+ *
+ * Vertex layout: x spans -1..1 across the width, y is 0 (the vertex shader
+ * displaces it by the level), z spans 0..1 from the NEWEST row to the oldest.
+ *
+ * @param {number} cols
+ * @param {number} rows
+ * @returns {{positions:Float32Array, uvs:Float32Array,
+ *            indices:(Uint16Array|Uint32Array), cols:number, rows:number,
+ *            vertexCount:number, indexCount:number}}
+ */
+function buildRibbonGeometry(cols, rows) {
+  var c = ribbonGridSize(cols, RIBBON_COLS);
+  var r = ribbonGridSize(rows, RIBBON_ROWS);
+  var vertexCount = c * r;
+  var positions = new Float32Array(vertexCount * 3);
+  var uvs = new Float32Array(vertexCount * 2);
+
+  var row;
+  var col;
+  for (row = 0; row < r; row += 1) {
+    var v = row / (r - 1);
+    for (col = 0; col < c; col += 1) {
+      var u = col / (c - 1);
+      var i = row * c + col;
+      positions[i * 3] = u * 2 - 1;
+      positions[i * 3 + 1] = 0;
+      positions[i * 3 + 2] = v;
+      uvs[i * 2] = u;
+      uvs[i * 2 + 1] = v;
+    }
+  }
+
+  var indexCount = (c - 1) * (r - 1) * 6;
+  // Uint16 indices top out at 65535, so a mesh past that needs 32-bit indices
+  // (WebGL2 supports them natively — no OES_element_index_uint dance).
+  var indices = vertexCount > 65536 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
+  var k = 0;
+  for (row = 0; row < r - 1; row += 1) {
+    for (col = 0; col < c - 1; col += 1) {
+      var a = row * c + col;
+      var b = a + 1;
+      var e = a + c;
+      var f = e + 1;
+      indices[k] = a;
+      indices[k + 1] = e;
+      indices[k + 2] = b;
+      indices[k + 3] = b;
+      indices[k + 4] = e;
+      indices[k + 5] = f;
+      k += 6;
+    }
+  }
+
+  return {
+    positions: positions,
+    uvs: uvs,
+    indices: indices,
+    cols: c,
+    rows: r,
+    vertexCount: vertexCount,
+    indexCount: indexCount,
+  };
+}
+
+/**
+ * Contract a time-domain frame down to `targetLen` buckets, PEAK-PRESERVING:
+ * each bucket keeps the sample with the largest magnitude, sign intact. A mean
+ * (or every-nth-sample decimation) would swallow exactly the transients the
+ * ribbon exists to show; taking the extreme keeps a single-sample spike alive.
+ *
+ * Never invents data: a buffer already at or below the target comes back as a
+ * copy of itself, and nothing usable comes back as an empty array.
+ *
+ * @param {ArrayLike<number>} samples
+ * @param {number} targetLen
+ * @returns {Float32Array}
+ */
+function downsampleBuffer(samples, targetLen) {
+  var target = typeof targetLen === 'number' && isFinite(targetLen) ? Math.floor(targetLen) : 0;
+  if (target < 1 || !isArrayLike(samples) || samples.length < 1) return new Float32Array(0);
+
+  var n = Math.floor(samples.length);
+  var i;
+  if (n <= target) {
+    var copy = new Float32Array(n);
+    for (i = 0; i < n; i += 1) {
+      var one = samples[i];
+      copy[i] = typeof one === 'number' && isFinite(one) ? one : 0;
+    }
+    return copy;
+  }
+
+  var out = new Float32Array(target);
+  for (var b = 0; b < target; b += 1) {
+    var start = Math.floor((b * n) / target);
+    var end = Math.floor(((b + 1) * n) / target);
+    if (end <= start) end = start + 1;
+    if (end > n) end = n;
+    var peak = 0;
+    var kept = 0;
+    for (i = start; i < end; i += 1) {
+      var value = samples[i];
+      if (typeof value !== 'number' || !isFinite(value)) continue;
+      var magnitude = value < 0 ? -value : value;
+      if (magnitude > peak) {
+        peak = magnitude;
+        kept = value;
+      }
+    }
+    out[b] = kept;
+  }
+  return out;
+}
+
+/** The dimmed midpoint of the two §1.5 anchors — the colour of "not known". */
+function ribbonNeutralColor() {
+  return [
+    ((RIBBON_MINOR_RGB[0] + RIBBON_MAJOR_RGB[0]) / 2) * RIBBON_NEUTRAL_DIM,
+    ((RIBBON_MINOR_RGB[1] + RIBBON_MAJOR_RGB[1]) / 2) * RIBBON_NEUTRAL_DIM,
+    ((RIBBON_MINOR_RGB[2] + RIBBON_MAJOR_RGB[2]) / 2) * RIBBON_NEUTRAL_DIM,
+  ];
+}
+
+/**
+ * Map a worker valence reading onto the §1.5 palette.
+ *
+ *   mode 'major', strength 1 -> exactly vec3(0.0, 0.94, 1.0)
+ *   mode 'minor', strength 1 -> exactly vec3(0.54, 0.17, 0.89)
+ *   no reading, or a mode the classifier refused to call, or strength 0
+ *                            -> the dim neutral blend of the two
+ *
+ * Strength interpolates linearly between those, so a half-confident major is
+ * visibly half-way to cyan and never claims more than the evidence supports.
+ *
+ * @param {{mode?:string, strength?:number}|null} valence
+ * @returns {number[]} [r, g, b], each 0..1
+ */
+function valenceToColor(valence) {
+  var neutral = ribbonNeutralColor();
+  if (!valence || typeof valence !== 'object') return neutral;
+  var mode = valence.mode;
+  if (mode !== 'major' && mode !== 'minor') return neutral;
+
+  var strength = clamp01(valence.strength);
+  var target = mode === 'major' ? RIBBON_MAJOR_RGB : RIBBON_MINOR_RGB;
+  return [
+    neutral[0] + (target[0] - neutral[0]) * strength,
+    neutral[1] + (target[1] - neutral[1]) * strength,
+    neutral[2] + (target[2] - neutral[2]) * strength,
+  ];
+}
+
+/**
+ * Shift the level history one row deeper and write the newest frame at row 0.
+ * Row 0 is the front edge of the ribbon (now); row rows-1 is the far edge (the
+ * oldest frame still on screen). The array IS the Z-depth time axis.
+ *
+ * Length is invariant: this is the same buffer the GPU already owns, so it is
+ * mutated in place and handed straight back.
+ *
+ * @param {Float32Array} history rows*cols levels, row-major, newest row first
+ * @param {ArrayLike<number>} rowValues up to `cols` levels for the new row
+ * @param {number} rows
+ * @param {number} cols
+ * @returns {Float32Array} the same `history` instance
+ */
+function pushRibbonRow(history, rowValues, rows, cols) {
+  if (!history || typeof history.length !== 'number') return history;
+  var c = typeof cols === 'number' && isFinite(cols) ? Math.floor(cols) : 0;
+  var r = typeof rows === 'number' && isFinite(rows) ? Math.floor(rows) : 0;
+  // A mismatched shape would silently scramble the mesh; refuse instead.
+  if (c < 1 || r < 1 || history.length !== c * r) return history;
+
+  if (r > 1) {
+    if (typeof history.copyWithin === 'function') {
+      // copyWithin is memmove semantics, so the overlapping shift is safe.
+      history.copyWithin(c, 0, (r - 1) * c);
+    } else {
+      for (var i = r * c - 1; i >= c; i -= 1) history[i] = history[i - c];
+    }
+  }
+
+  var available = isArrayLike(rowValues) ? Math.min(Math.floor(rowValues.length), c) : 0;
+  for (var col = 0; col < c; col += 1) {
+    var value = col < available ? rowValues[col] : 0;
+    history[col] = typeof value === 'number' && isFinite(value) ? value : 0;
+  }
+  return history;
+}
+
+/**
+ * A column-major 4x4 perspective matrix, hand-built because this file carries
+ * no matrix library. Identical to the classic gluPerspective formulation.
+ *
+ * @param {number} fovY vertical field of view, radians
+ * @param {number} aspect width / height
+ * @param {number} near
+ * @param {number} far
+ * @returns {Float32Array} 16 elements, column-major (what uniformMatrix4fv wants)
+ */
+function perspectiveMatrix4(fovY, aspect, near, far) {
+  var fov = typeof fovY === 'number' && isFinite(fovY) && fovY > 0 ? fovY : RIBBON_FOV;
+  var ratio = typeof aspect === 'number' && isFinite(aspect) && aspect > 0 ? aspect : 1;
+  var n = typeof near === 'number' && isFinite(near) && near > 0 ? near : RIBBON_NEAR;
+  var f = typeof far === 'number' && isFinite(far) && far > n ? far : n + RIBBON_FAR;
+
+  var focal = 1 / Math.tan(fov / 2);
+  var depth = 1 / (n - f);
+  var out = new Float32Array(16);
+  out[0] = focal / ratio;
+  out[5] = focal;
+  out[10] = (f + n) * depth;
+  out[11] = -1;
+  out[14] = 2 * f * n * depth;
+  return out;
+}
+
+/**
+ * The renderer itself.
+ *
+ * Everything it needs is injected, so the whole object can be built and driven
+ * in a test against a recording GL stub and a fake rAF — no browser, no canvas,
+ * no GPU. Constructing it NEVER throws: a browser without WebGL2 (or a context
+ * that refuses to compile) leaves contextOk() false and failureMessage() set,
+ * and every other method degrades to a no-op so the rest of the app is
+ * untouched (docs/ENGINEERING-STANDARD.md §2.3).
+ *
+ * @param {{
+ *   canvas?: object,
+ *   gl?: object,                       pre-made context (tests inject a stub)
+ *   cols?: number, rows?: number,
+ *   raf?: (cb: Function) => any,       injected so the loop is drivable
+ *   caf?: (handle: any) => void,
+ *   devicePixelRatio?: number
+ * }} deps
+ * @returns {{pushFrame:Function, renderOnce:Function, start:Function,
+ *            stop:Function, isRunning:Function, contextOk:Function,
+ *            failureMessage:Function, reset:Function, colorNow:Function,
+ *            levelNow:Function, framesPushed:Function, history:Function,
+ *            geometry:Function, gl:Function}}
+ */
+function createRibbonRenderer(deps) {
+  var d = deps || {};
+  var canvas = d.canvas || null;
+
+  var geometry = buildRibbonGeometry(d.cols, d.rows);
+  var cols = geometry.cols;
+  var rows = geometry.rows;
+  var history = new Float32Array(cols * rows);
+
+  var neutral = ribbonNeutralColor();
+  var color = [neutral[0], neutral[1], neutral[2]];
+  var target = [neutral[0], neutral[1], neutral[2]];
+  var energy = 0;
+  var pushed = 0;
+  var levelsDirty = true;
+
+  var running = false;
+  var handle = null;
+  var ready = false;
+  var failure = null;
+
+  var raf = typeof d.raf === 'function' ? d.raf : null;
+  var caf = typeof d.caf === 'function' ? d.caf : null;
+
+  var gl = null;
+  if (d.gl) {
+    gl = d.gl;
+  } else if (canvas && typeof canvas.getContext === 'function') {
+    try {
+      gl =
+        canvas.getContext('webgl2', {
+          alpha: true,
+          antialias: true,
+          depth: true,
+          premultipliedAlpha: false,
+        }) || null;
+    } catch (err) {
+      gl = null;
+    }
+  }
+  if (!gl) failure = 'this browser did not provide a WebGL2 drawing context';
+
+  var program = null;
+  var vao = null;
+  var levelBuffer = null;
+  var indexType = null;
+  var uProjection = null;
+  var uColor = null;
+  var uLift = null;
+  var uTwist = null;
+  var uDim = null;
+  var projection = perspectiveMatrix4(RIBBON_FOV, 1.6, RIBBON_NEAR, RIBBON_FAR);
+  var viewWidth = 0;
+  var viewHeight = 0;
+
+  function infoLog(getter, handleObj) {
+    if (typeof getter !== 'function') return '';
+    var log = getter.call(gl, handleObj);
+    return typeof log === 'string' ? log : '';
+  }
+
+  function compile(type, source, label) {
+    var shader = gl.createShader(type);
+    if (!shader) {
+      failure = 'the ' + label + ' shader could not be created';
+      return null;
+    }
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      failure = 'the ' + label + ' shader failed to compile: ' + infoLog(gl.getShaderInfoLog, shader);
+      if (typeof gl.deleteShader === 'function') gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  }
+
+  /** Upload one static/dynamic float attribute and point the program at it. */
+  function bindAttribute(name, data, size, usage) {
+    var location = gl.getAttribLocation(program, name);
+    var buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, usage);
+    // A driver is entitled to optimise an unused input away (-1). That is not
+    // an error, it just means there is nothing to point at.
+    if (typeof location === 'number' && location >= 0) {
+      gl.enableVertexAttribArray(location);
+      gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
+    }
+    return buffer;
+  }
+
+  function setup() {
+    var vertexShader = compile(gl.VERTEX_SHADER, RIBBON_VERTEX_SOURCE, 'vertex');
+    if (!vertexShader) return false;
+    var fragmentShader = compile(gl.FRAGMENT_SHADER, RIBBON_FRAGMENT_SOURCE, 'fragment');
+    if (!fragmentShader) return false;
+
+    program = gl.createProgram();
+    if (!program) {
+      failure = 'the WebGL program could not be created';
+      return false;
+    }
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      failure = 'the WebGL program failed to link: ' + infoLog(gl.getProgramInfoLog, program);
+      return false;
+    }
+    gl.useProgram(program);
+
+    // A VAO keeps the attribute wiring out of the per-frame path. WebGL2 always
+    // has them; the guard is for a stub that does not bother.
+    if (typeof gl.createVertexArray === 'function') {
+      vao = gl.createVertexArray() || null;
+      if (vao && typeof gl.bindVertexArray === 'function') gl.bindVertexArray(vao);
+    }
+
+    bindAttribute('aPosition', geometry.positions, 3, gl.STATIC_DRAW);
+    bindAttribute('aUv', geometry.uvs, 2, gl.STATIC_DRAW);
+    levelBuffer = bindAttribute('aLevel', history, 1, gl.DYNAMIC_DRAW);
+
+    var indexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geometry.indices, gl.STATIC_DRAW);
+    indexType = geometry.indices.BYTES_PER_ELEMENT === 4 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+
+    uProjection = gl.getUniformLocation(program, 'uProjection');
+    uColor = gl.getUniformLocation(program, 'uColor');
+    uLift = gl.getUniformLocation(program, 'uLift');
+    uTwist = gl.getUniformLocation(program, 'uTwist');
+    uDim = gl.getUniformLocation(program, 'uDim');
+
+    if (typeof gl.enable === 'function') gl.enable(gl.DEPTH_TEST);
+    if (typeof gl.clearColor === 'function') gl.clearColor(0, 0, 0, 0);
+    return true;
+  }
+
+  if (gl) {
+    try {
+      ready = setup();
+    } catch (err) {
+      ready = false;
+      failure = 'WebGL setup failed: ' + errorMessage(err);
+    }
+  }
+
+  /** Match the drawing buffer to the laid-out CSS box, and re-aim the camera. */
+  function syncSize() {
+    var width = 0;
+    var height = 0;
+    if (canvas) {
+      var cssWidth = typeof canvas.clientWidth === 'number' ? canvas.clientWidth : 0;
+      var cssHeight = typeof canvas.clientHeight === 'number' ? canvas.clientHeight : 0;
+      if (cssWidth > 0 && cssHeight > 0) {
+        var dpr =
+          typeof d.devicePixelRatio === 'number' && d.devicePixelRatio > 0
+            ? d.devicePixelRatio
+            : (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+        if (dpr > RIBBON_MAX_DPR) dpr = RIBBON_MAX_DPR;
+        width = Math.max(1, Math.round(cssWidth * dpr));
+        height = Math.max(1, Math.round(cssHeight * dpr));
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
+      } else {
+        width = typeof canvas.width === 'number' ? canvas.width : 0;
+        height = typeof canvas.height === 'number' ? canvas.height : 0;
+      }
+    }
+    if (!(width > 0) || !(height > 0)) return false;
+    if (width !== viewWidth || height !== viewHeight) {
+      viewWidth = width;
+      viewHeight = height;
+      projection = perspectiveMatrix4(RIBBON_FOV, width / height, RIBBON_NEAR, RIBBON_FAR);
+    }
+    return true;
+  }
+
+  return {
+    /**
+     * Consume one captured frame. Pure JS — it works (and keeps the history
+     * warm) even when there is no GL context at all.
+     *
+     * @param {ArrayLike<number>} timeDomainChunk raw AnalyserNode frame
+     * @param {object|null} valence the worker's latest classification
+     * @returns {boolean} false when the chunk held nothing to show
+     */
+    pushFrame: function (timeDomainChunk, valence) {
+      var row = downsampleBuffer(timeDomainChunk, cols);
+      if (row.length === 0) return false;
+
+      pushRibbonRow(history, row, rows, cols);
+      pushed += 1;
+      levelsDirty = true;
+
+      var peak = 0;
+      for (var i = 0; i < row.length; i += 1) {
+        var magnitude = row[i] < 0 ? -row[i] : row[i];
+        if (magnitude > peak) peak = magnitude;
+      }
+      // Smoothed so the twist breathes with the performance instead of
+      // jittering frame to frame.
+      var scaled = peak * 2.2;
+      if (scaled > 1) scaled = 1;
+      energy += (scaled - energy) * RIBBON_ENERGY_LERP;
+
+      target = valenceToColor(valence);
+      return true;
+    },
+
+    /**
+     * Draw exactly one frame. Safe to call at any time; a no-op without GL.
+     * @returns {boolean} whether anything was drawn
+     */
+    renderOnce: function () {
+      if (!ready || !gl) return false;
+
+      // §1.5 colour interpolation: ~5% of the remaining distance per frame.
+      for (var i = 0; i < 3; i += 1) color[i] += (target[i] - color[i]) * RIBBON_COLOR_LERP;
+
+      if (!syncSize()) return false;
+
+      if (levelsDirty && levelBuffer) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, levelBuffer);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, history);
+        levelsDirty = false;
+      }
+
+      gl.useProgram(program);
+      if (vao && typeof gl.bindVertexArray === 'function') gl.bindVertexArray(vao);
+      gl.viewport(0, 0, viewWidth, viewHeight);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      if (uProjection) gl.uniformMatrix4fv(uProjection, false, projection);
+      if (uColor) gl.uniform3f(uColor, color[0], color[1], color[2]);
+      if (uLift) gl.uniform1f(uLift, RIBBON_LIFT);
+      if (uTwist) gl.uniform1f(uTwist, energy * RIBBON_MAX_TWIST);
+      if (uDim) gl.uniform1f(uDim, RIBBON_NEUTRAL_DIM);
+
+      gl.drawElements(gl.TRIANGLES, geometry.indexCount, indexType, 0);
+      return true;
+    },
+
+    /**
+     * Start the animation loop. Idempotent, and refused when there is nothing
+     * to animate — an idle tab must never hold the GPU awake.
+     * @returns {boolean} whether this call started it
+     */
+    start: function () {
+      if (running || !ready || !raf) return false;
+      running = true;
+      var self = this;
+      function tick() {
+        handle = null;
+        if (!running) return;
+        self.renderOnce();
+        if (running && raf) handle = raf(tick);
+      }
+      handle = raf(tick);
+      return true;
+    },
+
+    /** Stop the loop. Idempotent. @returns {boolean} whether it was running */
+    stop: function () {
+      if (!running) return false;
+      running = false;
+      if (handle !== null && caf) {
+        try {
+          caf(handle);
+        } catch (err) {
+          /* a handle the host has already retired is not an error */
+        }
+      }
+      handle = null;
+      return true;
+    },
+
+    isRunning: function () {
+      return running === true;
+    },
+
+    /** True when there is a live WebGL2 context with a linked program. */
+    contextOk: function () {
+      return ready === true && !!gl;
+    },
+
+    /** Why not, in words fit to show a user. Null when everything is fine. */
+    failureMessage: function () {
+      return failure;
+    },
+
+    /** Clear the history and the colour back to "nothing measured yet". */
+    reset: function () {
+      for (var i = 0; i < history.length; i += 1) history[i] = 0;
+      var fresh = ribbonNeutralColor();
+      color = [fresh[0], fresh[1], fresh[2]];
+      target = [fresh[0], fresh[1], fresh[2]];
+      energy = 0;
+      pushed = 0;
+      levelsDirty = true;
+    },
+
+    /** Introspection for tests and for the browser smoke check. */
+    colorNow: function () {
+      return [color[0], color[1], color[2]];
+    },
+    levelNow: function () {
+      return energy;
+    },
+    framesPushed: function () {
+      return pushed;
+    },
+    history: function () {
+      return history;
+    },
+    geometry: function () {
+      return geometry;
+    },
+    gl: function () {
+      return gl;
+    },
+  };
+}
+
 (function () {
   if (typeof document === 'undefined') return;
 
@@ -4712,6 +5781,7 @@ function createThemePrefs(deps) {
     const metricPitch = $('metric-pitch');
     const metricRms = $('metric-rms');
     const metricBpm = $('metric-bpm');
+    const metricValence = $('metric-valence');
     const micHelp = $('mic-help');
     const micHelpLead = $('mic-help-lead');
     const micHelpDetail = $('mic-help-detail');
@@ -4719,6 +5789,10 @@ function createThemePrefs(deps) {
     let dspWorker = null;
     let sentChunks = 0;
     let lastAck = null;
+    // The worker's latest harmonic-valence reading. It drives the ribbon's
+    // colour, and it is deliberately null until the classifier has enough
+    // voiced frames to commit to a key.
+    let lastValence = null;
 
     function renderReadout() {
       readout.textContent =
@@ -4731,12 +5805,13 @@ function createThemePrefs(deps) {
       el.className = 'metric-value' + (tone ? ' ' + tone : '');
     }
 
-    /** Live pitch / level / tempo, straight from the worker's 'analysis' reply. */
+    /** Live pitch / level / tempo / key, from the worker's 'analysis' reply. */
     function renderAnalysis(analysis) {
       const view = formatAnalysis(analysis);
       setMetric(metricPitch, view.pitch, view.pitch === '—' ? 'is-idle' : '');
       setMetric(metricRms, view.rms, view.gated ? 'is-gated' : view.rms === '—' ? 'is-idle' : '');
       setMetric(metricBpm, view.bpm, view.bpm === '—' ? 'is-idle' : '');
+      setMetric(metricValence, view.valence, view.valence === '—' ? 'is-idle' : '');
     }
 
     function clearAnalysis() {
@@ -4762,6 +5837,7 @@ function createThemePrefs(deps) {
         } else if (data.type === 'analysis') {
           // An analysis reply IS the ack for that frame — same seq, same trip.
           lastAck = data.seq;
+          lastValence = data.valence || null;
           renderReadout();
           renderAnalysis(data);
         } else if (data.type === 'error') {
@@ -4861,6 +5937,53 @@ function createThemePrefs(deps) {
 
     viewManager.switchTo(DEFAULT_VIEW);
 
+    /* ---------------- 3D frequency ribbon (§1.5) ---------------- */
+
+    const vizCanvas = $('viz-ribbon');
+    const vizNote = $('viz-note');
+
+    const ribbon = createRibbonRenderer({
+      canvas: vizCanvas,
+      // Bound wrappers: a bare `requestAnimationFrame` reference throws
+      // "Illegal invocation" the moment it is called detached from `window`.
+      raf:
+        typeof requestAnimationFrame === 'function'
+          ? function (callback) {
+              return requestAnimationFrame(callback);
+            }
+          : undefined,
+      caf:
+        typeof cancelAnimationFrame === 'function'
+          ? function (id) {
+              cancelAnimationFrame(id);
+            }
+          : undefined,
+    });
+
+    if (ribbon.contextOk()) {
+      // One frame now, so the panel shows the empty ribbon at rest rather than
+      // a blank rectangle until the first hum arrives.
+      ribbon.renderOnce();
+      // While the loop is running it re-measures the canvas every frame. While
+      // it is NOT running nothing would, so a resized window would leave the
+      // last frame stretched across a drawing buffer of the wrong size. One
+      // redraw per resize costs nothing and is not a loop.
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('resize', function () {
+          if (!ribbon.isRunning()) ribbon.renderOnce();
+        });
+      }
+    } else {
+      // No fabricated fallback animation: the canvas goes away and says why,
+      // and every other measurement keeps working (ENGINEERING-STANDARD §2.3).
+      vizCanvas.hidden = true;
+      vizNote.textContent =
+        'WebGL2 not available — 3D visualizer disabled' +
+        (ribbon.failureMessage() ? ' (' + ribbon.failureMessage() + ').' : '.') +
+        ' Every measurement it would draw is in the chips above.';
+      vizNote.hidden = false;
+    }
+
     /* ---------------- live capture wiring ---------------- */
 
     const STATE_LABEL = {
@@ -4935,6 +6058,13 @@ function createThemePrefs(deps) {
         onChunk: function (chunk) {
           sentChunks += 1;
           renderReadout();
+          // ORDER MATTERS: the ribbon reads this frame BEFORE the buffer is
+          // transferred to the worker below, because a transferred buffer is
+          // detached and its samples are gone from this thread. The colour
+          // pairs it with the newest valence the worker has answered with —
+          // one frame (~46 ms) behind the geometry, which is why the analysis
+          // reply does not need to ship the samples back.
+          ribbon.pushFrame(chunk.samples, lastValence);
           if (!dspWorker) return;
           try {
             // Transfer the buffer: zero-copy handoff, and the engine already
@@ -4959,11 +6089,25 @@ function createThemePrefs(deps) {
           if (state === 'requesting') {
             sentChunks = 0;
             lastAck = null;
+            lastValence = null;
             renderReadout();
             clearAnalysis();
+            // A new session starts from an empty ribbon, exactly as the worker
+            // starts from an empty histogram.
+            ribbon.reset();
           } else if (state !== 'live') {
             // Nothing is being measured any more; keep no stale numbers on screen.
+            lastValence = null;
             clearAnalysis();
+          }
+          // The rAF loop runs ONLY while capture is live: no idle GPU burn on a
+          // tab that is just sitting in the Hum view. One last frame is drawn
+          // on the way out so the panel shows the state it stopped in.
+          if (state === 'live') {
+            ribbon.start();
+          } else {
+            ribbon.stop();
+            ribbon.renderOnce();
           }
           renderMic(state, detail);
         },

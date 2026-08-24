@@ -38,7 +38,7 @@ const { suite } = require('./lib/runner.js');
 const { extractScriptById } = require('./lib/extract.js');
 
 const INDEX = path.resolve(__dirname, '..', 'index.html');
-const EXPECTED_VERSION = '0.5.0';
+const EXPECTED_VERSION = '0.6.0';
 const PREFS_KEY = 'suno_ui_prefs';
 
 /* -------------------------------------------------------------------------- */
@@ -364,6 +364,66 @@ s.test('an interrupted (rejected) transition still resolves — a skipped animat
   }, 'switchTo must never reject');
   assert.strictEqual(result.ok, true);
   assert.strictEqual(shell.editor.hidden, false, 'the view still has to end up switched');
+});
+
+s.test('every promise a skipped transition rejects is observed, so none escapes unhandled', async () => {
+  // A ViewTransition rejects ready / updateCallbackDone / finished together
+  // when it is skipped — which a browser really does whenever the document is
+  // not compositing (a background tab). switchTo() awaits only one of them, so
+  // any of the others left unobserved surfaces as "Uncaught (in promise)".
+  // Reproduced against the real API's shape: all three reject.
+  const escaped = [];
+  const collect = (reason) => escaped.push((reason && reason.message) || String(reason));
+  process.on('unhandledRejection', collect);
+  try {
+    const app = loadAppSandbox();
+    const rejections = [];
+    const shell = makeShell(app, {
+      startViewTransition: function (update) {
+        update();
+        const skipped = () => {
+          const p = Promise.reject(new Error('Transition was aborted because of invalid state'));
+          rejections.push(p);
+          return p;
+        };
+        return { ready: skipped(), updateCallbackDone: skipped(), finished: skipped() };
+      },
+    });
+
+    const result = await shell.manager.switchTo('editor');
+    assert.strictEqual(result.ok, true, 'a skipped transition is still a completed switch');
+    assert.strictEqual(shell.editor.hidden, false, 'the view still has to end up switched');
+
+    // Give the microtask queue and the rejection check a few turns to fire.
+    for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(
+      escaped,
+      [],
+      `a skipped view transition leaked ${escaped.length} unhandled rejection(s): ${escaped.join(', ')}`
+    );
+  } finally {
+    process.removeListener('unhandledRejection', collect);
+  }
+});
+
+s.test('ignoreRejection only ever touches real promises', () => {
+  const app = loadAppSandbox();
+  assert.strictEqual(
+    typeof app.sandbox.ignoreRejection,
+    'function',
+    'ignoreRejection must be a top-level function declaration'
+  );
+  for (const notAPromise of [undefined, null, 0, '', 'later', {}, { then: 1 }, { then: () => {} }, []]) {
+    assert.doesNotThrow(
+      () => app.sandbox.ignoreRejection(notAPromise),
+      `ignoreRejection(${JSON.stringify(notAPromise)}) must be a no-op, not a throw`
+    );
+  }
+  // It must not change the promise's outcome for anyone else who is waiting.
+  const resolved = Promise.resolve('kept');
+  app.sandbox.ignoreRejection(resolved);
+  return resolved.then((value) => assert.strictEqual(value, 'kept', 'the promise value was altered'));
 });
 
 s.test('a startViewTransition that throws still swaps the view', async () => {

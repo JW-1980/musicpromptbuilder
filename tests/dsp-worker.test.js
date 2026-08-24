@@ -960,6 +960,319 @@ s.test('pitch mapping: midiNoteFromHz and 12-TET snapping follow the FDD formula
 });
 
 /* ------------------------------------------------------------------------ *
+ * Harmonic Valence & Mode Classifier (docs/FDD.md §2, Domain A #3)
+ *
+ * The ribbon's colour contract (FEATURE-MECHANICS.md §1.5) is downstream of
+ * this: cyan means a MEASURED major third, violet a MEASURED minor third. A
+ * fabricated mode would paint a lie, so "no answer" is asserted at least as
+ * hard as the answers.
+ * ------------------------------------------------------------------------ */
+
+/** Feed a tracker a repeating pitch-class pattern on a 100 ms grid. */
+function feedNotes(tracker, midiNotes, count, startMs, stepMs) {
+  const step = stepMs === undefined ? 100 : stepMs;
+  const from = startMs === undefined ? 0 : startMs;
+  for (let i = 0; i < count; i += 1) {
+    tracker.addNote(midiNotes[i % midiNotes.length], from + i * step);
+  }
+  return tracker;
+}
+
+s.test('DSP_ENGINE_VERSION is 0.4.0 — the harmonic-valence release', () => {
+  const w = loadWorkerSandbox(INDEX);
+  assert.strictEqual(
+    w.evaluate('DSP_ENGINE_VERSION'),
+    '0.4.0',
+    'the valence classifier ships as DSP engine 0.4.0'
+  );
+});
+
+s.test('createValenceTracker is a top-level factory with the documented API', () => {
+  const w = loadWorkerSandbox(INDEX);
+  assert.strictEqual(
+    typeof w.sandbox.createValenceTracker,
+    'function',
+    'createValenceTracker is not reachable as a top-level function declaration'
+  );
+  const t = w.sandbox.createValenceTracker();
+  for (const method of ['addNote', 'classify', 'advance', 'histogram', 'frames', 'reset']) {
+    assert.strictEqual(typeof t[method], 'function', `tracker is missing ${method}()`);
+  }
+  // Two trackers share no state — the factory must not close over a module
+  // mutable, or one capture session would poison the next.
+  const a = w.sandbox.createValenceTracker();
+  const b = w.sandbox.createValenceTracker();
+  feedNotes(a, [60], 20);
+  assert.strictEqual(b.frames(), 0, 'a second tracker saw the first tracker\'s notes');
+
+  // An empty tracker has no key. It says so.
+  assert.strictEqual(w.sandbox.createValenceTracker().classify(), null, 'an empty tracker invented a key');
+});
+
+s.test('valence: a C-E-G feed classifies as C major (major 3rd -> euphoric)', () => {
+  const w = loadWorkerSandbox(INDEX);
+  const t = feedNotes(w.sandbox.createValenceTracker(), [60, 64, 67], 12);
+  const v = t.classify();
+
+  assert.ok(v, 'twelve voiced frames of a C major triad produced no classification');
+  assert.strictEqual(v.root, 0, `root should be pitch class 0 (C), got ${v.root}`);
+  assert.strictEqual(v.rootName, 'C', `rootName should be "C", got "${v.rootName}"`);
+  assert.strictEqual(v.mode, 'major', `E over C is a major third, got "${v.mode}"`);
+  assert.strictEqual(v.frames, 12, 'frames must report the voiced frames actually counted');
+  assert.ok(v.strength > 0.99, `an unambiguous major triad should be full strength, got ${v.strength}`);
+  assert.ok(v.strength <= 1, `strength must stay inside 0..1, got ${v.strength}`);
+
+  // The histogram is the real thing, not a summary: three equal bins.
+  // (Array.from re-homes the vm realm's array so deepStrictEqual can compare
+  // it — a cross-realm array has a different prototype by definition.)
+  const hist = Array.from(t.histogram());
+  assert.strictEqual(hist.length, 12, 'the histogram must have exactly 12 bins');
+  assert.deepStrictEqual(
+    hist,
+    [4, 0, 0, 0, 4, 0, 0, 4, 0, 0, 0, 0],
+    `histogram bins are wrong: ${JSON.stringify(hist)}`
+  );
+
+  // Octave is irrelevant — a pitch CLASS histogram folds them together.
+  const octaves = feedNotes(w.sandbox.createValenceTracker(), [48, 76, 55, 72, 64, 79], 12);
+  const wide = octaves.classify();
+  assert.strictEqual(wide.root, 0, 'octave-spread C/E/G must still resolve to C');
+  assert.strictEqual(wide.mode, 'major', 'octave-spread C/E/G must still be major');
+});
+
+s.test('valence: a C-Eb-G feed classifies as C minor (minor 3rd -> melancholic)', () => {
+  const w = loadWorkerSandbox(INDEX);
+  const v = feedNotes(w.sandbox.createValenceTracker(), [60, 63, 67], 12).classify();
+
+  assert.ok(v, 'twelve voiced frames of a C minor triad produced no classification');
+  assert.strictEqual(v.root, 0, `root should be pitch class 0 (C), got ${v.root}`);
+  assert.strictEqual(v.rootName, 'C', `rootName should be "C", got "${v.rootName}"`);
+  assert.strictEqual(v.mode, 'minor', `Eb over C is a minor third, got "${v.mode}"`);
+  assert.ok(v.strength > 0.99, `an unambiguous minor triad should be full strength, got ${v.strength}`);
+});
+
+s.test('valence: an A-C#-E feed classifies as A major (the root is not always C)', () => {
+  const w = loadWorkerSandbox(INDEX);
+  const v = feedNotes(w.sandbox.createValenceTracker(), [69, 73, 76], 12).classify();
+
+  assert.ok(v, 'twelve voiced frames of an A major triad produced no classification');
+  assert.strictEqual(v.root, 9, `root should be pitch class 9 (A), got ${v.root}`);
+  assert.strictEqual(v.rootName, 'A', `rootName should be "A", got "${v.rootName}"`);
+  assert.strictEqual(v.mode, 'major', `C# over A is a major third, got "${v.mode}"`);
+
+  // And its relative minor is a different key, not the same notes relabelled.
+  const relative = feedNotes(w.sandbox.createValenceTracker(), [69, 72, 76], 12).classify();
+  assert.strictEqual(relative.root, 9, 'A-C-E must still be rooted on A');
+  assert.strictEqual(relative.mode, 'minor', 'C over A is a minor third');
+});
+
+s.test('valence: no third evidence -> no mode; too little evidence -> no result at all', () => {
+  const w = loadWorkerSandbox(INDEX);
+
+  // A monotone drone has a root but no third. It must NOT pick one.
+  const drone = feedNotes(w.sandbox.createValenceTracker(), [60], 20).classify();
+  assert.ok(drone, 'a 20-frame drone is enough evidence for a root');
+  assert.strictEqual(drone.root, 0, 'a C drone is rooted on C');
+  assert.strictEqual(drone.mode, null, `a drone has no third, so mode must be null, got "${drone.mode}"`);
+  assert.strictEqual(drone.strength, 0, 'no third means no strength to report');
+
+  // Root + fifth only: the fifth reinforces C rather than voting for itself.
+  const fifths = feedNotes(w.sandbox.createValenceTracker(), [60, 67], 20).classify();
+  assert.strictEqual(fifths.root, 0, `a C-G drone is rooted on C, got pitch class ${fifths.root}`);
+  assert.strictEqual(fifths.mode, null, 'a bare fifth is neither major nor minor');
+
+  // Both thirds equally present is genuinely ambiguous — still no mode.
+  const both = feedNotes(w.sandbox.createValenceTracker(), [60, 63, 64, 67], 20).classify();
+  assert.strictEqual(both.root, 0, 'the ambiguous chord is still rooted on C');
+  assert.strictEqual(both.mode, null, 'equal major and minor thirds cannot resolve to either');
+  assert.strictEqual(both.strength, 0, 'an ambiguous third has zero decisiveness');
+
+  // One stray third in a long window is noise, not a modulation.
+  const stray = w.sandbox.createValenceTracker();
+  feedNotes(stray, [60], 40);
+  stray.addNote(64, 4000);
+  const strayResult = stray.classify();
+  assert.strictEqual(
+    strayResult.mode,
+    null,
+    'a single third in 41 frames is below the evidence share and must not set a mode'
+  );
+
+  // Under the minimum frame count there is no answer whatsoever.
+  for (let n = 0; n < 10; n += 1) {
+    const thin = feedNotes(w.sandbox.createValenceTracker(), [60, 64, 67], n);
+    assert.strictEqual(
+      thin.classify(),
+      null,
+      `${n} voiced frames is below the evidence floor and must classify as null`
+    );
+  }
+  const enough = feedNotes(w.sandbox.createValenceTracker(), [60, 64, 67], 10);
+  assert.ok(enough.classify(), '10 voiced frames is the documented floor and must classify');
+
+  // Strength scales with how much third evidence there is, and never exceeds 1.
+  const thinThird = w.sandbox.createValenceTracker();
+  feedNotes(thinThird, [60, 67], 18);
+  thinThird.addNote(64, 1900);
+  const thinResult = thinThird.classify();
+  assert.strictEqual(thinResult.mode, 'major', 'one third in 19 frames clears the 5% share');
+  assert.ok(
+    thinResult.strength > 0 && thinResult.strength < 0.5,
+    `a single supporting frame must not read as a confident key, got ${thinResult.strength}`
+  );
+});
+
+s.test('valence: the sliding window lets a new key displace the old one', () => {
+  const w = loadWorkerSandbox(INDEX);
+  const t = w.sandbox.createValenceTracker();
+  assert.strictEqual(t.windowMs, 8000, 'the documented window is 8 seconds of capture');
+
+  feedNotes(t, [60, 64, 67], 30);
+  const first = t.classify();
+  assert.strictEqual(first.rootName, 'C', 'the first key is C');
+  assert.strictEqual(first.mode, 'major', 'the first key is major');
+
+  // A modulation arriving a full window later: the old key must be gone, not
+  // merely outvoted.
+  feedNotes(t, [69, 72, 76], 30, 12000, 100);
+  const second = t.classify();
+  assert.strictEqual(second.rootName, 'A', `the new key should be A, got ${second.rootName}`);
+  assert.strictEqual(second.mode, 'minor', `the new key should be minor, got ${second.mode}`);
+  assert.strictEqual(second.frames, 30, 'only the new key\'s frames should remain in the window');
+  assert.deepStrictEqual(
+    Array.from(t.histogram()),
+    [10, 0, 0, 0, 10, 0, 0, 0, 0, 10, 0, 0],
+    'the old key still has mass in the histogram'
+  );
+
+  // Silence also decays it: advance() runs the window on the capture clock, so
+  // a key fades even though no further notes arrive.
+  t.advance(9000);
+  assert.strictEqual(t.frames(), 0, 'nine seconds of silence must empty the window');
+  assert.strictEqual(t.classify(), null, 'an emptied window must report no key');
+
+  // reset() is the session boundary.
+  feedNotes(t, [60, 64, 67], 12, 30000, 100);
+  assert.ok(t.classify(), 'the tracker must keep working after a decay to empty');
+  t.reset();
+  assert.strictEqual(t.frames(), 0, 'reset() must empty the window');
+  assert.strictEqual(t.nowMs(), 0, 'reset() must restart the clock');
+  assert.strictEqual(t.classify(), null, 'reset() must clear the classification');
+});
+
+s.test('valence: addNote refuses anything that is not a real note number', () => {
+  const w = loadWorkerSandbox(INDEX);
+  const t = w.sandbox.createValenceTracker();
+  for (const bad of [null, undefined, NaN, Infinity, -1, 128, 'C4', {}, []]) {
+    assert.strictEqual(
+      t.addNote(bad, 0),
+      false,
+      `addNote(${JSON.stringify(bad)}) must be refused, not counted`
+    );
+  }
+  assert.strictEqual(t.frames(), 0, 'a refused note still reached the histogram');
+  assert.strictEqual(t.addNote(60, 0), true, 'a real MIDI note must be accepted');
+  assert.strictEqual(t.frames(), 1, 'an accepted note must be counted exactly once');
+});
+
+s.test('valence: gated and unvoiced frames never reach the histogram', () => {
+  const w = loadWorkerSandbox(INDEX);
+
+  // Drive the REAL worker: silence and noise interleaved with a C major
+  // arpeggio. Only the arpeggio frames may be counted.
+  const c4 = sine(261.6256);
+  const e4 = sine(329.6276);
+  const g4 = sine(391.9954);
+  const silence = new Float32Array(FRAME); // exactly zero: below the RMS gate
+  const noise = whiteNoise(FRAME, 0.5, 424242); // loud, but unvoiced
+
+  const program = [c4, silence, e4, noise, g4, silence, c4, e4, noise, g4, c4, e4, g4, silence, c4];
+  let last = null;
+  let gatedSeen = 0;
+  let unvoicedSeen = 0;
+  for (let i = 0; i < program.length; i += 1) {
+    last = w.send({ type: 'analyze', seq: i, sampleRate: SR, samples: program[i] });
+    if (last.gated) gatedSeen += 1;
+    else if (last.pitchHz === null) unvoicedSeen += 1;
+  }
+
+  assert.strictEqual(gatedSeen, 3, `expected 3 gated frames, the worker gated ${gatedSeen}`);
+  assert.strictEqual(unvoicedSeen, 2, `expected 2 loud-but-unvoiced frames, got ${unvoicedSeen}`);
+  assert.ok(last.valence, 'the arpeggio should have produced a classification');
+  assert.strictEqual(
+    last.valence.frames,
+    10,
+    `only the 10 voiced frames may count, the histogram holds ${last.valence.frames}`
+  );
+  assert.strictEqual(last.valence.rootName, 'C', 'a C major arpeggio is rooted on C');
+  assert.strictEqual(last.valence.mode, 'major', 'a C major arpeggio is major');
+
+  // A capture of nothing but silence can never produce a key.
+  const quiet = loadWorkerSandbox(INDEX);
+  let quietReply = null;
+  for (let i = 0; i < 30; i += 1) {
+    quietReply = quiet.send({ type: 'analyze', seq: i, sampleRate: SR, samples: new Float32Array(FRAME) });
+  }
+  assert.strictEqual(quietReply.gated, true, 'digital silence must be gated');
+  assert.strictEqual(quietReply.valence, null, 'silence must never be classified as a key');
+});
+
+s.test("valence: the 'analysis' reply carries it and the rest of the protocol is unchanged", () => {
+  const w = loadWorkerSandbox(INDEX);
+
+  const reply = w.send({ type: 'analyze', seq: 7, sampleRate: SR, samples: sine(440) });
+  assert.ok('valence' in reply, "the analysis reply must always carry a 'valence' field");
+  assert.strictEqual(
+    reply.valence,
+    null,
+    'one frame is not enough evidence for a key, so valence must be null'
+  );
+  // Every pre-existing field kept its name, type and meaning.
+  for (const field of ['seq', 'sampleRate', 'samples', 'rms', 'gated', 'pitchHz', 'midiNote', 'snappedHz', 'bpm', 'onsets']) {
+    assert.ok(field in reply, `the analysis reply lost its "${field}" field`);
+  }
+  assert.strictEqual(reply.seq, 7, 'seq must still echo back');
+  assert.strictEqual(reply.samples, FRAME, 'samples must still be the frame length');
+  assert.strictEqual(reply.midiNote, 69, '440 Hz must still map to MIDI 69');
+
+  // handleMessage stays pure: no tracker, no valence — and no throw.
+  const pure = w.sandbox.handleMessage({ type: 'analyze', seq: 0, sampleRate: SR, samples: sine(440) });
+  assert.strictEqual(pure.valence, null, 'without a tracker there is no history, so valence must be null');
+  assert.strictEqual(pure.bpm, null, 'the bpm contract must be unchanged by the valence extension');
+
+  // …and it accepts the tracker as an explicit third argument, exactly like the
+  // tempo tracker, without ever reaching for a module-level mutable.
+  const valence = w.sandbox.createValenceTracker();
+  const notes = [sine(261.6256), sine(329.6276), sine(391.9954)];
+  let out = null;
+  for (let i = 0; i < 12; i += 1) {
+    out = w.sandbox.handleMessage(
+      { type: 'analyze', seq: i, sampleRate: SR, samples: notes[i % 3] },
+      undefined,
+      valence
+    );
+  }
+  assert.ok(out.valence, 'an explicitly passed valence tracker must be used');
+  assert.strictEqual(out.valence.rootName, 'C', 'the injected tracker classified the wrong root');
+  assert.strictEqual(out.valence.mode, 'major', 'the injected tracker classified the wrong mode');
+  assert.strictEqual(out.bpm, null, 'no tempo tracker was passed, so bpm must still be null');
+
+  // A new capture session (seq back to 0) must not inherit the old key.
+  const live = loadWorkerSandbox(INDEX);
+  for (let i = 0; i < 12; i += 1) {
+    live.send({ type: 'analyze', seq: i, sampleRate: SR, samples: notes[i % 3] });
+  }
+  const beforeReset = live.send({ type: 'analyze', seq: 12, sampleRate: SR, samples: notes[0] });
+  assert.ok(beforeReset.valence, 'the live session should have accumulated a key');
+  const afterReset = live.send({ type: 'analyze', seq: 0, sampleRate: SR, samples: notes[0] });
+  assert.strictEqual(
+    afterReset.valence,
+    null,
+    'seq 0 starts a new capture session — the previous key must not leak into it'
+  );
+});
+
+/* ------------------------------------------------------------------------ *
  * Performance budget: docs/FEATURE-MECHANICS.md §1.2 caps one 2048-sample YIN
  * pass at 5 ms so the worker never becomes the bottleneck that pushes the UI
  * thread off 60 FPS.
