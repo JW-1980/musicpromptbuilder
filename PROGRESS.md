@@ -48,3 +48,11 @@
 - **Tests:** dsp-worker 39/39 (+10 valence), new visualizer suite 29/29 (+3 todos), ui-layout 35/35. Total 222 passed / 0 failed / 24 todo; run-all + nightly GREEN (independently re-run). Mutation check 9/10 killed (1 equivalent mutant annotated). Browser pixel-evidence: cyan (1,111,120) for strong major, violet (65,23,109) for strong minor, dim neutral for null; console clean.
 - **Owner request logged:** full color-configurability + dark/light switcher + light theme added to queue (now `## NOW`).
 - **Next:** Full theming system (owner request, moved to `## NOW`).
+
+### [2026-08-24] Task 7 — Theming: configurable tokens, dark/light switcher, Studio Daylight
+- **Implemented (Opus subagent, independently verified):** three-layer token architecture — `:root` Obsidian palette (unchanged), `.theme-light` "Studio Daylight" mirror block, derived tokens via `color-mix()` on `html`. Every raw rgba() in the stylesheet promoted to tokens. Dark/light switcher (`#btn-theme`, system-preference default via matchMedia until an explicit choice persists), Colors panel (`#colors-panel`: 14 palette tokens, color+alpha pair per row, strict value validation — 12+ hostile injection forms rejected with aria-invalid + alert, nothing persisted), reset, Escape/focus-return. Custom colors as inline root properties, suspended under Code Mode and restored after. APP_VERSION 0.7.0.
+- **Daylight accents contrast-corrected** (deep teal #00707C 5.24:1, violet #6E1BC4 7.23:1, ochre #8A5A00 5.34:1, deep rose #C2185B 5.29:1 — ratios recomputed by the test suite from the CSS itself). WebGL valence colors untouched (semantic, per mechanics §1.5).
+- **Defect found & fixed:** Daylight accents would have leaked into Code Mode (worst 2.62:1); `.high-contrast` now pins Obsidian accent values in both themes.
+- **Follow-up noted:** pre-existing `--accent-violet` on Code Mode black is 3.52:1 (predates this task; CSS comment corrected, palette redesign out of scope).
+- **Tests:** new theming suite 30/30 (+3 todos). Total 252 passed / 0 failed / 27 todo; run-all + nightly GREEN (independently re-run). Browser smoke: persistence, live token repaint incl. derived tints, hostile input rejection, Code Mode suspension, full-app contrast audit ≥4.98:1 both themes, clean console.
+- **Next:** Layman Vibe Translators (moved to `## NOW`).

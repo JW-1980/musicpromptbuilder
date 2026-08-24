@@ -2,9 +2,9 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Full theming system (owner request 2026-08-24): make every color user-configurable via the design-token layer, add a dark/light theme switcher, and design a light theme variant of Studio Obsidian. Persist choices as lightweight UI state; keep the token single-source-of-truth rule and Code Mode compatibility.
-## NEXT
 - [ ] Implement Layman Vibe Translators (Scene generator, 3-axis physical sliders, Safe-Mode artist dissector).
+
+## NEXT
 - [ ] Build the Drag-and-Drop Structure Builder (`[Intro]`, `[Chorus]`, etc.) with the `Ctrl+Z` undo/redo stack.
 - [ ] Implement the Live 1,000-Character Limiter, Token Compactor, and Tag Conflict Resolution Engine.
 - [ ] Develop the `.mid` export function, translating the tracked pitch contour into MIDI events for direct import into Ableton or FL Studio.
@@ -12,6 +12,7 @@
 - [ ] Run the comprehensive nightly E2E verification across all 50 features and tag `v1.0.0-release`.
 
 ## DONE
+- [x] Full theming system (owner request): configurable color tokens, dark/light switcher, Studio Daylight light theme.
 - [x] Implement the 3D WebGL Frequency Visualizer and bind it to the Web Worker's output array.
 - [x] Scaffold the Obsidian Studio CSS layout using CSS Container Queries and native View Transitions.
 - [x] Build the Tri-Mode Universal AI Dissector (WebGPU/WASM in-browser engine, Free Cloud APIs, and Local Ollama hook). *(Mode 1 = embedded taxonomy engine per ASSUMPTIONS.md — no LLM download possible under the zero-dependency constraint.)*

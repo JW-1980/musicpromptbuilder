@@ -28,7 +28,9 @@
        prompt builders, parseDissectorReply, createToastHost) and the single
        var CLOUD_API_PRESETS registry, which is the ONLY place in this file
        allowed to hold a remote URL (tests/verify-single-file.js enforces it)
-    4. the studio shell (createViewManager, tabKeyTarget, createThemePrefs)
+    4. the studio shell (createViewManager, tabKeyTarget, the theming layer —
+       THEMABLE_TOKENS, normalizeColorValue, parseColorParts,
+       composeColorValue, createThemePrefs, applyThemeState)
     5. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
        the pure mesh/level/colour helpers (buildRibbonGeometry, downsampleBuffer,
        valenceToColor, pushRibbonRow, perspectiveMatrix4) plus createRibbonRenderer
@@ -37,11 +39,31 @@
 <style>
   /* ==========================================================================
      DESIGN TOKENS — docs/FDD.md §6 / docs/SUNO-AI-AGENT-DIRECTIVE.md §2.1.
-     This block and the .high-contrast block below are the ONLY places in this
-     file allowed to hold a raw colour literal. Every rule downstream consumes
-     var(--token), which is what lets High-Contrast "Code" Mode (FDD #17) be a
-     pure token swap on the root element instead of a per-element restyle.
-     tests/ui-layout.test.js enforces that rule.
+
+     THREE LAYERS, ONE SOURCE OF TRUTH.
+
+       1. PALETTE  — `:root` (Studio Obsidian, dark) and `.theme-light`
+          (Studio Daylight) declare exactly the same token names with
+          different literal values. These two blocks plus `.high-contrast`
+          are the ONLY places in this file allowed to hold a colour literal;
+          tests/ui-layout.test.js and tests/theming.test.js enforce that, and
+          tests/theming.test.js additionally proves the two palettes are a
+          name-for-name mirror of each other.
+       2. DERIVED  — the `html` block below mixes every wash, tint, glow ring
+          and placeholder shade FROM the palette with color-mix(), so a user
+          override of --accent-cyan repaints the genre badges and the tab tint
+          with it and a theme swap needs no second edit. It is declared on
+          `html` rather than `:root` (same element, lower specificity, no
+          conflict) purely so the two PALETTE blocks stay a strict mirror.
+       3. USER      — createThemePrefs() writes validated colour overrides as
+          INLINE custom properties on <html>, which outrank both palette
+          blocks. High-Contrast "Code" Mode (FDD #17) must beat those too, so
+          applyThemeState() suspends the inline layer while the mode is on
+          and restores it when it goes off — accessibility always wins.
+
+     Every rule downstream consumes var(--token). That is what lets a theme
+     swap, a user recolour and Code Mode all be pure token swaps on the root
+     element instead of per-element restyles.
      ========================================================================== */
   :root {
     --bg: #0A0A0C;
@@ -51,27 +73,117 @@
     --surface-border: rgba(255, 255, 255, 0.08);
     /* Recessed surface — text inputs, code blocks, the tab rail. */
     --field-bg: rgba(0, 0, 0, 0.28);
+    /* The visualiser stage. The ribbon's own colours are DSP semantics, not
+       theme (major = cyan, minor = violet, FEATURE-MECHANICS.md §1.5), so the
+       stage behind them stays dark in EVERY theme — see .theme-light. */
+    --viz-bg: rgba(0, 0, 0, 0.28);
+    /* Floating panels (toasts, the colour picker) sit above the glass and need
+       their own near-opaque ground rather than a second translucent wash. */
+    --toast-bg: rgba(18, 18, 24, 0.94);
+    --shadow-color: rgba(0, 0, 0, 0.5);
     --accent-cyan: #00F0FF;
     --accent-violet: #8A2BE2;
     --warning-amber: #FFB800;
     --danger-crimson: #FF3366;
     --text: rgba(255, 255, 255, 0.92);
     --text-dim: rgba(255, 255, 255, 0.55);
+    /* One shared "this element is live" language: accent border + outer glow,
+       reused by the active tab, the armed record button and the code-mode
+       toggle instead of each growing its own bespoke effect. On a dark ground
+       that reads as neon; .theme-light swaps it for a soft drop shadow. */
+    --glow-cyan: 0 0 18px color-mix(in srgb, var(--accent-cyan) 22%, transparent);
+    --glow-violet: 0 0 18px color-mix(in srgb, var(--accent-violet) 28%, transparent);
+    --glow-crimson: 0 0 18px color-mix(in srgb, var(--danger-crimson) 25%, transparent);
+
+    /* --- Non-colour tokens. Deliberately NOT part of the palette mirror: a
+       theme changes hues, not typefaces or timings. -------------------------- */
     --font-ui: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
     /* Glassmorphism blur (FDD #13). High-contrast mode resolves this to `none`,
        which is a valid backdrop-filter value, so no rule needs a fallback. */
     --glass-blur: blur(14px);
     --focus-ring: 2px;
-    /* One shared "this element is live" language: accent border + outer glow,
-       reused by the active tab, the armed record button and the code-mode
-       toggle instead of each growing its own bespoke effect. */
-    --glow-cyan: 0 0 18px rgba(0, 240, 255, 0.22);
-    --glow-violet: 0 0 18px rgba(138, 43, 226, 0.28);
     /* View-transition timings (FEATURE-MECHANICS.md §6.1). */
     --vt-out: 200ms;
     --vt-in: 280ms;
     --vt-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+
+  /* ==========================================================================
+     STUDIO DAYLIGHT — the light variant of Studio Obsidian.
+
+     Same structure, inverted ground: a cool light neutral (never pure white,
+     which would blow out under the glass blur), near-black text, and the
+     "glass" washes flipped from white-alpha to DARK-alpha so a card still
+     reads as a pane sitting ON the ground rather than a hole cut into it.
+
+     ACCENTS ARE CONTRAST-CORRECTED, NOT REUSED. #00F0FF, #FFB800 and #FF3366
+     are 1.2–1.9:1 against a light ground — unusable for the text, borders and
+     status labels this app paints with them. Each is re-derived at the same
+     hue with the lightness dropped until it clears WCAG AA (4.5:1) against
+     --bg, so the identity survives the correction. Ratios below are computed,
+     not estimated, and tests/theming.test.js recomputes every one of them from
+     these very declarations and fails if a value drifts:
+
+       --accent-cyan     #00F0FF (1.27:1) -> #00707C deep teal-cyan   5.24:1
+       --accent-violet   #8A2BE2 (5.37:1) -> #6E1BC4 rich violet      7.23:1
+       --warning-amber   #FFB800 (1.56:1) -> #8A5A00 ochre            5.34:1
+       --danger-crimson  #FF3366 (3.20:1) -> #C2185B deep rose        5.29:1
+       --text            over --bg                                   14.90:1
+       --text-dim        over --bg                                    4.98:1
+
+     Violet already cleared AA on light, but was deepened with it so the four
+     accents stay a family rather than one bright outlier among three dark ones.
+     ========================================================================== */
+  .theme-light {
+    --bg: #F2F3F6;
+    --surface: rgba(16, 16, 22, 0.045);
+    --surface-2: rgba(16, 16, 22, 0.025);
+    /* 1.35:1 against --bg — deliberately the same near-invisible hairline the
+       dark theme draws at 1.18:1, so both themes carry the same visual weight.
+       Code Mode is the escape hatch that makes every border legible. */
+    --surface-border: rgba(16, 16, 22, 0.14);
+    /* Recessed fields invert: on a light ground "inset" reads as paper, so
+       the field goes LIGHTER than the surface instead of darker. */
+    --field-bg: rgba(255, 255, 255, 0.75);
+    /* The one surface that does not flip — see :root. */
+    --viz-bg: rgba(12, 12, 18, 0.90);
+    --toast-bg: rgba(252, 252, 254, 0.96);
+    --shadow-color: rgba(16, 16, 22, 0.16);
+    --accent-cyan: #00707C;
+    --accent-violet: #6E1BC4;
+    --warning-amber: #8A5A00;
+    --danger-crimson: #C2185B;
+    --text: rgba(12, 12, 16, 0.92);
+    --text-dim: rgba(12, 12, 16, 0.60);
+    /* Neon does not exist in daylight: the same "this element is live" language
+       becomes a soft, grounded drop shadow instead of an outer halo. */
+    --glow-cyan: 0 2px 10px color-mix(in srgb, var(--accent-cyan) 30%, transparent);
+    --glow-violet: 0 2px 10px color-mix(in srgb, var(--accent-violet) 30%, transparent);
+    --glow-crimson: 0 2px 10px color-mix(in srgb, var(--danger-crimson) 30%, transparent);
+  }
+
+  /* ==========================================================================
+     DERIVED TOKENS — layer 2. Mixed from the palette, never written out, so
+     they follow both the active theme AND any user override for free.
+     color-mix() is baseline in every engine this app already requires for
+     WebGL2, @container and :has(), so it needs no fallback rung.
+     ========================================================================== */
+  html {
+    /* Placeholder text — the one derived shade that is real content rather
+       than decoration, so it is tuned to clear AA over --field-bg in both
+       themes (4.60:1 light, 6.68:1 dark) instead of to look faint. */
+    --text-faint: color-mix(in srgb, var(--text) 62%, transparent);
+    --meter-track: color-mix(in srgb, var(--text) 12%, transparent);
+    --tint-cyan: color-mix(in srgb, var(--accent-cyan) 12%, transparent);
+    --tint-cyan-border: color-mix(in srgb, var(--accent-cyan) 44%, transparent);
+    --tint-violet: color-mix(in srgb, var(--accent-violet) 16%, transparent);
+    --tint-amber: color-mix(in srgb, var(--warning-amber) 8%, transparent);
+    --tint-amber-border: color-mix(in srgb, var(--warning-amber) 36%, transparent);
+    /* The armed-record halo. Its far keyframe is plain `transparent`: CSS
+       interpolates colours premultiplied, so it fades out without a grey
+       fringe and needs no second token. */
+    --pulse-ring: color-mix(in srgb, var(--danger-crimson) 55%, transparent);
   }
 
   * { box-sizing: border-box; }
@@ -92,7 +204,13 @@
     container-name: app-shell;
   }
 
+  /* backdrop-filter makes the header its own stacking context. Without an
+     explicit position+z-index that context would paint UNDER the later
+     #workspace sibling, and the colour panel that pops out of the header with
+     it. One declaration keeps the whole header above the workspace. */
   .app-header {
+    position: relative;
+    z-index: 20;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -165,8 +283,8 @@
 
   .view-tab[aria-selected="true"] {
     color: var(--accent-cyan);
-    background: linear-gradient(135deg, rgba(0, 240, 255, 0.14), rgba(138, 43, 226, 0.16));
-    border-color: rgba(0, 240, 255, 0.45);
+    background: linear-gradient(135deg, var(--tint-cyan), var(--tint-violet));
+    border-color: var(--tint-cyan-border);
     box-shadow: var(--glow-cyan);
   }
 
@@ -203,6 +321,179 @@
   }
 
   .btn-toggle:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  /* --- Dark/light switcher + user colour picker --------------------------- */
+
+  /* The glyph pair is inline SVG (a single-file app has no icon font and no
+     sprite sheet to fetch); exactly one of the two is rendered at a time and
+     the other carries [hidden], which the UA stylesheet already resolves to
+     display:none because nothing here overrides `display`. */
+  .btn-toggle .glyph {
+    width: 15px;
+    height: 15px;
+    flex: none;
+  }
+
+  .btn-toggle[aria-pressed="true"].btn-theme {
+    color: var(--warning-amber);
+    border-color: var(--warning-amber);
+    box-shadow: none;
+  }
+
+  /* The disclosure and its popover share a positioning context, so the panel
+     hangs off the button no matter where the header wraps it. */
+  .colors-menu {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .colors-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 70;
+    width: min(340px, calc(100vw - 40px));
+    max-height: min(70vh, 620px);
+    overflow-y: auto;
+    padding: 16px 18px;
+    text-align: left;
+    background: var(--toast-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    box-shadow: 0 18px 44px var(--shadow-color);
+    backdrop-filter: var(--glass-blur);
+  }
+
+  .colors-panel[hidden] { display: none; }
+
+  .colors-title {
+    margin: 0 0 6px;
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .colors-lead {
+    margin: 0 0 12px;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .colors-note {
+    margin: 0 0 12px;
+    padding: 9px 11px;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--warning-amber);
+    background: var(--tint-amber);
+    border: 1px solid var(--tint-amber-border);
+    border-radius: 9px;
+  }
+
+  .colors-note[hidden] { display: none; }
+
+  .colors-group {
+    margin: 16px 0 2px;
+    font-size: 0.62rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .color-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 9px 0;
+    border-top: 1px solid var(--surface-border);
+  }
+
+  .color-row-label {
+    font-size: 0.79rem;
+    line-height: 1.3;
+  }
+
+  .color-row-token {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--text-dim);
+  }
+
+  .color-row-swatch {
+    width: 38px;
+    height: 28px;
+    padding: 2px;
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .color-row-alpha {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin: 0;
+    accent-color: var(--accent-cyan);
+  }
+
+  .color-row-value {
+    grid-column: 1 / -1;
+    width: 100%;
+    padding: 6px 9px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text);
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+  }
+
+  .color-row-value[aria-invalid="true"] {
+    color: var(--danger-crimson);
+    border-color: var(--danger-crimson);
+  }
+
+  .colors-error {
+    margin: 12px 0 0;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--danger-crimson);
+  }
+
+  .colors-error:empty { display: none; }
+
+  .colors-actions {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .btn-mini {
+    padding: 7px 15px;
+    font: inherit;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: color 140ms ease, border-color 140ms ease;
+  }
+
+  .btn-mini:hover { color: var(--text); border-color: var(--accent-cyan); }
+
+  .btn-mini:focus-visible,
+  .colors-panel input:focus-visible {
     outline: var(--focus-ring) solid var(--accent-cyan);
     outline-offset: 2px;
   }
@@ -344,19 +635,19 @@
     height: 10px;
     border-radius: 50%;
     background: var(--danger-crimson);
-    box-shadow: 0 0 0 0 rgba(255, 51, 102, 0.55);
+    box-shadow: 0 0 0 0 var(--pulse-ring);
   }
 
   .btn-record.is-live {
     border-color: var(--danger-crimson);
-    box-shadow: 0 0 18px rgba(255, 51, 102, 0.25);
+    box-shadow: var(--glow-crimson);
   }
 
   .btn-record.is-live .rec-dot { animation: rec-pulse 1.2s ease-out infinite; }
 
   @keyframes rec-pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(255, 51, 102, 0.55); }
-    100% { box-shadow: 0 0 0 12px rgba(255, 51, 102, 0); }
+    0%   { box-shadow: 0 0 0 0 var(--pulse-ring); }
+    100% { box-shadow: 0 0 0 12px transparent; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -424,11 +715,14 @@
     color: var(--text-dim);
   }
 
+  /* The GL context clears to fully transparent, so this token IS the canvas
+     clear colour: the stage follows the theme while the ribbon's own
+     major/minor hues stay the DSP semantics they encode. */
   .viz-canvas {
     display: block;
     width: 100%;
     height: 190px;
-    background: var(--field-bg);
+    background: var(--viz-bg);
     border: 1px solid var(--surface-border);
     border-radius: 12px;
   }
@@ -448,8 +742,8 @@
   .mic-help {
     margin-top: 18px;
     padding: 16px 18px;
-    background: rgba(255, 184, 0, 0.06);
-    border: 1px solid rgba(255, 184, 0, 0.35);
+    background: var(--tint-amber);
+    border: 1px solid var(--tint-amber-border);
     border-radius: 12px;
   }
 
@@ -513,7 +807,7 @@
     resize: vertical;
   }
 
-  .dissect-input::placeholder { color: rgba(255, 255, 255, 0.35); }
+  .dissect-input::placeholder { color: var(--text-faint); }
   .dissect-input:focus-visible,
   .field-input:focus-visible,
   .field-select:focus-visible {
@@ -615,15 +909,15 @@
     padding: 6px 13px;
     font-size: 0.82rem;
     color: var(--accent-cyan);
-    background: rgba(0, 240, 255, 0.10);
-    border: 1px solid rgba(0, 240, 255, 0.42);
+    background: var(--tint-cyan);
+    border: 1px solid var(--tint-cyan-border);
     border-radius: 999px;
   }
 
   .badge-weight {
     font-family: var(--font-mono);
     font-size: 0.68rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
 
@@ -671,7 +965,7 @@
     margin-top: 6px;
     height: 8px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--meter-track);
     overflow: hidden;
   }
 
@@ -695,8 +989,8 @@
     padding: 2px 8px;
     border-radius: 999px;
     color: var(--warning-amber);
-    background: rgba(255, 184, 0, 0.10);
-    border: 1px solid rgba(255, 184, 0, 0.38);
+    background: var(--tint-amber);
+    border: 1px solid var(--tint-amber-border);
   }
 
   .source-flag[hidden] { display: none; }
@@ -742,11 +1036,11 @@
     font-size: 0.85rem;
     line-height: 1.45;
     color: var(--text);
-    background: rgba(18, 18, 24, 0.94);
+    background: var(--toast-bg);
     border: 1px solid var(--surface-border);
     border-left: 3px solid var(--accent-cyan);
     border-radius: 10px;
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 14px 34px var(--shadow-color);
     backdrop-filter: var(--glass-blur);
     animation: toast-in 180ms ease-out;
   }
@@ -855,8 +1149,25 @@
      HIGH-CONTRAST "CODE" MODE — docs/FDD.md #17.
      A pure token swap on the root element: solid black surfaces, no blur,
      borders and text pushed to full legibility, thicker focus rings. The
-     accent hues are deliberately NOT changed — cyan and violet already clear
-     WCAG AA on black, and they are how the app encodes meaning.
+     accent hues are deliberately not RE-designed — they are how the app
+     encodes meaning — but they are PINNED to their Obsidian values, because
+     Code Mode's ground is black whichever base theme is underneath it and
+     Studio Daylight's accents were derived for the opposite ground:
+
+       on #000000     Obsidian          Daylight
+       cyan           14.91:1           3.61:1
+       violet          3.52:1           2.62:1
+       amber          12.11:1           3.54:1
+       crimson         5.92:1           3.58:1
+
+     Letting the light accents through would have handed the accessibility
+     mode the least legible palette in the app.
+
+     THE LAST WORD IN THE CASCADE. This block sits after .theme-light, so it
+     beats either palette on equal specificity; and because inline custom
+     properties would still outrank a class, applyThemeState() SUSPENDS the
+     user's colour overrides for as long as the mode is on. A legibility mode
+     that a recolour could quietly defeat is not a legibility mode.
      ========================================================================== */
 
   .high-contrast {
@@ -864,19 +1175,29 @@
     --surface: #000000;
     --surface-2: #000000;
     --field-bg: #000000;
+    --viz-bg: #000000;
+    --toast-bg: #000000;
+    --shadow-color: rgba(0, 0, 0, 0);
     --surface-border: rgba(255, 255, 255, 0.45);
     --text: #FFFFFF;
     --text-dim: rgba(255, 255, 255, 0.86);
+    /* Pinned, not re-designed — see the ratio table above. */
+    --accent-cyan: #00F0FF;
+    --accent-violet: #8A2BE2;
+    --warning-amber: #FFB800;
+    --danger-crimson: #FF3366;
     --glass-blur: none;
     --focus-ring: 3px;
     --glow-cyan: none;
     --glow-violet: none;
+    --glow-crimson: none;
   }
 
   /* Belt and braces: --glass-blur already resolves to `none`, but a blur that
      survived a future edit would defeat the whole mode, so it is killed
      outright on every glass surface. */
   .high-contrast .app-header,
+  .high-contrast .colors-panel,
   .high-contrast .toast {
     backdrop-filter: none;
   }
@@ -886,6 +1207,7 @@
   .high-contrast .genre-badge,
   .high-contrast .source-flag,
   .high-contrast .toast,
+  .high-contrast .colors-note,
   .high-contrast .confidence-meter,
   .high-contrast .view-tabs,
   .high-contrast .view-tab[aria-selected="true"] {
@@ -893,6 +1215,7 @@
   }
 
   .high-contrast .confidence-meter,
+  .high-contrast .colors-note,
   .high-contrast .genre-badge {
     border: 1px solid var(--surface-border);
   }
@@ -925,7 +1248,7 @@
     ::view-transition-new(editor-view) { animation: none !important; }
     .studio-view.is-entering,
     #view-hum.is-entering { animation: none; }
-    .view-tab, .btn-toggle { transition: none; }
+    .view-tab, .btn-toggle, .btn-mini { transition: none; }
   }
 </style>
 </head>
@@ -942,6 +1265,50 @@
                 aria-controls="view-hum" aria-selected="true" tabindex="0">Hum Studio</button>
         <button type="button" role="tab" id="tab-editor" class="view-tab" data-view="editor"
                 aria-controls="view-editor" aria-selected="false" tabindex="-1">Prompt Editor</button>
+      </div>
+      <!-- Three token-level controls, three different jobs: pick a base theme,
+           recolour its tokens, or override both for legibility. The visible
+           label of each stays fixed so the accessible name always contains it
+           (WCAG 2.5.3); the STATE lives in aria-pressed and, on the theme
+           switch, in which of the two inline glyphs is rendered. -->
+      <button type="button" id="btn-theme" class="btn-toggle btn-theme" aria-pressed="false"
+              aria-label="Light theme: off">
+        <svg id="theme-glyph-moon" class="glyph" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z"/>
+        </svg>
+        <svg id="theme-glyph-sun" class="glyph" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true" focusable="false" hidden>
+          <circle cx="12" cy="12" r="4.2"/>
+          <path d="M12 2v2.4M12 19.6V22M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2 12h2.4M19.6 12H22M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/>
+        </svg>
+        <span>Light</span>
+      </button>
+      <div class="colors-menu">
+        <button type="button" id="btn-colors" class="btn-toggle" aria-expanded="false"
+                aria-controls="colors-panel" aria-haspopup="dialog"
+                aria-label="Theme colours">Colors</button>
+        <div id="colors-panel" class="colors-panel" role="dialog"
+             aria-labelledby="colors-panel-title" hidden>
+          <h2 id="colors-panel-title" class="colors-title">Theme colours</h2>
+          <p class="colors-lead">
+            Every colour in the app is one design token. Change one here and the
+            whole interface — tints, glows and all — re-derives from it. Choices
+            persist in this browser.
+          </p>
+          <p id="colors-note" class="colors-note" hidden>
+            Code mode is on, so it overrides every colour below until you turn
+            it off. Your choices are kept and come back with it.
+          </p>
+          <div id="colors-rows"></div>
+          <p id="colors-error" class="colors-error" role="alert"></p>
+          <div class="colors-actions">
+            <button type="button" id="btn-colors-reset" class="btn-mini">Reset colors</button>
+            <button type="button" id="btn-colors-close" class="btn-mini">Close</button>
+          </div>
+        </div>
       </div>
       <button type="button" id="btn-contrast" class="btn-toggle" aria-pressed="false"
               aria-label="High-contrast code mode">Code mode</button>
@@ -2068,7 +2435,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -4720,11 +5087,61 @@ var DEFAULT_VIEW = 'hum';
 var VIEW_ACTIVE_CLASS = 'is-active';
 var VIEW_ENTER_CLASS = 'is-entering';
 var HIGH_CONTRAST_CLASS = 'high-contrast';
+var THEME_LIGHT_CLASS = 'theme-light';
+/* Studio Obsidian is the house theme; the system preference only decides which
+ * way an untouched install starts, and an explicit choice always wins. */
+var DEFAULT_THEME = 'dark';
 
 /* The ONLY localStorage key this app writes (docs/FEATURE-MECHANICS.md §6.4:
  * localStorage is strictly reserved for lightweight UI state; presets and
  * history belong in IndexedDB). */
 var UI_PREFS_KEY = 'suno_ui_prefs';
+
+/*
+ * The canonical themable-token list — the closed set of PURE-COLOUR palette
+ * tokens a user is allowed to override, in the order the picker renders them.
+ *
+ * Closed on purpose. It is the allow-list half of setCustomColor's validation:
+ * a name that is not here can never reach documentElement.style, so a hostile
+ * localStorage payload cannot smuggle `--glass-blur: url(…)` — or any other
+ * non-colour token — into an inline declaration. It deliberately excludes:
+ *   - the DERIVED tokens (--tint-*, --glow-*, --pulse-ring, --text-faint,
+ *     --meter-track): they are color-mix() expressions over the entries below,
+ *     so overriding an accent already repaints every one of them;
+ *   - the non-colour tokens (--font-*, --glass-blur, --focus-ring, --vt-*):
+ *     a theme changes hues, not typefaces or timings.
+ * tests/theming.test.js cross-checks every name here against the :root block.
+ */
+var THEMABLE_TOKENS = [
+  { name: '--bg', label: 'Page background', group: 'Ground' },
+  { name: '--surface', label: 'Card surface', group: 'Ground' },
+  { name: '--surface-2', label: 'Nested surface', group: 'Ground' },
+  { name: '--surface-border', label: 'Border', group: 'Ground' },
+  { name: '--field-bg', label: 'Input / field', group: 'Ground' },
+  { name: '--viz-bg', label: 'Visualizer stage', group: 'Ground' },
+  { name: '--toast-bg', label: 'Floating panel', group: 'Ground' },
+  { name: '--shadow-color', label: 'Drop shadow', group: 'Ground' },
+  { name: '--accent-cyan', label: 'Primary accent', group: 'Accents' },
+  { name: '--accent-violet', label: 'Secondary accent', group: 'Accents' },
+  { name: '--warning-amber', label: 'Warning', group: 'Accents' },
+  { name: '--danger-crimson', label: 'Danger', group: 'Accents' },
+  { name: '--text', label: 'Text', group: 'Text' },
+  { name: '--text-dim', label: 'Dimmed text', group: 'Text' },
+];
+
+/* A colour value is never longer than this in any accepted form; the cap is
+ * checked BEFORE the shape regexes so a megabyte-long payload costs nothing. */
+var COLOR_MAX_LENGTH = 64;
+/* #RGB / #RRGGBB / #RRGGBBAA. Four-digit #RGBA is deliberately not accepted:
+ * it buys nothing the picker can produce and widens the surface for typos. */
+var HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+var RGB_COLOR_RE = /^rgb\(([0-9]{1,3}),([0-9]{1,3}),([0-9]{1,3})\)$/;
+var RGBA_COLOR_RE =
+  /^rgba\(([0-9]{1,3}),([0-9]{1,3}),([0-9]{1,3}),(0|1|0?\.[0-9]{1,4}|1\.0{1,4})\)$/;
+/* Nothing outside this alphabet can appear in any accepted form. Rejecting on
+ * it first means `;`, `{`, `}`, `:`, `/`, `*`, quotes, backslashes and every
+ * non-ASCII homoglyph are gone before a shape regex is ever consulted. */
+var COLOR_ALPHABET_RE = /^[#0-9a-zA-Z.,()\s]+$/;
 
 /**
  * Roving-tabindex arithmetic for a horizontal tablist (WAI-ARIA tabs pattern).
@@ -4944,17 +5361,175 @@ function createViewManager(deps) {
 }
 
 /**
- * High-Contrast "Code" Mode preference (docs/FDD.md #17).
+ * @param {*} name
+ * @returns {boolean} true iff `name` is one of the canonical themable tokens
+ */
+function isThemableToken(name) {
+  if (typeof name !== 'string' || !name) return false;
+  for (var i = 0; i < THEMABLE_TOKENS.length; i += 1) {
+    if (THEMABLE_TOKENS[i].name === name) return true;
+  }
+  return false;
+}
+
+/**
+ * The security gate for every user-supplied colour.
  *
- * Persists ONE boolean under `suno_ui_prefs` and nothing else — this is the
- * lightweight-UI-state exception in FEATURE-MECHANICS.md §6.4, not a general
- * state store. The value is written as JSON so the record can grow later, but
- * anything unreadable (a truncated write, a value from another app, a string
- * where an object belongs) degrades silently to the default rather than
- * throwing during boot.
+ * Whatever comes back from here is written verbatim into an inline custom
+ * property on <html>, so this function — not the caller, not the DOM — is what
+ * stands between a stored string and the CSS parser. It is therefore an
+ * ALLOW-LIST, not a sanitiser: a value is accepted only when it matches one of
+ * three exact shapes end to end, and is rejected outright otherwise. Nothing is
+ * stripped, escaped or repaired, because a repaired hostile value is still a
+ * value somebody chose.
  *
- * @param {{storage?: {getItem:Function, setItem:Function}}} deps
- * @returns {{isHighContrast:Function, setHighContrast:Function, load:Function}}
+ * Accepted: #RGB, #RRGGBB, #RRGGBBAA, rgb(r,g,b), rgba(r,g,b,a) — components
+ * 0-255, alpha 0-1. Rejected: everything else, including url(), var(),
+ * expression(), bare keywords, anything carrying `;` `{` `}` `:` `/` `*` or a
+ * quote, non-ASCII homoglyphs, and anything over COLOR_MAX_LENGTH.
+ *
+ * @param {*} value
+ * @returns {string|null} the canonical form, or null when not accepted
+ */
+function normalizeColorValue(value) {
+  if (typeof value !== 'string') return null;
+  if (value.length === 0 || value.length > COLOR_MAX_LENGTH) return null;
+  if (!COLOR_ALPHABET_RE.test(value)) return null;
+
+  var text = value.trim();
+  if (!text) return null;
+  if (HEX_COLOR_RE.test(text)) return text.toUpperCase();
+
+  // Whitespace inside the functional forms is insignificant, so it is removed
+  // before matching and re-inserted canonically on the way out.
+  var compact = text.replace(/\s+/g, '').toLowerCase();
+
+  var m = RGB_COLOR_RE.exec(compact);
+  if (m) {
+    var rgb = channelsOrNull(m[1], m[2], m[3]);
+    return rgb ? 'rgb(' + rgb[0] + ', ' + rgb[1] + ', ' + rgb[2] + ')' : null;
+  }
+
+  m = RGBA_COLOR_RE.exec(compact);
+  if (m) {
+    var parts = channelsOrNull(m[1], m[2], m[3]);
+    if (!parts) return null;
+    var alpha = Number(m[4]);
+    if (!isFinite(alpha) || alpha < 0 || alpha > 1) return null;
+    return 'rgba(' + parts[0] + ', ' + parts[1] + ', ' + parts[2] + ', ' + alpha + ')';
+  }
+
+  return null;
+}
+
+/**
+ * @returns {number[]|null} the three channels as integers, or null if any is
+ *   outside 0-255 (the regex only proves they are 1-3 digits)
+ */
+function channelsOrNull(r, g, b) {
+  var out = [Number(r), Number(g), Number(b)];
+  for (var i = 0; i < 3; i += 1) {
+    if (!isFinite(out[i]) || out[i] < 0 || out[i] > 255) return null;
+  }
+  return out;
+}
+
+/**
+ * Split any colour this app is allowed to store into numeric channels, so the
+ * picker can seed an <input type="color"> (which speaks only #RRGGBB) and an
+ * opacity slider from a single stored token value.
+ *
+ * @param {*} value
+ * @returns {{r:number, g:number, b:number, a:number}|null}
+ */
+function parseColorParts(value) {
+  var normalized = normalizeColorValue(value);
+  if (normalized === null) return null;
+
+  if (normalized.charAt(0) === '#') {
+    var hex = normalized.slice(1);
+    if (hex.length === 3) {
+      return {
+        r: parseInt(hex.charAt(0) + hex.charAt(0), 16),
+        g: parseInt(hex.charAt(1) + hex.charAt(1), 16),
+        b: parseInt(hex.charAt(2) + hex.charAt(2), 16),
+        a: 1,
+      };
+    }
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+      a: hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1,
+    };
+  }
+
+  var nums = normalized.replace(/^rgba?\(|\)$/g, '').split(',');
+  return {
+    r: Number(nums[0]),
+    g: Number(nums[1]),
+    b: Number(nums[2]),
+    a: nums.length > 3 ? Number(nums[3]) : 1,
+  };
+}
+
+/**
+ * The inverse of parseColorParts: fully opaque values come back as hex (which
+ * is what the palette itself is written in), anything else as rgba().
+ *
+ * @param {number} r 0-255
+ * @param {number} g 0-255
+ * @param {number} b 0-255
+ * @param {number} a 0-1
+ * @returns {string}
+ */
+function composeColorValue(r, g, b, a) {
+  var ch = [r, g, b].map(function (n) {
+    var v = Math.round(Number(n));
+    if (!isFinite(v)) v = 0;
+    return Math.min(255, Math.max(0, v));
+  });
+  var alpha = Number(a);
+  if (!isFinite(alpha)) alpha = 1;
+  alpha = Math.min(1, Math.max(0, alpha));
+  if (alpha >= 1) {
+    return (
+      '#' +
+      ch
+        .map(function (n) {
+          return (n < 16 ? '0' : '') + n.toString(16);
+        })
+        .join('')
+        .toUpperCase()
+    );
+  }
+  return 'rgba(' + ch[0] + ', ' + ch[1] + ', ' + ch[2] + ', ' + Math.round(alpha * 100) / 100 + ')';
+}
+
+/**
+ * Lightweight UI preferences (docs/FEATURE-MECHANICS.md §6.4) — High-Contrast
+ * "Code" Mode (FDD #17), the dark/light base theme, and the user's per-token
+ * colour overrides.
+ *
+ * ONE key, `suno_ui_prefs`, holding ONE JSON record:
+ *   { highContrast: boolean, theme: 'dark'|'light'|null, customColors: {} }
+ * `theme: null` is not a missing value, it is a meaningful state: "never
+ * chosen", which is what makes the system preference the initial answer while
+ * an explicit choice keeps winning forever after.
+ *
+ * Nothing read back is trusted. The record is JSON, every field is re-checked
+ * against its own contract, and every stored colour is re-run through
+ * normalizeColorValue() on load — a payload edited by hand, left by another
+ * app, or truncated mid-write degrades to the default instead of reaching the
+ * DOM or throwing during boot. That also means an older `{highContrast:true}`
+ * record from before this release still loads, unchanged, as exactly what it
+ * says.
+ *
+ * @param {{
+ *   storage?: {getItem:Function, setItem:Function},
+ *   matchMedia?: (query: string) => {matches?: boolean}
+ * }} deps
+ * @returns {object}
  */
 function createThemePrefs(deps) {
   var d = deps || {};
@@ -4962,7 +5537,13 @@ function createThemePrefs(deps) {
     d.storage && typeof d.storage.getItem === 'function' && typeof d.storage.setItem === 'function'
       ? d.storage
       : null;
+  var matchMedia = typeof d.matchMedia === 'function' ? d.matchMedia : null;
+
   var highContrast = false;
+  /** @type {'dark'|'light'|null} null === the user has never chosen */
+  var theme = null;
+  /** @type {Record<string,string>} */
+  var customColors = {};
 
   function read() {
     if (!storage) return null;
@@ -4976,7 +5557,10 @@ function createThemePrefs(deps) {
   function write() {
     if (!storage) return false;
     try {
-      storage.setItem(UI_PREFS_KEY, JSON.stringify({ highContrast: highContrast }));
+      storage.setItem(
+        UI_PREFS_KEY,
+        JSON.stringify({ highContrast: highContrast, theme: theme, customColors: customColors })
+      );
       return true;
     } catch (err) {
       // A full or disabled quota must not break the toggle; the class is
@@ -4985,10 +5569,37 @@ function createThemePrefs(deps) {
     }
   }
 
+  /** @returns {Record<string,string>} only the entries that survive validation */
+  function sanitizeColors(input) {
+    var out = {};
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return out;
+    for (var i = 0; i < THEMABLE_TOKENS.length; i += 1) {
+      var name = THEMABLE_TOKENS[i].name;
+      if (!Object.prototype.hasOwnProperty.call(input, name)) continue;
+      var normalized = normalizeColorValue(input[name]);
+      if (normalized !== null) out[name] = normalized;
+    }
+    return out;
+  }
+
+  function systemTheme() {
+    if (!matchMedia) return DEFAULT_THEME;
+    try {
+      var light = matchMedia('(prefers-color-scheme: light)');
+      if (light && light.matches === true) return 'light';
+      var dark = matchMedia('(prefers-color-scheme: dark)');
+      if (dark && dark.matches === true) return 'dark';
+    } catch (err) {
+      // A matchMedia that throws is a matchMedia that has no opinion.
+    }
+    return DEFAULT_THEME;
+  }
+
   return {
     /**
-     * Re-read the stored preference. Never throws.
-     * @returns {boolean} the value now in effect
+     * Re-read the whole stored record. Never throws, never writes.
+     * @returns {boolean} the high-contrast value now in effect (kept as the
+     *   return type it has always had, so existing callers are unaffected)
      */
     load: function () {
       var raw = read();
@@ -5000,7 +5611,10 @@ function createThemePrefs(deps) {
           parsed = null;
         }
       }
-      highContrast = !!(parsed && typeof parsed === 'object' && parsed.highContrast === true);
+      var record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+      highContrast = !!(record && record.highContrast === true);
+      theme = record && (record.theme === 'dark' || record.theme === 'light') ? record.theme : null;
+      customColors = sanitizeColors(record ? record.customColors : null);
       return highContrast;
     },
 
@@ -5018,7 +5632,148 @@ function createThemePrefs(deps) {
       write();
       return highContrast;
     },
+
+    /**
+     * The EXPLICIT choice, which is not the same question as "which theme is
+     * painted right now" — see resolvedTheme().
+     * @returns {'dark'|'light'|null} null when the user has never chosen
+     */
+    getTheme: function () {
+      return theme;
+    },
+
+    /**
+     * @param {'dark'|'light'|null} next 'system' or null clears the explicit
+     *   choice and hands the decision back to the OS
+     * @returns {'dark'|'light'} the theme now in effect
+     */
+    setTheme: function (next) {
+      if (next === 'dark' || next === 'light') theme = next;
+      else if (next === null || next === undefined || next === 'system') theme = null;
+      else return this.resolvedTheme(); // unrecognised: change nothing, write nothing
+      write();
+      return this.resolvedTheme();
+    },
+
+    /**
+     * The theme actually painted: the explicit choice if there is one, else
+     * the system preference, else Studio Obsidian.
+     * @returns {'dark'|'light'}
+     */
+    resolvedTheme: function () {
+      if (theme === 'dark' || theme === 'light') return theme;
+      return systemTheme();
+    },
+
+    /** @returns {Record<string,string>} a copy — callers cannot mutate the record */
+    getCustomColors: function () {
+      var out = {};
+      for (var key in customColors) {
+        if (Object.prototype.hasOwnProperty.call(customColors, key)) out[key] = customColors[key];
+      }
+      return out;
+    },
+
+    /**
+     * @param {string} token one of listThemableTokens()
+     * @param {string} value a colour in one of the accepted forms
+     * @returns {boolean} whether it was accepted — false means NOTHING was
+     *   stored, applied or written; the caller is expected to say so
+     */
+    setCustomColor: function (token, value) {
+      if (!isThemableToken(token)) return false;
+      var normalized = normalizeColorValue(value);
+      if (normalized === null) return false;
+      customColors[token] = normalized;
+      write();
+      return true;
+    },
+
+    /** Drop every override and fall back to the base theme. */
+    clearCustomColors: function () {
+      customColors = {};
+      write();
+      return true;
+    },
+
+    /** @returns {string[]} the canonical token names, in picker order */
+    listThemableTokens: function () {
+      return THEMABLE_TOKENS.map(function (t) {
+        return t.name;
+      });
+    },
   };
+}
+
+/**
+ * The ONE write path from preferences to the document, and the place the
+ * cascade contract is actually enforced (docs/FDD.md §6, #17).
+ *
+ * Three layers land here in a fixed order of authority:
+ *   base theme  — .theme-light on <html>, or its absence for Studio Obsidian;
+ *   user colours — inline custom properties on <html>, which outrank any class;
+ *   Code Mode    — .high-contrast, which must beat BOTH.
+ *
+ * Since an inline declaration always beats a class selector, the third layer
+ * cannot be expressed in CSS alone: while Code Mode is on this function
+ * SUSPENDS the inline layer entirely (the values stay in preferences and come
+ * straight back when the mode goes off). A legibility mode a recolour could
+ * quietly defeat would not be one.
+ *
+ * Idempotent by construction — it writes the full target state every time
+ * rather than diffing, so calling it twice changes nothing the first call did
+ * not already do, and it can safely be the handler for every control.
+ *
+ * @param {object} prefs a createThemePrefs instance
+ * @param {object} doc a Document (or any object exposing documentElement +
+ *   querySelector; the whole function is DOM-shaped, not DOM-dependent)
+ * @returns {{theme:string, highContrast:boolean, applied:string[]}|null}
+ */
+function applyThemeState(prefs, doc) {
+  if (!prefs || !doc) return null;
+  var root = doc.documentElement;
+  if (!root) return null;
+
+  var theme = typeof prefs.resolvedTheme === 'function' ? prefs.resolvedTheme() : DEFAULT_THEME;
+  if (theme !== 'light') theme = DEFAULT_THEME;
+  var highContrast = typeof prefs.isHighContrast === 'function' ? !!prefs.isHighContrast() : false;
+  var customColors =
+    typeof prefs.getCustomColors === 'function' ? prefs.getCustomColors() || {} : {};
+
+  if (root.classList && typeof root.classList.add === 'function') {
+    if (theme === 'light') root.classList.add(THEME_LIGHT_CLASS);
+    else root.classList.remove(THEME_LIGHT_CLASS);
+    if (highContrast) root.classList.add(HIGH_CONTRAST_CLASS);
+    else root.classList.remove(HIGH_CONTRAST_CLASS);
+  }
+
+  var applied = [];
+  var style = root.style;
+  if (style && typeof style.setProperty === 'function' && typeof style.removeProperty === 'function') {
+    for (var i = 0; i < THEMABLE_TOKENS.length; i += 1) {
+      var name = THEMABLE_TOKENS[i].name;
+      var value =
+        highContrast || !Object.prototype.hasOwnProperty.call(customColors, name)
+          ? null
+          : normalizeColorValue(customColors[name]);
+      if (value === null) {
+        // Removing an absent property is a defined no-op, which is what keeps
+        // the "suspend, then restore" cycle free of bookkeeping.
+        style.removeProperty(name);
+      } else {
+        style.setProperty(name, value);
+        applied.push(name);
+      }
+    }
+  }
+
+  // Tells the UA which way to paint form controls, scrollbars and the canvas
+  // it composites the page onto — without it a light theme keeps dark widgets.
+  var meta =
+    typeof doc.querySelector === 'function' ? doc.querySelector('meta[name="color-scheme"]') : null;
+  if (meta && typeof meta.setAttribute === 'function') meta.setAttribute('content', theme);
+
+  return { theme: theme, highContrast: highContrast, applied: applied };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -5873,29 +6628,284 @@ function createRibbonRenderer(deps) {
       prefsStorage = null;
     }
 
-    const themePrefs = createThemePrefs({ storage: prefsStorage });
-    const contrastBtn = $('btn-contrast');
+    // Feature-detected and wrapped: an unbound `window.matchMedia` reference
+    // throws "Illegal invocation", and reading it can throw outright in a
+    // locked-down embedding. No matchMedia simply means no system preference.
+    let mediaQuery = null;
+    try {
+      mediaQuery =
+        typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+          ? function (query) {
+              return window.matchMedia(query);
+            }
+          : null;
+    } catch (err) {
+      mediaQuery = null;
+    }
 
-    function applyContrast() {
+    const themePrefs = createThemePrefs({ storage: prefsStorage, matchMedia: mediaQuery });
+    const contrastBtn = $('btn-contrast');
+    const themeBtn = $('btn-theme');
+    const themeGlyphSun = $('theme-glyph-sun');
+    const themeGlyphMoon = $('theme-glyph-moon');
+    const colorsBtn = $('btn-colors');
+    const colorsPanel = $('colors-panel');
+    const colorsRows = $('colors-rows');
+    const colorsNote = $('colors-note');
+    const colorsError = $('colors-error');
+
+    /** Mirror the preference state onto the controls that announce it. */
+    function syncThemeControls() {
       const on = themePrefs.isHighContrast();
-      // The tokens are overridden on the root element, so every var(--…) in the
-      // stylesheet re-resolves at once — no per-element restyling anywhere.
-      if (on) document.documentElement.classList.add(HIGH_CONTRAST_CLASS);
-      else document.documentElement.classList.remove(HIGH_CONTRAST_CLASS);
+      const light = themePrefs.resolvedTheme() === 'light';
       contrastBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
       contrastBtn.setAttribute(
         'aria-label',
         on ? 'High-contrast code mode: on' : 'High-contrast code mode: off'
       );
+      themeBtn.setAttribute('aria-pressed', light ? 'true' : 'false');
+      themeBtn.setAttribute('aria-label', light ? 'Light theme: on' : 'Light theme: off');
+      // The glyph shows the theme in effect; the fixed "Light" label names what
+      // the control toggles, so the accessible name still contains it.
+      themeGlyphSun.hidden = !light;
+      themeGlyphMoon.hidden = light;
+      colorsNote.hidden = !on;
+    }
+
+    /**
+     * The single repaint path. Every control below calls exactly this, so the
+     * document, the controls and the stored preferences can never drift.
+     */
+    function repaintTheme() {
+      // The tokens are overridden on the root element, so every var(--…) in the
+      // stylesheet re-resolves at once — no per-element restyling anywhere.
+      applyThemeState(themePrefs, document);
+      syncThemeControls();
+      if (!colorsPanel.hidden) seedColorRows();
     }
 
     themePrefs.load();
-    applyContrast();
+
+    /* -------- the colour picker (one row per themable token) -------- */
+
+    /** @type {Array<{token:object, swatch:object, alpha:object, value:object}>} */
+    const colorRows = [];
+
+    /**
+     * What a row should show: the user's override if there is one, otherwise
+     * whatever the active theme currently resolves the token to.
+     */
+    function currentTokenValue(name) {
+      const custom = themePrefs.getCustomColors()[name];
+      if (custom) return custom;
+      try {
+        const computed = window
+          .getComputedStyle(document.documentElement)
+          .getPropertyValue(name);
+        const normalized = normalizeColorValue(String(computed || '').trim());
+        if (normalized !== null) return normalized;
+      } catch (err) {
+        // getComputedStyle can throw in a detached document; fall through.
+      }
+      return '#000000';
+    }
+
+    function showColorError(message) {
+      colorsError.textContent = message || '';
+    }
+
+    /** Push the live value of one token back into its three controls. */
+    function seedColorRow(row) {
+      const value = currentTokenValue(row.token.name);
+      const parts = parseColorParts(value) || { r: 0, g: 0, b: 0, a: 1 };
+      row.swatch.value = composeColorValue(parts.r, parts.g, parts.b, 1).toLowerCase();
+      row.alpha.value = String(Math.round(parts.a * 100));
+      row.value.value = value;
+      row.value.setAttribute('aria-invalid', 'false');
+    }
+
+    function seedColorRows() {
+      for (const row of colorRows) seedColorRow(row);
+    }
+
+    /**
+     * Try to make `next` the value of this row's token. A rejected value is
+     * never stored and never applied — it is reported, and the row keeps the
+     * value it had.
+     * @returns {boolean}
+     */
+    function commitColor(row, next) {
+      if (themePrefs.setCustomColor(row.token.name, next)) {
+        row.value.setAttribute('aria-invalid', 'false');
+        showColorError('');
+        repaintTheme();
+        return true;
+      }
+      row.value.setAttribute('aria-invalid', 'true');
+      showColorError(
+        '“' +
+          String(next).slice(0, 32) +
+          '” is not a colour this app will store. Use #RGB, #RRGGBB, #RRGGBBAA, rgb(r, g, b) or rgba(r, g, b, a).'
+      );
+      return false;
+    }
+
+    function buildColorRows() {
+      let group = null;
+      for (const token of THEMABLE_TOKENS) {
+        if (token.group !== group) {
+          group = token.group;
+          const heading = document.createElement('h3');
+          heading.className = 'colors-group';
+          heading.textContent = group;
+          colorsRows.appendChild(heading);
+        }
+
+        const slug = token.name.replace(/^--/, '');
+        const row = document.createElement('div');
+        row.className = 'color-row';
+
+        const label = document.createElement('label');
+        label.className = 'color-row-label';
+        label.setAttribute('for', 'color-' + slug);
+        label.appendChild(document.createTextNode(token.label));
+        const code = document.createElement('span');
+        code.className = 'color-row-token';
+        code.textContent = token.name;
+        label.appendChild(code);
+
+        // input[type=color] only ever emits #RRGGBB, so the alpha half of a
+        // translucent token gets its own slider and the two are composed into
+        // one rgba() on every edit. Every token carries the pair, so a surface
+        // and an accent behave identically instead of one being a special case.
+        const swatch = document.createElement('input');
+        swatch.type = 'color';
+        swatch.className = 'color-row-swatch';
+        swatch.id = 'color-' + slug;
+
+        const alpha = document.createElement('input');
+        alpha.type = 'range';
+        alpha.className = 'color-row-alpha';
+        alpha.id = 'alpha-' + slug;
+        alpha.min = '0';
+        alpha.max = '100';
+        alpha.step = '1';
+        alpha.setAttribute('aria-label', token.label + ' opacity (percent)');
+
+        const value = document.createElement('input');
+        value.type = 'text';
+        value.className = 'color-row-value';
+        value.id = 'value-' + slug;
+        value.spellcheck = false;
+        value.setAttribute('autocomplete', 'off');
+        value.setAttribute('aria-label', token.label + ' colour value');
+
+        row.appendChild(label);
+        row.appendChild(swatch);
+        row.appendChild(alpha);
+        row.appendChild(value);
+        colorsRows.appendChild(row);
+
+        const entry = { token: token, swatch: swatch, alpha: alpha, value: value };
+        colorRows.push(entry);
+
+        const fromControls = function () {
+          const parts = parseColorParts(swatch.value) || { r: 0, g: 0, b: 0 };
+          const next = composeColorValue(parts.r, parts.g, parts.b, Number(alpha.value) / 100);
+          if (commitColor(entry, next)) value.value = next;
+        };
+
+        swatch.addEventListener('input', fromControls);
+        alpha.addEventListener('input', fromControls);
+        value.addEventListener('change', function () {
+          if (commitColor(entry, value.value)) seedColorRow(entry);
+        });
+      }
+    }
+
+    buildColorRows();
+    repaintTheme();
+
+    /* -------- disclosure behaviour -------- */
+
+    function onColorsKeydown(event) {
+      if (event.key === 'Escape' && !colorsPanel.hidden) {
+        event.preventDefault();
+        closeColors();
+      }
+    }
+
+    function onColorsPointerDown(event) {
+      if (colorsPanel.hidden) return;
+      const target = event.target;
+      if (colorsPanel.contains(target) || colorsBtn.contains(target)) return;
+      // A click elsewhere dismisses the popover but must NOT steal focus back:
+      // the user is already on their way somewhere else.
+      closeColors(false);
+    }
+
+    function openColors() {
+      seedColorRows();
+      showColorError('');
+      colorsPanel.hidden = false;
+      colorsBtn.setAttribute('aria-expanded', 'true');
+      document.addEventListener('keydown', onColorsKeydown, true);
+      document.addEventListener('pointerdown', onColorsPointerDown, true);
+      const first = colorsPanel.querySelector('input, button');
+      if (first && typeof first.focus === 'function') first.focus();
+    }
+
+    function closeColors(restoreFocus) {
+      if (colorsPanel.hidden) return;
+      colorsPanel.hidden = true;
+      colorsBtn.setAttribute('aria-expanded', 'false');
+      showColorError('');
+      document.removeEventListener('keydown', onColorsKeydown, true);
+      document.removeEventListener('pointerdown', onColorsPointerDown, true);
+      if (restoreFocus !== false) colorsBtn.focus();
+    }
+
+    colorsBtn.addEventListener('click', function () {
+      if (colorsPanel.hidden) openColors();
+      else closeColors();
+    });
+
+    $('btn-colors-close').addEventListener('click', function () {
+      closeColors();
+    });
+
+    $('btn-colors-reset').addEventListener('click', function () {
+      themePrefs.clearCustomColors();
+      repaintTheme();
+      seedColorRows();
+      showColorError('');
+    });
+
+    themeBtn.addEventListener('click', function () {
+      themePrefs.setTheme(themePrefs.resolvedTheme() === 'light' ? 'dark' : 'light');
+      repaintTheme();
+    });
 
     contrastBtn.addEventListener('click', function () {
       themePrefs.setHighContrast(!themePrefs.isHighContrast());
-      applyContrast();
+      repaintTheme();
     });
+
+    // While the user has expressed no preference of their own, the OS keeps
+    // the vote — including when it changes mid-session (macOS/Windows auto
+    // dark at sunset). An explicit choice ends the subscription's effect.
+    if (mediaQuery) {
+      try {
+        const lightQuery = mediaQuery('(prefers-color-scheme: light)');
+        if (lightQuery && typeof lightQuery.addEventListener === 'function') {
+          lightQuery.addEventListener('change', function () {
+            if (themePrefs.getTheme() === null) repaintTheme();
+          });
+        }
+      } catch (err) {
+        // No live media-query events: the initial resolution still applied.
+      }
+    }
 
     const baseTitle = document.title;
 

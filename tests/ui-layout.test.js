@@ -18,14 +18,15 @@
  *      #17 (High-Contrast "Code" Mode) are CSS, not JavaScript, so they are
  *      asserted by scanning the <style> block and the markup directly.
  *
- * TOKEN POLICY (the last static test): the design tokens in :root and their
- * overrides in .high-contrast are the single source of truth for colour. A hex
- * literal anywhere else in the stylesheet means a rule has hard-coded a colour
- * that high-contrast mode can no longer swap — which is exactly how a
- * legibility mode rots. Every `#rrggbb` in the stylesheet must therefore sit on
- * a custom-property declaration line. rgba() tints of the existing palette are
- * deliberately NOT policed: they are alpha washes over a token-driven surface,
- * and .high-contrast overrides the handful that matter by name.
+ * TOKEN POLICY (the last static test): the design tokens in :root, their light
+ * twin in .theme-light and their overrides in .high-contrast are the single
+ * source of truth for colour. A hex literal anywhere else in the stylesheet
+ * means a rule has hard-coded a colour that neither a theme swap nor
+ * high-contrast mode can swap — which is exactly how a legibility mode rots.
+ * Every `#rrggbb` in the stylesheet must therefore sit on a custom-property
+ * declaration line inside one of those three blocks. The companion suite
+ * tests/theming.test.js extends the same policy to rgba() and proves the two
+ * palettes are a name-for-name mirror.
  *
  * Node built-ins only: fs, path, assert, vm.
  */
@@ -38,7 +39,11 @@ const { suite } = require('./lib/runner.js');
 const { extractScriptById } = require('./lib/extract.js');
 
 const INDEX = path.resolve(__dirname, '..', 'index.html');
-const EXPECTED_VERSION = '0.6.0';
+/* The blocks allowed to hold a raw colour literal, in stylesheet order. The
+ * two palettes must come before the Code Mode override, which wins on equal
+ * specificity purely by sitting last. */
+const TOKEN_BLOCK_SELECTORS = [':root {', '.theme-light {', '.high-contrast {'];
+const EXPECTED_VERSION = '0.7.0';
 const PREFS_KEY = 'suno_ui_prefs';
 
 /* -------------------------------------------------------------------------- */
@@ -219,7 +224,13 @@ function cssBlock(css, needle, from) {
   return null;
 }
 
-/** Every `#rrggbb`-shaped literal in the stylesheet, with its source line. */
+/**
+ * Every `#rrggbb`-shaped literal in the stylesheet, with its source line AND
+ * its absolute index. The index is what lets a caller decide which block a hit
+ * sits in without searching for its text — two token blocks can legitimately
+ * hold byte-identical declaration lines, and a text search would attribute
+ * both to whichever came first.
+ */
 function hexLiterals(css) {
   const lines = css.split(/\r\n|\r|\n/);
   const re = /#([0-9a-fA-F]{3,8})(?![0-9a-zA-Z_-])/g;
@@ -227,7 +238,7 @@ function hexLiterals(css) {
   let m;
   while ((m = re.exec(css)) !== null) {
     const lineNo = css.slice(0, m.index).split(/\r\n|\r|\n/).length;
-    out.push({ hex: m[0], line: lineNo, text: (lines[lineNo - 1] || '').trim() });
+    out.push({ hex: m[0], line: lineNo, index: m.index, text: (lines[lineNo - 1] || '').trim() });
   }
   return out;
 }
@@ -741,7 +752,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the studio shell release`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the user-configurable theming release`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });
@@ -972,23 +983,24 @@ s.test('the token blocks are the only place a hex colour appears', () => {
   assert.strictEqual(
     strays.length,
     0,
-    'hex colour(s) outside a custom-property declaration — high-contrast mode cannot swap these:\n' +
+    'hex colour(s) outside a custom-property declaration — theming and high-contrast mode cannot swap these:\n' +
       strays.map((h) => `  line ${h.line}: ${h.hex}  in  ${h.text}`).join('\n')
   );
 
-  // …and those declarations must actually live in the two token blocks.
-  const root = cssBlock(css, ':root {');
-  const contrast = cssBlock(css, '.high-contrast {');
-  assert.ok(root && contrast, 'both token blocks must exist');
-  const rootEnd = root.start + root.body.length;
-  const contrastEnd = contrast.start + contrast.body.length;
+  // …and those declarations must actually live in one of the THREE token
+  // blocks: the two palettes (:root = Studio Obsidian, .theme-light = Studio
+  // Daylight) and the .high-contrast override that beats both.
+  const blocks = TOKEN_BLOCK_SELECTORS.map((selector) => {
+    const found = cssBlock(css, selector);
+    assert.ok(found, `token block \`${selector} { … }\` is missing`);
+    return found;
+  });
+
   for (const hit of hits) {
-    const inRoot = css.indexOf(hit.text) >= root.start && css.indexOf(hit.text) <= rootEnd;
-    const inContrast =
-      css.indexOf(hit.text) >= contrast.start && css.indexOf(hit.text) <= contrastEnd;
+    const home = blocks.some((b) => hit.index >= b.start && hit.index <= b.end);
     assert.ok(
-      inRoot || inContrast,
-      `${hit.hex} on line ${hit.line} is declared outside :root and .high-contrast`
+      home,
+      `${hit.hex} on line ${hit.line} is declared outside ${TOKEN_BLOCK_SELECTORS.join(' / ')}`
     );
   }
 });

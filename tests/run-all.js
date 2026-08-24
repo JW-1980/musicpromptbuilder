@@ -25,6 +25,7 @@ const SUITES = [
   { id: 'ai-dissector', script: path.join(TESTS_DIR, 'ai-dissector.test.js') },
   { id: 'ui-layout', script: path.join(TESTS_DIR, 'ui-layout.test.js') },
   { id: 'visualizer', script: path.join(TESTS_DIR, 'visualizer.test.js') },
+  { id: 'theming', script: path.join(TESTS_DIR, 'theming.test.js') },
   { id: 'limiter-eval', script: path.join(TESTS_DIR, 'limiter-eval.js') },
 ];
 
