@@ -52,6 +52,7 @@ const SUITES = [
   { id: 'dsp-worker', script: path.join(TESTS_DIR, 'dsp-worker.test.js') },
   { id: 'audio-capture', script: path.join(TESTS_DIR, 'audio-capture.test.js') },
   { id: 'ai-dissector', script: path.join(TESTS_DIR, 'ai-dissector.test.js') },
+  { id: 'ui-layout', script: path.join(TESTS_DIR, 'ui-layout.test.js') },
   { id: 'limiter-eval', script: path.join(TESTS_DIR, 'limiter-eval.js') },
 ];
 

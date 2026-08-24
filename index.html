@@ -28,14 +28,26 @@
        prompt builders, parseDissectorReply, createToastHost) and the single
        var CLOUD_API_PRESETS registry, which is the ONLY place in this file
        allowed to hold a remote URL (tests/verify-single-file.js enforces it)
-    4. the boot IIFE
+    4. the studio shell (createViewManager, tabKeyTarget, createThemePrefs)
+    5. the boot IIFE
 -->
 <style>
+  /* ==========================================================================
+     DESIGN TOKENS — docs/FDD.md §6 / docs/SUNO-AI-AGENT-DIRECTIVE.md §2.1.
+     This block and the .high-contrast block below are the ONLY places in this
+     file allowed to hold a raw colour literal. Every rule downstream consumes
+     var(--token), which is what lets High-Contrast "Code" Mode (FDD #17) be a
+     pure token swap on the root element instead of a per-element restyle.
+     tests/ui-layout.test.js enforces that rule.
+     ========================================================================== */
   :root {
-    /* Studio Obsidian design tokens — docs/FDD.md §6 (single source of truth) */
     --bg: #0A0A0C;
     --surface: rgba(255, 255, 255, 0.04);
+    /* Nested surface — a card sitting on a card (config rows). */
+    --surface-2: rgba(255, 255, 255, 0.02);
     --surface-border: rgba(255, 255, 255, 0.08);
+    /* Recessed surface — text inputs, code blocks, the tab rail. */
+    --field-bg: rgba(0, 0, 0, 0.28);
     --accent-cyan: #00F0FF;
     --accent-violet: #8A2BE2;
     --warning-amber: #FFB800;
@@ -44,6 +56,19 @@
     --text-dim: rgba(255, 255, 255, 0.55);
     --font-ui: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+    /* Glassmorphism blur (FDD #13). High-contrast mode resolves this to `none`,
+       which is a valid backdrop-filter value, so no rule needs a fallback. */
+    --glass-blur: blur(14px);
+    --focus-ring: 2px;
+    /* One shared "this element is live" language: accent border + outer glow,
+       reused by the active tab, the armed record button and the code-mode
+       toggle instead of each growing its own bespoke effect. */
+    --glow-cyan: 0 0 18px rgba(0, 240, 255, 0.22);
+    --glow-violet: 0 0 18px rgba(138, 43, 226, 0.28);
+    /* View-transition timings (FEATURE-MECHANICS.md §6.1). */
+    --vt-out: 200ms;
+    --vt-in: 280ms;
+    --vt-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   }
 
   * { box-sizing: border-box; }
@@ -66,13 +91,21 @@
 
   .app-header {
     display: flex;
-    align-items: baseline;
-    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px 24px;
     padding: 16px 20px;
     background: var(--surface);
     border: 1px solid var(--surface-border);
     border-radius: 14px;
-    backdrop-filter: blur(14px);
+    backdrop-filter: var(--glass-blur);
+  }
+
+  .app-brand {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
   }
 
   .app-header h1 {
@@ -87,6 +120,88 @@
     font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text-dim);
+  }
+
+  .header-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* --- View tab switcher -------------------------------------------------- */
+
+  /* A roving-tabindex tablist: exactly one tab is in the tab order at a time
+     and Left/Right/Home/End move between them (WAI-ARIA tabs pattern). The
+     roving tabindex and aria-selected are written by createViewManager so the
+     accessible state can never drift from what is actually on screen. */
+  .view-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+  }
+
+  .view-tab {
+    padding: 8px 18px;
+    font: inherit;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+  }
+
+  .view-tab:hover { color: var(--text); }
+
+  .view-tab[aria-selected="true"] {
+    color: var(--accent-cyan);
+    background: linear-gradient(135deg, rgba(0, 240, 255, 0.14), rgba(138, 43, 226, 0.16));
+    border-color: rgba(0, 240, 255, 0.45);
+    box-shadow: var(--glow-cyan);
+  }
+
+  .view-tab:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  /* --- High-contrast "Code" mode toggle (FDD #17) ------------------------- */
+
+  .btn-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    font: inherit;
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  .btn-toggle:hover { color: var(--text); border-color: var(--accent-violet); }
+
+  .btn-toggle[aria-pressed="true"] {
+    color: var(--accent-violet);
+    border-color: var(--accent-violet);
+    box-shadow: var(--glow-violet);
+  }
+
+  .btn-toggle:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
   }
 
   .status-line {
@@ -106,16 +221,75 @@
   main#workspace {
     margin-top: 18px;
     min-height: 320px;
-    padding: 20px;
+    padding: 24px;
     background: var(--surface);
     border: 1px solid var(--surface-border);
     border-radius: 14px;
   }
 
+  /* ==========================================================================
+     TWO-VIEW STUDIO SHELL
+     Exactly one .studio-view is visible at a time; the other carries [hidden].
+     Each view is its OWN named container (docs/ENGINEERING-STANDARD.md §2.2),
+     so the panels inside reflow against the width of the view itself rather
+     than the viewport — which is what will let a view be dropped into a split
+     pane later without a single media query changing.
+     ========================================================================== */
+
+  .studio-view {
+    container-type: inline-size;
+  }
+
+  .studio-view[hidden] { display: none; }
+
+  #view-hum { container-name: hum-view; }
+  #view-editor { container-name: editor-view; }
+
+  /* view-transition-name must be unique among RENDERED elements. Only one view
+     is rendered at a time, so these two names never collide. */
+  #view-hum { view-transition-name: hum-view; }
+  #view-editor { view-transition-name: editor-view; }
+
+  .view-heading {
+    margin: 0 0 4px;
+    font-size: 1.05rem;
+    letter-spacing: 0.01em;
+  }
+
+  .view-intro {
+    margin: 0 0 22px;
+    max-width: 68ch;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--text-dim);
+  }
+
+  /* Single column until the CONTAINER (not the window) is wide enough. */
+  .view-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px 16px;
+    align-items: start;
+  }
+
+  .view-col {
+    min-width: 0;
+    container-type: inline-size;
+  }
+
   /* --- Live capture panel ------------------------------------------------ */
 
   .capture-panel {
-    max-width: 720px;
+    container-name: capture;
+  }
+
+  .metrics-note { margin: 16px 0 0; }
+
+  .metrics-panel {
+    padding: 20px;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
   }
 
   .panel-heading {
@@ -158,7 +332,7 @@
   .btn-record:hover { border-color: var(--accent-cyan); }
 
   .btn-record:focus-visible {
-    outline: 2px solid var(--accent-cyan);
+    outline: var(--focus-ring) solid var(--accent-cyan);
     outline-offset: 2px;
   }
 
@@ -280,14 +454,10 @@
 
   /* --- AI acoustic dissector panel --------------------------------------- */
 
-  .dissector-panel {
-    max-width: 860px;
-    margin-top: 30px;
-    padding-top: 24px;
-    border-top: 1px solid var(--surface-border);
-    container-type: inline-size;
-    container-name: dissector;
-  }
+  /* Both editor columns answer to the SAME container name: whichever column a
+     control lands in, it reflows against that column's own width. */
+  .dissector-panel,
+  .editor-output { container-name: dissector; }
 
   .dissect-input {
     width: 100%;
@@ -297,7 +467,7 @@
     font-size: 0.9rem;
     line-height: 1.5;
     color: var(--text);
-    background: rgba(0, 0, 0, 0.28);
+    background: var(--field-bg);
     border: 1px solid var(--surface-border);
     border-radius: 12px;
     resize: vertical;
@@ -307,7 +477,7 @@
   .dissect-input:focus-visible,
   .field-input:focus-visible,
   .field-select:focus-visible {
-    outline: 2px solid var(--accent-cyan);
+    outline: var(--focus-ring) solid var(--accent-cyan);
     outline-offset: 2px;
   }
 
@@ -348,7 +518,7 @@
     font: inherit;
     font-size: 0.85rem;
     color: var(--text);
-    background: rgba(0, 0, 0, 0.28);
+    background: var(--field-bg);
     border: 1px solid var(--surface-border);
     border-radius: 10px;
   }
@@ -362,7 +532,7 @@
     flex-wrap: wrap;
     gap: 14px;
     padding: 16px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-2);
     border: 1px solid var(--surface-border);
     border-radius: 12px;
   }
@@ -508,7 +678,7 @@
     font-size: 0.74rem;
     line-height: 1.55;
     color: var(--text);
-    background: rgba(0, 0, 0, 0.34);
+    background: var(--field-bg);
     border: 1px solid var(--surface-border);
     border-radius: 10px;
   }
@@ -537,7 +707,7 @@
     border-left: 3px solid var(--accent-cyan);
     border-radius: 10px;
     box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(12px);
+    backdrop-filter: var(--glass-blur);
     animation: toast-in 180ms ease-out;
   }
 
@@ -549,7 +719,38 @@
     to { opacity: 1; transform: none; }
   }
 
-  @container app-shell (max-width: 560px) {
+  /* ==========================================================================
+     CONTAINER QUERIES — docs/ENGINEERING-STANDARD.md §2.2.
+     @container, never @media, for anything layout-related. The only @media
+     rules in this file test prefers-* user preferences, which are properties
+     of the person rather than of the box the component sits in.
+     ========================================================================== */
+
+  /* Hum Studio: capture rig beside the live-analysis rail once the VIEW (not
+     the window) can hold both. Below 880px they stack, which is also what
+     happens inside a narrow split pane on a 4K display. */
+  @container hum-view (min-width: 880px) {
+    .hum-grid { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
+    .metrics-panel .capture-metrics { flex-direction: column; }
+    .metrics-panel .metric { justify-content: space-between; }
+  }
+
+  /* Prompt Editor: dissector form on the left, results on the right. */
+  @container editor-view (min-width: 880px) {
+    .editor-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  }
+
+  /* Nothing has been dissected yet, so there is no second column to make room
+     for — collapse back to one. If :has() is unsupported the whole selector is
+     dropped and the layout simply stays two-column: a safe degradation. */
+  @container editor-view (min-width: 880px) {
+    .editor-grid:not(:has(#dissect-results:not([hidden]))) {
+      grid-template-columns: minmax(0, 1fr);
+      max-width: 780px;
+    }
+  }
+
+  @container capture (max-width: 360px) {
     .capture-controls { align-items: stretch; flex-direction: column; }
     .btn-record { justify-content: center; }
   }
@@ -562,17 +763,149 @@
     .dissect-facts dd { margin-bottom: 10px; }
   }
 
+  /* ==========================================================================
+     VIEW TRANSITIONS — docs/FEATURE-MECHANICS.md §6.1.
+     Contract: leaving the Hum view FADES OUT, entering the Prompt Editor
+     SLIDES UP FROM THE BOTTOM. Two mechanisms, same contract:
+       1. Native document.startViewTransition() — the ::view-transition-old/new
+          pseudo-elements below animate the real snapshots.
+       2. No API? createViewManager swaps the DOM directly and stamps
+          .is-entering on the incoming view, which replays the same motion on
+          the live element. The leaving view cannot be animated in this path —
+          it is already gone — so it simply disappears, which is the documented
+          "fall back gracefully to standard DOM swapping".
+     ========================================================================== */
+
+  @keyframes view-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+
+  @keyframes view-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes view-slide-up {
+    from { opacity: 0; transform: translateY(28px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  ::view-transition-old(hum-view) {
+    animation: view-fade-out var(--vt-out) ease-in both;
+  }
+
+  ::view-transition-new(editor-view) {
+    animation: view-slide-up var(--vt-in) var(--vt-ease) both;
+  }
+
+  ::view-transition-old(editor-view) {
+    animation: view-fade-out var(--vt-out) ease-in both;
+  }
+
+  ::view-transition-new(hum-view) {
+    animation: view-fade-in var(--vt-in) ease-out both;
+  }
+
+  /* Fallback path: same motion, applied to the live element. */
+  .studio-view.is-entering { animation: view-slide-up var(--vt-in) var(--vt-ease) both; }
+  #view-hum.is-entering { animation: view-fade-in var(--vt-in) ease-out both; }
+
+  /* ==========================================================================
+     HIGH-CONTRAST "CODE" MODE — docs/FDD.md #17.
+     A pure token swap on the root element: solid black surfaces, no blur,
+     borders and text pushed to full legibility, thicker focus rings. The
+     accent hues are deliberately NOT changed — cyan and violet already clear
+     WCAG AA on black, and they are how the app encodes meaning.
+     ========================================================================== */
+
+  .high-contrast {
+    --bg: #000000;
+    --surface: #000000;
+    --surface-2: #000000;
+    --field-bg: #000000;
+    --surface-border: rgba(255, 255, 255, 0.45);
+    --text: #FFFFFF;
+    --text-dim: rgba(255, 255, 255, 0.86);
+    --glass-blur: none;
+    --focus-ring: 3px;
+    --glow-cyan: none;
+    --glow-violet: none;
+  }
+
+  /* Belt and braces: --glass-blur already resolves to `none`, but a blur that
+     survived a future edit would defeat the whole mode, so it is killed
+     outright on every glass surface. */
+  .high-contrast .app-header,
+  .high-contrast .toast {
+    backdrop-filter: none;
+  }
+
+  /* The handful of translucent washes that are tints rather than surfaces. */
+  .high-contrast .mic-help,
+  .high-contrast .genre-badge,
+  .high-contrast .source-flag,
+  .high-contrast .toast,
+  .high-contrast .confidence-meter,
+  .high-contrast .view-tabs,
+  .high-contrast .view-tab[aria-selected="true"] {
+    background: var(--bg);
+  }
+
+  .high-contrast .confidence-meter,
+  .high-contrast .genre-badge {
+    border: 1px solid var(--surface-border);
+  }
+
+  /* The selected tab loses its gradient here, so the accent border becomes the
+     only thing marking it — it has to be the accent, not a neutral. */
+  .high-contrast .view-tab[aria-selected="true"] {
+    border: 1px solid var(--accent-cyan);
+  }
+
+  .high-contrast .badge-weight { color: var(--text-dim); }
+  .high-contrast .dissect-input::placeholder { color: var(--text-dim); }
+  .high-contrast .btn-record.is-live { box-shadow: none; }
+
+  /* Opacity is used to encode token weight (FEATURE-MECHANICS.md §7.2); in a
+     legibility mode the text must be readable, so the weight moves to the
+     border and the label goes solid. */
+  .high-contrast .genre-badge { opacity: 1 !important; }
+
   @media (prefers-reduced-motion: reduce) {
     .toast { animation: none; }
     .confidence-fill { transition: none; }
+    /* Motion off means motion off, including the view transition itself. */
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) { animation: none !important; }
+    ::view-transition-old(hum-view),
+    ::view-transition-new(hum-view),
+    ::view-transition-old(editor-view),
+    ::view-transition-new(editor-view) { animation: none !important; }
+    .studio-view.is-entering,
+    #view-hum.is-entering { animation: none; }
+    .view-tab, .btn-toggle { transition: none; }
   }
 </style>
 </head>
 <body>
 <div class="app-shell">
   <header class="app-header">
-    <h1>Suno<span class="accent">Prompt</span> Studio</h1>
-    <span class="app-version" id="app-version"></span>
+    <div class="app-brand">
+      <h1>Suno<span class="accent">Prompt</span> Studio</h1>
+      <span class="app-version" id="app-version"></span>
+    </div>
+    <div class="header-tools">
+      <div class="view-tabs" role="tablist" aria-label="Studio views">
+        <button type="button" role="tab" id="tab-hum" class="view-tab" data-view="hum"
+                aria-controls="view-hum" aria-selected="true" tabindex="0">Hum Studio</button>
+        <button type="button" role="tab" id="tab-editor" class="view-tab" data-view="editor"
+                aria-controls="view-editor" aria-selected="false" tabindex="-1">Prompt Editor</button>
+      </div>
+      <button type="button" id="btn-contrast" class="btn-toggle" aria-pressed="false"
+              aria-label="High-contrast code mode">Code mode</button>
+    </div>
   </header>
   <div class="status-line">
     <span id="status-worker">DSP worker: starting…</span>
@@ -580,8 +913,16 @@
     <span id="status-mic">mic: idle</span>
   </div>
   <main id="workspace" aria-label="SunoPrompt Studio workspace">
-    <section class="capture-panel" aria-labelledby="capture-heading">
-      <h2 id="capture-heading" class="panel-heading">Live audio capture</h2>
+
+  <section id="view-hum" class="studio-view" role="tabpanel" aria-labelledby="tab-hum" tabindex="-1">
+    <h2 class="view-heading">Hum Studio</h2>
+    <p class="view-intro">
+      Capture a melody straight from the microphone and watch the DSP worker resolve it into
+      pitch, level and tempo in real time.
+    </p>
+    <div class="view-grid hum-grid">
+    <section class="view-col capture-panel" aria-labelledby="capture-heading">
+      <h3 id="capture-heading" class="panel-heading">Live audio capture</h3>
       <p class="panel-note">
         Hum, sing or play into your microphone. Time-domain frames are read from a Web Audio
         <code>AnalyserNode</code> on the main thread and transferred to the DSP worker, which
@@ -595,20 +936,6 @@
         </button>
         <span id="capture-readout" class="capture-readout" role="status" aria-live="polite">
           chunks 0 · last ack —
-        </span>
-      </div>
-      <div id="capture-metrics" class="capture-metrics">
-        <span class="metric">
-          <span class="metric-label">pitch</span>
-          <span class="metric-value is-idle" id="metric-pitch">—</span>
-        </span>
-        <span class="metric">
-          <span class="metric-label">rms</span>
-          <span class="metric-value is-idle" id="metric-rms">—</span>
-        </span>
-        <span class="metric">
-          <span class="metric-label">bpm</span>
-          <span class="metric-value is-idle" id="metric-bpm">—</span>
         </span>
       </div>
       <div id="mic-help" class="mic-help" role="region" aria-label="Microphone troubleshooting" hidden>
@@ -649,8 +976,40 @@
       </div>
     </section>
 
-    <section class="dissector-panel" aria-labelledby="dissect-heading">
-      <h2 id="dissect-heading" class="panel-heading">AI acoustic dissector</h2>
+    <section class="view-col metrics-panel" aria-labelledby="metrics-heading">
+      <h3 id="metrics-heading" class="panel-heading">Live analysis</h3>
+      <div id="capture-metrics" class="capture-metrics">
+        <span class="metric">
+          <span class="metric-label">pitch</span>
+          <span class="metric-value is-idle" id="metric-pitch">—</span>
+        </span>
+        <span class="metric">
+          <span class="metric-label">rms</span>
+          <span class="metric-value is-idle" id="metric-rms">—</span>
+        </span>
+        <span class="metric">
+          <span class="metric-label">bpm</span>
+          <span class="metric-value is-idle" id="metric-bpm">—</span>
+        </span>
+      </div>
+      <p class="panel-note metrics-note">
+        One chip per quantity the worker actually measures. A dash means the frame carried no
+        answer — a gated or unvoiced frame has no pitch, and no tempo exists until two onsets
+        have been seen. Nothing here is ever estimated to fill a gap.
+      </p>
+    </section>
+    </div>
+  </section>
+
+  <section id="view-editor" class="studio-view" role="tabpanel" aria-labelledby="tab-editor" tabindex="-1" hidden>
+    <h2 class="view-heading">Prompt Editor</h2>
+    <p class="view-intro">
+      Turn plain language into copyright-safe Suno v5.5 tokens, then read back exactly which
+      traits were matched and how confident the engine is.
+    </p>
+    <div class="view-grid editor-grid">
+    <section class="view-col dissector-panel" aria-labelledby="dissect-heading">
+      <h3 id="dissect-heading" class="panel-heading">AI acoustic dissector</h3>
       <p class="panel-note">
         Describe a vibe, a scene or a reference sound in plain language and it is deconstructed into
         generic, copyright-safe Suno tokens. <strong>Local</strong> runs a deterministic taxonomy
@@ -726,7 +1085,9 @@
       </div>
 
       <p id="dissect-status" class="dissect-status" role="status" aria-live="polite"></p>
+    </section>
 
+    <div class="view-col editor-output">
       <div id="dissect-results" class="dissect-results" hidden>
         <div id="dissect-badges" class="genre-badges"></div>
         <dl class="dissect-facts">
@@ -754,7 +1115,10 @@
           <pre id="dissect-json"></pre>
         </details>
       </div>
-    </section>
+    </div>
+    </div>
+  </section>
+
   </main>
 </div>
 
@@ -1406,7 +1770,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -4035,6 +4399,289 @@ function createToastHost(doc, options) {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Studio shell — two-view switching + lightweight UI preferences             */
+/* -------------------------------------------------------------------------- */
+
+var DEFAULT_VIEW = 'hum';
+var VIEW_ACTIVE_CLASS = 'is-active';
+var VIEW_ENTER_CLASS = 'is-entering';
+var HIGH_CONTRAST_CLASS = 'high-contrast';
+
+/* The ONLY localStorage key this app writes (docs/FEATURE-MECHANICS.md §6.4:
+ * localStorage is strictly reserved for lightweight UI state; presets and
+ * history belong in IndexedDB). */
+var UI_PREFS_KEY = 'suno_ui_prefs';
+
+/**
+ * Roving-tabindex arithmetic for a horizontal tablist (WAI-ARIA tabs pattern).
+ * Kept pure so the keyboard model is testable without a DOM: the caller does
+ * the focusing, this decides where focus should land.
+ *
+ * @param {string} key a KeyboardEvent.key value
+ * @param {number} index index of the tab that currently has focus
+ * @param {number} count how many tabs there are
+ * @returns {number} index to move to, or -1 when the key is not ours to handle
+ */
+function tabKeyTarget(key, index, count) {
+  var n = typeof count === 'number' && isFinite(count) ? Math.floor(count) : 0;
+  if (n <= 0) return -1;
+  var i = typeof index === 'number' && isFinite(index) ? Math.floor(index) : 0;
+  if (i < 0 || i >= n) i = 0;
+  if (key === 'ArrowRight') return (i + 1) % n;
+  if (key === 'ArrowLeft') return (i - 1 + n) % n;
+  if (key === 'Home') return 0;
+  if (key === 'End') return n - 1;
+  return -1;
+}
+
+/**
+ * The two-view studio shell (docs/FEATURE-MECHANICS.md §6.1).
+ *
+ * The manager owns exactly three things per view — the [hidden] attribute, the
+ * .is-active class, and the tab's aria-selected + roving tabindex — so the
+ * accessible state and the painted state are written in ONE place and cannot
+ * drift apart.
+ *
+ * Motion is delegated, never assumed. When `startViewTransition` is supplied
+ * the DOM mutation is handed to it, so the browser captures before/after
+ * snapshots and the ::view-transition-old/-new rules in the stylesheet run.
+ * When it is absent the same mutation runs directly and the incoming view is
+ * stamped .is-entering, replaying the same motion on the live element — the
+ * "fall back gracefully to standard DOM swapping" half of §6.1.
+ *
+ * switchTo() is contracted NEVER to reject and never to throw: an unknown id
+ * resolves to {ok:false}, and a view transition that is skipped or interrupted
+ * mid-flight still resolves, because a cancelled animation is a presentation
+ * detail rather than a failed navigation.
+ *
+ * @param {{
+ *   doc?: Document,
+ *   startViewTransition?: (update: Function) => {finished?: Promise<any>, updateCallbackDone?: Promise<any>},
+ *   onViewChange?: (id: string, previousId: string|null) => void
+ * }} deps
+ * @returns {{register:Function, switchTo:Function, current:Function, ids:Function}}
+ */
+function createViewManager(deps) {
+  var d = deps || {};
+  var doc = d.doc && typeof d.doc.getElementById === 'function' ? d.doc : null;
+  var startViewTransition =
+    typeof d.startViewTransition === 'function' ? d.startViewTransition : null;
+  var onViewChange = typeof d.onViewChange === 'function' ? d.onViewChange : function () {};
+
+  var views = [];
+  var currentId = null;
+
+  function find(id) {
+    for (var i = 0; i < views.length; i += 1) {
+      if (views[i].id === id) return views[i];
+    }
+    return null;
+  }
+
+  function toggleClass(el, name, on) {
+    if (!el || !el.classList) return;
+    if (on) el.classList.add(name);
+    else el.classList.remove(name);
+  }
+
+  function setAttr(el, name, value) {
+    if (el && typeof el.setAttribute === 'function') el.setAttribute(name, value);
+  }
+
+  /**
+   * The single write path for "view X is the visible one now". Idempotent, so
+   * calling it twice (or re-asserting the current view) is always safe.
+   * @param {string} targetId
+   */
+  function paint(targetId) {
+    for (var i = 0; i < views.length; i += 1) {
+      var view = views[i];
+      var active = view.id === targetId;
+      if (view.el) {
+        view.el.hidden = !active;
+        toggleClass(view.el, VIEW_ACTIVE_CLASS, active);
+        // Cleared on every paint so the fallback animation can be re-armed.
+        toggleClass(view.el, VIEW_ENTER_CLASS, false);
+      }
+      if (view.tab) {
+        setAttr(view.tab, 'aria-selected', active ? 'true' : 'false');
+        // Roving tabindex: exactly one tab sits in the page tab order.
+        setAttr(view.tab, 'tabindex', active ? '0' : '-1');
+        toggleClass(view.tab, VIEW_ACTIVE_CLASS, active);
+      }
+    }
+    currentId = targetId;
+  }
+
+  function settled(id, transitioned, changed) {
+    return { ok: true, id: id, transitioned: transitioned === true, changed: changed === true };
+  }
+
+  return {
+    /**
+     * Register a view. `el` and `tab` are resolved from `doc` by the id
+     * convention (#view-<id> / #tab-<id>) when not passed explicitly.
+     *
+     * @param {string} id
+     * @param {object} [el] the view container
+     * @param {object} [tab] the tab button that controls it
+     */
+    register: function (id, el, tab) {
+      if (typeof id !== 'string' || !id) return { ok: false, reason: 'invalid-id' };
+      if (find(id)) return { ok: false, reason: 'duplicate-id', id: id };
+      var element = el || (doc ? doc.getElementById('view-' + id) : null) || null;
+      var tabEl = tab || (doc ? doc.getElementById('tab-' + id) : null) || null;
+      views.push({ id: id, el: element, tab: tabEl });
+      // Adopt whatever the markup already shows as the starting view, so the
+      // first switchTo() re-asserts state instead of animating a change the
+      // user never asked for.
+      if (currentId === null && element && element.hidden !== true) currentId = id;
+      return { ok: true, id: id, el: element, tab: tabEl };
+    },
+
+    /**
+     * @param {string} id
+     * @returns {Promise<{ok:boolean, id:string, transitioned?:boolean, changed?:boolean, reason?:string}>}
+     */
+    switchTo: function (id) {
+      var view = find(id);
+      if (!view) return Promise.resolve({ ok: false, id: id, reason: 'unknown-view' });
+
+      // Already here: re-assert the DOM (cheap, idempotent) so a view adopted
+      // from static markup gets its siblings and tabs synchronised, but run no
+      // transition and fire no change event.
+      if (currentId === id) {
+        paint(id);
+        return Promise.resolve(settled(id, false, false));
+      }
+
+      var previous = currentId;
+      function commit() {
+        paint(id);
+        onViewChange(id, previous);
+      }
+
+      if (startViewTransition) {
+        var transition;
+        try {
+          transition = startViewTransition(commit);
+        } catch (err) {
+          // The API exists but refused the call; the swap still has to happen.
+          commit();
+          return Promise.resolve(settled(id, false, true));
+        }
+        var done = transition && (transition.finished || transition.updateCallbackDone);
+        if (done && typeof done.then === 'function') {
+          return done.then(
+            function () {
+              return settled(id, true, true);
+            },
+            function () {
+              return settled(id, true, true);
+            }
+          );
+        }
+        return Promise.resolve(settled(id, true, true));
+      }
+
+      commit();
+      toggleClass(view.el, VIEW_ENTER_CLASS, true);
+      return Promise.resolve(settled(id, false, true));
+    },
+
+    /** @returns {string|null} id of the visible view */
+    current: function () {
+      return currentId;
+    },
+
+    /** @returns {string[]} registered ids, in registration order */
+    ids: function () {
+      var out = [];
+      for (var i = 0; i < views.length; i += 1) out.push(views[i].id);
+      return out;
+    },
+  };
+}
+
+/**
+ * High-Contrast "Code" Mode preference (docs/FDD.md #17).
+ *
+ * Persists ONE boolean under `suno_ui_prefs` and nothing else — this is the
+ * lightweight-UI-state exception in FEATURE-MECHANICS.md §6.4, not a general
+ * state store. The value is written as JSON so the record can grow later, but
+ * anything unreadable (a truncated write, a value from another app, a string
+ * where an object belongs) degrades silently to the default rather than
+ * throwing during boot.
+ *
+ * @param {{storage?: {getItem:Function, setItem:Function}}} deps
+ * @returns {{isHighContrast:Function, setHighContrast:Function, load:Function}}
+ */
+function createThemePrefs(deps) {
+  var d = deps || {};
+  var storage =
+    d.storage && typeof d.storage.getItem === 'function' && typeof d.storage.setItem === 'function'
+      ? d.storage
+      : null;
+  var highContrast = false;
+
+  function read() {
+    if (!storage) return null;
+    try {
+      return storage.getItem(UI_PREFS_KEY);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function write() {
+    if (!storage) return false;
+    try {
+      storage.setItem(UI_PREFS_KEY, JSON.stringify({ highContrast: highContrast }));
+      return true;
+    } catch (err) {
+      // A full or disabled quota must not break the toggle; the class is
+      // already applied, the choice just will not survive a reload.
+      return false;
+    }
+  }
+
+  return {
+    /**
+     * Re-read the stored preference. Never throws.
+     * @returns {boolean} the value now in effect
+     */
+    load: function () {
+      var raw = read();
+      var parsed = null;
+      if (typeof raw === 'string' && raw) {
+        try {
+          parsed = JSON.parse(raw);
+        } catch (err) {
+          parsed = null;
+        }
+      }
+      highContrast = !!(parsed && typeof parsed === 'object' && parsed.highContrast === true);
+      return highContrast;
+    },
+
+    /** @returns {boolean} */
+    isHighContrast: function () {
+      return highContrast;
+    },
+
+    /**
+     * @param {boolean} next
+     * @returns {boolean} the value now in effect
+     */
+    setHighContrast: function (next) {
+      highContrast = !!next;
+      write();
+      return highContrast;
+    },
+  };
+}
+
 (function () {
   if (typeof document === 'undefined') return;
 
@@ -4137,6 +4784,82 @@ function createToastHost(doc, options) {
       storageStatus.textContent = 'storage: unavailable';
       storageStatus.className = 'err';
     }
+
+    /* ---------------- studio shell: views + UI preferences ---------------- */
+
+    // Touching `localStorage` can throw on access alone (sandboxed iframes,
+    // storage disabled for file:// origins), so the handle is resolved once,
+    // defensively, and a null handle simply means "preferences do not persist".
+    let prefsStorage = null;
+    try {
+      prefsStorage = typeof localStorage !== 'undefined' ? localStorage : null;
+    } catch (err) {
+      prefsStorage = null;
+    }
+
+    const themePrefs = createThemePrefs({ storage: prefsStorage });
+    const contrastBtn = $('btn-contrast');
+
+    function applyContrast() {
+      const on = themePrefs.isHighContrast();
+      // The tokens are overridden on the root element, so every var(--…) in the
+      // stylesheet re-resolves at once — no per-element restyling anywhere.
+      if (on) document.documentElement.classList.add(HIGH_CONTRAST_CLASS);
+      else document.documentElement.classList.remove(HIGH_CONTRAST_CLASS);
+      contrastBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      contrastBtn.setAttribute(
+        'aria-label',
+        on ? 'High-contrast code mode: on' : 'High-contrast code mode: off'
+      );
+    }
+
+    themePrefs.load();
+    applyContrast();
+
+    contrastBtn.addEventListener('click', function () {
+      themePrefs.setHighContrast(!themePrefs.isHighContrast());
+      applyContrast();
+    });
+
+    const baseTitle = document.title;
+
+    const viewManager = createViewManager({
+      doc: document,
+      // Bound to its own document: an unbound reference throws "Illegal
+      // invocation" the moment it is called. Absent in Firefox/Safari today,
+      // where the manager falls back to a direct swap.
+      startViewTransition:
+        typeof document.startViewTransition === 'function'
+          ? document.startViewTransition.bind(document)
+          : undefined,
+      onViewChange: function (id) {
+        const tab = $('tab-' + id);
+        document.title = tab ? baseTitle + ' — ' + tab.textContent.trim() : baseTitle;
+      },
+    });
+
+    const tabs = [$('tab-hum'), $('tab-editor')];
+    viewManager.register('hum', $('view-hum'), tabs[0]);
+    viewManager.register('editor', $('view-editor'), tabs[1]);
+
+    for (let t = 0; t < tabs.length; t += 1) {
+      const tab = tabs[t];
+      const index = t;
+      tab.addEventListener('click', function () {
+        viewManager.switchTo(tab.getAttribute('data-view'));
+      });
+      tab.addEventListener('keydown', function (event) {
+        const target = tabKeyTarget(event.key, index, tabs.length);
+        if (target === -1) return;
+        event.preventDefault();
+        // Automatic activation: with two lightweight panels, moving focus and
+        // switching view are the same gesture (WAI-ARIA tabs pattern).
+        tabs[target].focus();
+        viewManager.switchTo(tabs[target].getAttribute('data-view'));
+      });
+    }
+
+    viewManager.switchTo(DEFAULT_VIEW);
 
     /* ---------------- live capture wiring ---------------- */
 

@@ -2,10 +2,9 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Scaffold the Obsidian Studio CSS layout using CSS Container Queries and native View Transitions.
+- [ ] Implement the 3D WebGL Frequency Visualizer and bind it to the Web Worker's output array.
 
 ## NEXT
-- [ ] Implement the 3D WebGL Frequency Visualizer and bind it to the Web Worker's output array.
 - [ ] Implement Layman Vibe Translators (Scene generator, 3-axis physical sliders, Safe-Mode artist dissector).
 - [ ] Build the Drag-and-Drop Structure Builder (`[Intro]`, `[Chorus]`, etc.) with the `Ctrl+Z` undo/redo stack.
 - [ ] Implement the Live 1,000-Character Limiter, Token Compactor, and Tag Conflict Resolution Engine.
@@ -14,6 +13,7 @@
 - [ ] Run the comprehensive nightly E2E verification across all 50 features and tag `v1.0.0-release`.
 
 ## DONE
+- [x] Scaffold the Obsidian Studio CSS layout using CSS Container Queries and native View Transitions.
 - [x] Build the Tri-Mode Universal AI Dissector (WebGPU/WASM in-browser engine, Free Cloud APIs, and Local Ollama hook). *(Mode 1 = embedded taxonomy engine per ASSUMPTIONS.md — no LLM download possible under the zero-dependency constraint.)*
 - [x] Write the background Web Worker for Autocorrelation ($F_0$) and RMS noise gating to keep the UI thread strictly at 60 FPS.
 - [x] Implement the `WebAudio` and `AnalyserNode` boilerplate in Vanilla JavaScript, ensuring zero external framework dependencies.
