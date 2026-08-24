@@ -2,10 +2,9 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Implement the `WebAudio` and `AnalyserNode` boilerplate in Vanilla JavaScript, ensuring zero external framework dependencies.
+- [ ] Write the background Web Worker for Autocorrelation ($F_0$) and RMS noise gating to keep the UI thread strictly at 60 FPS.
 
 ## NEXT
-- [ ] Write the background Web Worker for Autocorrelation ($F_0$) and RMS noise gating to keep the UI thread strictly at 60 FPS.
 - [ ] Build the Tri-Mode Universal AI Dissector (WebGPU/WASM in-browser engine, Free Cloud APIs, and Local Ollama hook).
 - [ ] Scaffold the Obsidian Studio CSS layout using CSS Container Queries and native View Transitions.
 - [ ] Implement the 3D WebGL Frequency Visualizer and bind it to the Web Worker's output array.
@@ -17,5 +16,6 @@
 - [ ] Run the comprehensive nightly E2E verification across all 50 features and tag `v1.0.0-release`.
 
 ## DONE
+- [x] Implement the `WebAudio` and `AnalyserNode` boilerplate in Vanilla JavaScript, ensuring zero external framework dependencies.
 - [x] Initialize repository structure, create empty `index.html`, and scaffold the Web Worker DSP test harnesses for overnight E2E execution.
 - [x] Master Functional Design (FDD) and Agent Directives finalized and approved.

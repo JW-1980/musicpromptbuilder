@@ -14,3 +14,9 @@
 - **Verification:** `node tests/run-all.js` → 22 passed / 0 failed / 28 todo, exit 0. `npm run test:e2e:nightly` → GREEN, report written. Negative checks confirmed the external-reference scanner actually flags injected CDN refs.
 - **GATE 0 status:** git repo + .gitignore ✅, durable state files ✅, env vars ✅, E2E framework scaffolded ✅. Autocorrelation unit test and limiter unit test remain open — they activate with queue tasks 2–3 and 8 (see `ASSUMPTIONS.md`).
 - **Next:** WebAudio + AnalyserNode boilerplate (moved to `## NOW`).
+
+### [2026-08-24] Task 2 — WebAudio + AnalyserNode capture boilerplate
+- **Implemented (Opus subagent, independently verified):** `createAudioCapture(deps)` dependency-injected capture engine in `#app-main` (state machine idle→requesting→live→stopped, plus denied/unsupported/error with real troubleshooting steps); AnalyserNode fftSize 2048, ~46ms polling (20ms clamp), fresh Float32Array per chunk, monotonic per-session seq (resets on restart); transfers chunks to DSP worker via `{type:'audio-chunk'}` with buffer transfer. Worker now acks chunks (`chunk-ack`), DSP_ENGINE_VERSION/APP_VERSION → 0.2.0. UI: Record toggle (aria-pressed), mic status, chunk/ack readout, `#mic-help` troubleshooting panel (browser padlock, Windows privacy settings, file:// insecure-origin note). New convention documented in index.html header: testable factories are top-level function declarations before a document-guarded boot IIFE.
+- **Tests:** new `tests/audio-capture.test.js` (17 tests + 3 todos, fully faked env via DI — no simulated audio in production paths); dsp-worker suite grew to 14 tests. Registered in run-all + nightly.
+- **Verification:** `node tests/run-all.js` → 43 passed / 0 failed / 31 todo, exit 0. Nightly GREEN.
+- **Next:** YIN autocorrelation + RMS noise gate inside the DSP worker (moved to `## NOW`); this closes the remaining GATE 0 DSP math item and activates the 13 DSP todos.

@@ -21,6 +21,7 @@ const ROOT = path.resolve(TESTS_DIR, '..');
 const SUITES = [
   { id: 'verify-single-file', script: path.join(TESTS_DIR, 'verify-single-file.js') },
   { id: 'dsp-worker', script: path.join(TESTS_DIR, 'dsp-worker.test.js') },
+  { id: 'audio-capture', script: path.join(TESTS_DIR, 'audio-capture.test.js') },
   { id: 'limiter-eval', script: path.join(TESTS_DIR, 'limiter-eval.js') },
 ];
 

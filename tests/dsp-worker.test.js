@@ -133,6 +133,99 @@ s.test('worker source touches no DOM globals (window/document/localStorage)', ()
 });
 
 /* ------------------------------------------------------------------------ *
+ * Capture transport: 'audio-chunk' carries live AnalyserNode frames from the
+ * main thread (see createAudioCapture in #app-main) into the worker.
+ * ------------------------------------------------------------------------ */
+
+s.test('audio-chunk -> chunk-ack echoing seq and the sample count', () => {
+  const w = loadWorkerSandbox(INDEX);
+  const reply = w.send({
+    type: 'audio-chunk',
+    seq: 0,
+    sampleRate: 44100,
+    samples: new Float32Array(2048),
+  });
+  assert.ok(reply, 'worker posted no reply to audio-chunk');
+  assert.strictEqual(reply.type, 'chunk-ack', `expected "chunk-ack", got "${reply.type}"`);
+  assert.strictEqual(reply.seq, 0, 'chunk-ack must echo the chunk seq');
+  assert.strictEqual(reply.samples, 2048, 'chunk-ack must report the received frame count');
+});
+
+s.test('audio-chunk acks preserve monotonic seq across a burst of frames', () => {
+  const w = loadWorkerSandbox(INDEX);
+  for (let seq = 0; seq < 5; seq += 1) {
+    const reply = w.send({
+      type: 'audio-chunk',
+      seq,
+      sampleRate: 48000,
+      samples: new Float32Array(1024),
+    });
+    assert.strictEqual(reply.type, 'chunk-ack');
+    assert.strictEqual(reply.seq, seq, `ack ${seq} echoed seq ${reply.seq}`);
+    assert.strictEqual(reply.samples, 1024);
+  }
+  assert.strictEqual(w.replies.length, 5, `expected 5 acks, got ${w.replies.length}`);
+});
+
+s.test('malformed audio-chunk (missing seq / non-array-like samples) -> error, no throw', () => {
+  const malformed = [
+    { type: 'audio-chunk', sampleRate: 44100, samples: new Float32Array(8) },
+    { type: 'audio-chunk', seq: '0', sampleRate: 44100, samples: new Float32Array(8) },
+    { type: 'audio-chunk', seq: NaN, sampleRate: 44100, samples: new Float32Array(8) },
+    { type: 'audio-chunk', seq: 0, sampleRate: 44100 },
+    { type: 'audio-chunk', seq: 0, sampleRate: 44100, samples: null },
+    { type: 'audio-chunk', seq: 0, sampleRate: 44100, samples: 2048 },
+    { type: 'audio-chunk', seq: 0, sampleRate: 44100, samples: 'not-audio' },
+  ];
+  for (const msg of malformed) {
+    const w = loadWorkerSandbox(INDEX);
+    let reply;
+    assert.doesNotThrow(() => {
+      reply = w.send(msg);
+    }, `worker threw on malformed audio-chunk: ${JSON.stringify(msg)}`);
+    assert.ok(reply, `no reply for malformed audio-chunk: ${JSON.stringify(msg)}`);
+    assert.strictEqual(
+      reply.type,
+      'error',
+      `expected "error" for ${JSON.stringify(msg)}, got "${reply.type}"`
+    );
+    assert.ok(/audio-chunk/.test(reply.error), `error should name audio-chunk; got "${reply.error}"`);
+  }
+});
+
+s.test('Float32Array survives the vm sandbox roundtrip intact', () => {
+  const w = loadWorkerSandbox(INDEX);
+
+  // Host-created typed array -> worker.
+  const host = new Float32Array([0.25, -0.5, 0.75, -1]);
+  const ack = w.send({ type: 'audio-chunk', seq: 7, sampleRate: 44100, samples: host });
+  assert.strictEqual(ack.type, 'chunk-ack');
+  assert.strictEqual(ack.seq, 7);
+  assert.strictEqual(ack.samples, 4);
+
+  // The worker context sees it as a real Float32Array with intact values.
+  w.sandbox.probeSamples = host;
+  assert.strictEqual(w.evaluate('probeSamples instanceof Float32Array'), true, 'lost its Float32Array identity in the sandbox');
+  assert.strictEqual(w.evaluate('probeSamples.length'), 4);
+  assert.strictEqual(w.evaluate('probeSamples[0]'), 0.25);
+  assert.strictEqual(w.evaluate('probeSamples[3]'), -1);
+
+  // Sandbox-created typed array -> back out to the host and through the protocol.
+  const built = w.evaluate('new Float32Array([1, 2, 3])');
+  assert.ok(built instanceof Float32Array, 'sandbox Float32Array is not recognised on the host side');
+  assert.strictEqual(built.length, 3);
+  assert.strictEqual(built[2], 3);
+  const ack2 = w.send({ type: 'audio-chunk', seq: 8, sampleRate: 44100, samples: built });
+  assert.strictEqual(ack2.type, 'chunk-ack');
+  assert.strictEqual(ack2.samples, 3);
+
+  // A structured-clone survivor (plain array) is accepted too.
+  const ack3 = w.send({ type: 'audio-chunk', seq: 9, sampleRate: 44100, samples: [0, 0.1, 0.2] });
+  assert.strictEqual(ack3.type, 'chunk-ack');
+  assert.strictEqual(ack3.samples, 3);
+});
+
+/* ------------------------------------------------------------------------ *
  * TODO: DSP maths. Activate each entry when the corresponding algorithm
  * lands in #dsp-worker-src. Parameters below are the agreed contract
  * (docs/FEATURE-MECHANICS.md / docs/FDD.md) — do not drift from them.

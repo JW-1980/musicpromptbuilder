@@ -13,6 +13,13 @@
   Inline script conventions (parsed by tests/lib/extract.js — keep IDs stable):
     #dsp-worker-src  type="text/js-worker"  — Web Worker source (DSP engine)
     #app-main        (regular script)       — main-thread application code
+
+  #app-main layout convention (tests/audio-capture.test.js depends on it):
+    Testable factories are FUNCTION DECLARATIONS at the top level of #app-main,
+    declared BEFORE the boot IIFE. `function`/`var` bindings become properties of
+    a node:vm context object; top-level `const`/`let` are lexical and do not.
+    The boot IIFE is guarded by `typeof document !== 'undefined'` so the whole
+    block can be evaluated in a DOM-free sandbox without side effects.
 -->
 <style>
   :root {
@@ -76,6 +83,7 @@
   .status-line {
     margin-top: 14px;
     display: flex;
+    flex-wrap: wrap;
     gap: 16px;
     font-family: var(--font-mono);
     font-size: 0.78rem;
@@ -84,6 +92,7 @@
 
   .status-line .ok { color: var(--accent-cyan); }
   .status-line .err { color: var(--danger-crimson); }
+  .status-line .warn { color: var(--warning-amber); }
 
   main#workspace {
     margin-top: 18px;
@@ -92,6 +101,138 @@
     background: var(--surface);
     border: 1px solid var(--surface-border);
     border-radius: 14px;
+  }
+
+  /* --- Live capture panel ------------------------------------------------ */
+
+  .capture-panel {
+    max-width: 720px;
+  }
+
+  .panel-heading {
+    margin: 0 0 6px;
+    font-size: 0.95rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .panel-note {
+    margin: 0 0 16px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .capture-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .btn-record {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    font: inherit;
+    font-size: 0.9rem;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  }
+
+  .btn-record:hover { border-color: var(--accent-cyan); }
+
+  .btn-record:focus-visible {
+    outline: 2px solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  .btn-record .rec-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--danger-crimson);
+    box-shadow: 0 0 0 0 rgba(255, 51, 102, 0.55);
+  }
+
+  .btn-record.is-live {
+    border-color: var(--danger-crimson);
+    box-shadow: 0 0 18px rgba(255, 51, 102, 0.25);
+  }
+
+  .btn-record.is-live .rec-dot { animation: rec-pulse 1.2s ease-out infinite; }
+
+  @keyframes rec-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255, 51, 102, 0.55); }
+    100% { box-shadow: 0 0 0 12px rgba(255, 51, 102, 0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn-record.is-live .rec-dot { animation: none; }
+  }
+
+  .capture-readout {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+
+  .mic-help {
+    margin-top: 18px;
+    padding: 16px 18px;
+    background: rgba(255, 184, 0, 0.06);
+    border: 1px solid rgba(255, 184, 0, 0.35);
+    border-radius: 12px;
+  }
+
+  .mic-help[hidden] { display: none; }
+
+  .mic-help-title {
+    margin: 0 0 8px;
+    font-size: 0.9rem;
+    color: var(--warning-amber);
+  }
+
+  .mic-help-lead {
+    margin: 0 0 10px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  .mic-help-steps {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: var(--text-dim);
+  }
+
+  .mic-help-steps strong { color: var(--text); font-weight: 600; }
+  .mic-help-steps code {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--accent-cyan);
+  }
+
+  .mic-help-detail {
+    margin: 12px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--danger-crimson);
+    word-break: break-word;
+  }
+
+  .mic-help-detail:empty { display: none; }
+
+  @container app-shell (max-width: 560px) {
+    .capture-controls { align-items: stretch; flex-direction: column; }
+    .btn-record { justify-content: center; }
   }
 </style>
 </head>
@@ -104,8 +245,64 @@
   <div class="status-line">
     <span id="status-worker">DSP worker: starting…</span>
     <span id="status-storage">storage: —</span>
+    <span id="status-mic">mic: idle</span>
   </div>
-  <main id="workspace" aria-label="SunoPrompt Studio workspace"></main>
+  <main id="workspace" aria-label="SunoPrompt Studio workspace">
+    <section class="capture-panel" aria-labelledby="capture-heading">
+      <h2 id="capture-heading" class="panel-heading">Live audio capture</h2>
+      <p class="panel-note">
+        Hum, sing or play into your microphone. Time-domain frames are read from a Web Audio
+        <code>AnalyserNode</code> on the main thread and transferred to the DSP worker, which
+        owns all heavy analysis.
+      </p>
+      <div class="capture-controls">
+        <button type="button" id="btn-record" class="btn-record" aria-pressed="false"
+                aria-label="Start microphone capture">
+          <span class="rec-dot" aria-hidden="true"></span>
+          <span id="btn-record-label">Record</span>
+        </button>
+        <span id="capture-readout" class="capture-readout" role="status" aria-live="polite">
+          chunks 0 · last ack —
+        </span>
+      </div>
+      <div id="mic-help" class="mic-help" role="region" aria-label="Microphone troubleshooting" hidden>
+        <h3 class="mic-help-title">Microphone unavailable</h3>
+        <p id="mic-help-lead" class="mic-help-lead"></p>
+        <ol class="mic-help-steps">
+          <li>
+            <strong>Allow the permission prompt.</strong> If it already closed, click the
+            padlock (or the crossed-out microphone) at the left of the address bar, set
+            <strong>Microphone → Allow</strong>, then reload and press Record again.
+          </li>
+          <li>
+            <strong>Clear a remembered block.</strong> Chrome/Edge:
+            <code>Settings → Privacy and security → Site settings → Microphone</code>.
+            Firefox: <code>Settings → Privacy &amp; Security → Permissions → Microphone</code>.
+            Remove this page from the blocked list.
+          </li>
+          <li>
+            <strong>Windows privacy switches.</strong>
+            <code>Settings → Privacy &amp; security → Microphone</code>: turn on
+            <em>Microphone access</em> and <em>Let desktop apps access your microphone</em>.
+            macOS: <code>System Settings → Privacy &amp; Security → Microphone</code>.
+          </li>
+          <li>
+            <strong>Opened from a file?</strong> Chrome and Edge treat <code>file://</code>
+            as an insecure origin and refuse microphone access outright. Serve the folder
+            locally instead — e.g. <code>python -m http.server 8000</code> in this directory,
+            then open <code>localhost:8000/index.html</code>. Firefox does allow
+            <code>file://</code> capture after a prompt.
+          </li>
+          <li>
+            <strong>Check the input device.</strong> Confirm the right microphone is selected
+            and unmuted in the OS sound settings, that no other app holds it exclusively, and
+            that a USB/Bluetooth mic is actually connected before retrying.
+          </li>
+        </ol>
+        <p id="mic-help-detail" class="mic-help-detail"></p>
+      </div>
+    </section>
+  </main>
 </div>
 
 <script id="dsp-worker-src" type="text/js-worker">
@@ -116,12 +313,37 @@
  * here so the UI thread stays at 60 FPS. Pure functions are declared at top
  * level so the Node test harness can execute them in a vm sandbox.
  *
- * Message protocol (main -> worker):  { type: 'ping' }
- * Message protocol (worker -> main):  { type: 'pong', engine: 'dsp', version }
- * DSP analysis messages are added alongside their implementations.
+ * Message protocol (main -> worker):
+ *   { type: 'ping' }
+ *   { type: 'audio-chunk', seq: number, sampleRate: number, samples: Float32Array }
+ * Message protocol (worker -> main):
+ *   { type: 'pong', engine: 'dsp', version }
+ *   { type: 'chunk-ack', seq, samples }      // samples = frame count received
+ *   { type: 'error', error }
+ *
+ * 'audio-chunk' is the transport half of the capture pipeline: it proves the
+ * live AnalyserNode frames arrive intact (and, with a transferable buffer,
+ * without a copy). The analysis reply ({type:'analysis', pitchHz, rms, bpm})
+ * is deliberately NOT emitted yet — no fabricated numbers. It lands together
+ * with the YIN/RMS/onset implementations (PLANNING.md ## NEXT).
  */
 
-const DSP_ENGINE_VERSION = '0.1.0';
+const DSP_ENGINE_VERSION = '0.2.0';
+
+/**
+ * True for anything indexable with a numeric `.length` — Float32Array, plain
+ * Array, or a structured-clone survivor. Strings are rejected on purpose.
+ * @param {*} value
+ */
+function isArrayLike(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof value.length === 'number' &&
+    isFinite(value.length) &&
+    value.length >= 0
+  );
+}
 
 function handleMessage(msg) {
   if (!msg || typeof msg.type !== 'string') {
@@ -130,6 +352,15 @@ function handleMessage(msg) {
   switch (msg.type) {
     case 'ping':
       return { type: 'pong', engine: 'dsp', version: DSP_ENGINE_VERSION };
+    case 'audio-chunk': {
+      if (typeof msg.seq !== 'number' || !isFinite(msg.seq)) {
+        return { type: 'error', error: 'audio-chunk: missing or non-numeric seq' };
+      }
+      if (!isArrayLike(msg.samples)) {
+        return { type: 'error', error: 'audio-chunk: samples must be array-like' };
+      }
+      return { type: 'chunk-ack', seq: msg.seq, samples: msg.samples.length };
+    }
     default:
       return { type: 'error', error: 'unknown message type: ' + msg.type };
   }
@@ -148,11 +379,342 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * SunoPrompt Studio — main-thread application code.
  * The DSP worker is instantiated from the inline #dsp-worker-src block via a
  * Blob URL so the whole app remains a single self-contained file.
+ *
+ * Layout: top-level function declarations first (reachable from a node:vm
+ * sandbox), boot IIFE last and only when a `document` exists.
  */
-(function () {
-  const APP_VERSION = '0.1.0';
 
-  function $(id) { return document.getElementById(id); }
+const APP_VERSION = '0.2.0';
+
+/* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
+ * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
+ * clamped so an exotic sample rate can never spin the timer faster than 50 Hz. */
+const CAPTURE_FFT_SIZE = 2048;
+const MIN_POLL_MS = 20;
+
+/**
+ * Ordered, actually-actionable recovery steps for a microphone that will not
+ * open. Mirrors the static <ol> inside #mic-help so the same guidance is
+ * available to non-DOM callers (status listeners, tests, future logging).
+ * @returns {string[]}
+ */
+function micTroubleshootingSteps() {
+  return [
+    'Allow the browser permission prompt; if it already closed, click the padlock in the address bar and set Microphone to Allow, then reload.',
+    'Clear a remembered block: Chrome/Edge Settings > Privacy and security > Site settings > Microphone; Firefox Settings > Privacy & Security > Permissions > Microphone.',
+    'Windows: Settings > Privacy & security > Microphone — enable "Microphone access" and "Let desktop apps access your microphone". macOS: System Settings > Privacy & Security > Microphone.',
+    'Chrome and Edge block the microphone on file:// pages. Serve this folder over localhost (for example: python -m http.server 8000) and open it from there; Firefox allows file:// after a prompt.',
+    'Check the OS input device: correct microphone selected, not muted, not held exclusively by another app, and physically connected.',
+  ];
+}
+
+/**
+ * Dependency-injected live audio capture engine.
+ *
+ * Real audio only: the caller supplies the real `getUserMedia` and the real
+ * `AudioContext` constructor. Tests inject fakes here instead of the engine
+ * ever synthesising a signal (docs/ENGINEERING-STANDARD.md §1.2).
+ *
+ * State machine:
+ *   idle --start()--> requesting --grant--> live --stop()--> stopped
+ *                                \--NotAllowedError--> denied
+ *                                \--other error------> error
+ *   missing getUserMedia / AudioContext --------------> unsupported
+ *
+ * @param {{
+ *   getUserMedia?: (constraints: any) => Promise<any>,
+ *   AudioContextCtor?: Function,
+ *   onChunk?: (chunk: {seq:number, sampleRate:number, samples:Float32Array, at:number}) => void,
+ *   onStatus?: (state: string, detail?: object) => void,
+ *   intervalScheduler?: (fn: Function, ms: number) => any,
+ *   clearScheduler?: (handle: any) => void,
+ *   now?: () => number
+ * }} deps
+ * @returns {{start:Function, stop:Function, getState:Function, chunkCount:Function, ready:Function}}
+ */
+function createAudioCapture(deps) {
+  const d = deps || {};
+
+  const schedule =
+    typeof d.intervalScheduler === 'function'
+      ? d.intervalScheduler
+      : typeof setInterval === 'function'
+        ? setInterval
+        : null;
+  const unschedule =
+    typeof d.clearScheduler === 'function'
+      ? d.clearScheduler
+      : typeof clearInterval === 'function'
+        ? clearInterval
+        : null;
+  const onChunk = typeof d.onChunk === 'function' ? d.onChunk : function () {};
+  const onStatus = typeof d.onStatus === 'function' ? d.onStatus : function () {};
+  const now =
+    typeof d.now === 'function'
+      ? d.now
+      : function () {
+          return Date.now();
+        };
+
+  let state = 'idle';
+  let seq = 0;
+  let chunks = 0;
+  let timer = null;
+  let stream = null;
+  let ctx = null;
+  let analyser = null;
+  let source = null;
+  let frame = null;
+  let sampleRate = 0;
+  let readyPromise = null;
+  let settleReady = null;
+
+  function setState(next, detail) {
+    state = next;
+    onStatus(next, detail);
+  }
+
+  function settle() {
+    const fn = settleReady;
+    settleReady = null;
+    if (fn) fn(state);
+  }
+
+  function describeError(err) {
+    const name =
+      (err && typeof err.name === 'string' && err.name) ||
+      (err && err.constructor && err.constructor.name) ||
+      'Error';
+    const message =
+      (err && typeof err.message === 'string' && err.message) || String(err === undefined ? 'unknown error' : err);
+    return { name: name, message: message };
+  }
+
+  function stopTracks(mediaStream) {
+    if (!mediaStream) return;
+    let tracks = null;
+    try {
+      if (typeof mediaStream.getTracks === 'function') tracks = mediaStream.getTracks();
+      else if (typeof mediaStream.getAudioTracks === 'function') tracks = mediaStream.getAudioTracks();
+    } catch (err) {
+      tracks = null;
+    }
+    if (!tracks || typeof tracks.length !== 'number') return;
+    for (let i = 0; i < tracks.length; i += 1) {
+      const track = tracks[i];
+      if (track && typeof track.stop === 'function') {
+        try {
+          track.stop();
+        } catch (err) {
+          /* a track already ended by the OS must not break teardown */
+        }
+      }
+    }
+  }
+
+  function teardown() {
+    if (timer !== null) {
+      if (typeof unschedule === 'function') {
+        try {
+          unschedule(timer);
+        } catch (err) {
+          /* ignore */
+        }
+      }
+      timer = null;
+    }
+    if (source && typeof source.disconnect === 'function') {
+      try {
+        source.disconnect();
+      } catch (err) {
+        /* ignore */
+      }
+    }
+    if (analyser && typeof analyser.disconnect === 'function') {
+      try {
+        analyser.disconnect();
+      } catch (err) {
+        /* ignore */
+      }
+    }
+    stopTracks(stream);
+    if (ctx && typeof ctx.close === 'function' && ctx.state !== 'closed') {
+      try {
+        ctx.close();
+      } catch (err) {
+        /* closing an already-closing context throws in some engines */
+      }
+    }
+    stream = null;
+    ctx = null;
+    analyser = null;
+    source = null;
+    frame = null;
+  }
+
+  /** One polling tick: copy the analyser's time-domain frame and emit it. */
+  function poll() {
+    if (state !== 'live' || !analyser || !frame) return;
+    try {
+      analyser.getFloatTimeDomainData(frame);
+    } catch (err) {
+      const info = describeError(err);
+      teardown();
+      setState('error', { name: info.name, message: info.message, phase: 'poll' });
+      return;
+    }
+    // A FRESH buffer per chunk: the old one is transferred to the worker and
+    // detached, and the analyser must never write into a buffer in flight.
+    const samples = new Float32Array(frame);
+    const chunk = { seq: seq, sampleRate: sampleRate, samples: samples, at: now() };
+    seq += 1;
+    chunks += 1;
+    onChunk(chunk);
+  }
+
+  function onGrant(mediaStream) {
+    if (state !== 'requesting') {
+      // stop() landed while the permission prompt was open — release the mic.
+      stopTracks(mediaStream);
+      settle();
+      return;
+    }
+    stream = mediaStream;
+    try {
+      ctx = new d.AudioContextCtor();
+      source = ctx.createMediaStreamSource(stream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = CAPTURE_FFT_SIZE;
+      source.connect(analyser);
+
+      const size =
+        typeof analyser.fftSize === 'number' && analyser.fftSize > 0
+          ? analyser.fftSize | 0
+          : CAPTURE_FFT_SIZE;
+      sampleRate = typeof ctx.sampleRate === 'number' && ctx.sampleRate > 0 ? ctx.sampleRate : 44100;
+      frame = new Float32Array(size);
+
+      const pollMs = Math.max(MIN_POLL_MS, Math.round((size / sampleRate) * 1000));
+      if (typeof schedule !== 'function') {
+        throw new Error('no interval scheduler available');
+      }
+      timer = schedule(poll, pollMs);
+      setState('live', { sampleRate: sampleRate, fftSize: size, pollMs: pollMs });
+    } catch (err) {
+      const info = describeError(err);
+      teardown();
+      setState('error', {
+        name: info.name,
+        message: info.message,
+        phase: 'audio-graph',
+        steps: micTroubleshootingSteps(),
+      });
+    }
+    settle();
+  }
+
+  function onReject(err) {
+    if (state !== 'requesting') {
+      settle();
+      return;
+    }
+    const info = describeError(err);
+    teardown();
+    if (info.name === 'NotAllowedError' || info.name === 'PermissionDeniedError') {
+      setState('denied', {
+        name: info.name,
+        message: info.message,
+        reason: 'permission-denied',
+        steps: micTroubleshootingSteps(),
+      });
+    } else {
+      setState('error', {
+        name: info.name,
+        message: info.message,
+        phase: 'getUserMedia',
+        steps: micTroubleshootingSteps(),
+      });
+    }
+    settle();
+  }
+
+  function start() {
+    if (state !== 'idle' && state !== 'stopped') return state;
+
+    const hasGum = typeof d.getUserMedia === 'function';
+    const hasCtx = typeof d.AudioContextCtor === 'function';
+    if (!hasGum || !hasCtx) {
+      const missing = [];
+      if (!hasGum) missing.push('getUserMedia');
+      if (!hasCtx) missing.push('AudioContext');
+      setState('unsupported', {
+        reason: 'missing-api',
+        missing: missing,
+        message:
+          'This browser does not expose ' +
+          missing.join(' or ') +
+          '. Live capture needs both navigator.mediaDevices.getUserMedia and the Web Audio API.',
+        steps: micTroubleshootingSteps(),
+      });
+      readyPromise = Promise.resolve(state);
+      return state;
+    }
+
+    // A restart is a NEW capture session: seq restarts at 0 so the worker's
+    // ack stream is unambiguous per session (see tests/audio-capture.test.js).
+    seq = 0;
+    chunks = 0;
+    readyPromise = new Promise(function (resolve) {
+      settleReady = resolve;
+    });
+    setState('requesting', { message: 'Waiting for microphone permission…' });
+
+    let request;
+    try {
+      request = d.getUserMedia({ audio: true, video: false });
+    } catch (err) {
+      onReject(err);
+      return state;
+    }
+    if (!request || typeof request.then !== 'function') {
+      onReject(new Error('getUserMedia did not return a promise'));
+      return state;
+    }
+    request.then(onGrant, onReject);
+    return state;
+  }
+
+  function stop() {
+    const was = state;
+    teardown();
+    if (was === 'stopped') return state;
+    setState('stopped', { chunks: chunks, lastSeq: seq - 1 });
+    settle();
+    return state;
+  }
+
+  return {
+    start: start,
+    stop: stop,
+    getState: function () {
+      return state;
+    },
+    chunkCount: function () {
+      return chunks;
+    },
+    /** Resolves with the state once the pending permission request settles. */
+    ready: function () {
+      return readyPromise || Promise.resolve(state);
+    },
+  };
+}
+
+(function () {
+  if (typeof document === 'undefined') return;
+
+  function $(id) {
+    return document.getElementById(id);
+  }
 
   function spawnDspWorker() {
     const src = $('dsp-worker-src').textContent;
@@ -165,27 +727,55 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
   function boot() {
     $('app-version').textContent = 'v' + APP_VERSION;
 
+    // Element handles and counters are resolved first: the worker's onmessage
+    // handler below touches the capture readout, so nothing may sit in a
+    // temporal dead zone by the time a message arrives.
     const workerStatus = $('status-worker');
+    const storageStatus = $('status-storage');
+    const micStatus = $('status-mic');
+    const recordBtn = $('btn-record');
+    const recordLabel = $('btn-record-label');
+    const readout = $('capture-readout');
+    const micHelp = $('mic-help');
+    const micHelpLead = $('mic-help-lead');
+    const micHelpDetail = $('mic-help-detail');
+
+    let dspWorker = null;
+    let sentChunks = 0;
+    let lastAck = null;
+
+    function renderReadout() {
+      readout.textContent =
+        'chunks ' + sentChunks + ' · last ack ' + (lastAck === null ? '—' : lastAck);
+    }
+
     try {
-      const worker = spawnDspWorker();
+      dspWorker = spawnDspWorker();
       const timeout = setTimeout(function () {
         workerStatus.textContent = 'DSP worker: no response';
         workerStatus.className = 'err';
       }, 3000);
-      worker.onmessage = function (e) {
-        if (e.data && e.data.type === 'pong') {
+      dspWorker.onmessage = function (e) {
+        const data = e.data;
+        if (!data) return;
+        if (data.type === 'pong') {
           clearTimeout(timeout);
-          workerStatus.textContent = 'DSP worker: online (v' + e.data.version + ')';
+          workerStatus.textContent = 'DSP worker: online (v' + data.version + ')';
           workerStatus.className = 'ok';
+        } else if (data.type === 'chunk-ack') {
+          lastAck = data.seq;
+          renderReadout();
+        } else if (data.type === 'error') {
+          workerStatus.textContent = 'DSP worker: ' + data.error;
+          workerStatus.className = 'err';
         }
       };
-      worker.postMessage({ type: 'ping' });
+      dspWorker.postMessage({ type: 'ping' });
     } catch (err) {
       workerStatus.textContent = 'DSP worker: failed — ' + err.message;
       workerStatus.className = 'err';
     }
 
-    const storageStatus = $('status-storage');
     try {
       localStorage.setItem('suno_storage_probe', '1');
       localStorage.removeItem('suno_storage_probe');
@@ -195,6 +785,128 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
       storageStatus.textContent = 'storage: unavailable';
       storageStatus.className = 'err';
     }
+
+    /* ---------------- live capture wiring ---------------- */
+
+    const STATE_LABEL = {
+      idle: 'idle',
+      requesting: 'requesting permission…',
+      live: 'live',
+      stopped: 'stopped',
+      denied: 'permission denied',
+      unsupported: 'unsupported browser',
+      error: 'error',
+    };
+
+    function showHelp(state, detail) {
+      if (state === 'unsupported') {
+        micHelpLead.textContent =
+          (detail && detail.message) ||
+          'This browser does not expose getUserMedia or the Web Audio API.';
+      } else if (state === 'denied') {
+        micHelpLead.textContent =
+          'The browser refused microphone access, so nothing was captured. Work through these steps, then press Record again:';
+      } else {
+        micHelpLead.textContent =
+          'The microphone could not be opened. Work through these steps, then press Record again:';
+      }
+      micHelpDetail.textContent =
+        detail && detail.name ? detail.name + ': ' + (detail.message || '') : '';
+      micHelp.hidden = false;
+    }
+
+    function hideHelp() {
+      micHelp.hidden = true;
+      micHelpDetail.textContent = '';
+    }
+
+    function renderMic(state, detail) {
+      micStatus.textContent = 'mic: ' + (STATE_LABEL[state] || state);
+      if (state === 'live') micStatus.className = 'ok';
+      else if (state === 'denied' || state === 'error' || state === 'unsupported') micStatus.className = 'err';
+      else if (state === 'requesting') micStatus.className = 'warn';
+      else micStatus.className = '';
+
+      const busy = state === 'live' || state === 'requesting';
+      recordBtn.setAttribute('aria-pressed', state === 'live' ? 'true' : 'false');
+      recordBtn.setAttribute(
+        'aria-label',
+        busy ? 'Stop microphone capture' : 'Start microphone capture'
+      );
+      recordLabel.textContent = busy ? 'Stop' : 'Record';
+      if (state === 'live') recordBtn.classList.add('is-live');
+      else recordBtn.classList.remove('is-live');
+
+      const securityBlocked = state === 'error' && detail && detail.name === 'SecurityError';
+      if (state === 'denied' || state === 'unsupported' || securityBlocked) showHelp(state, detail);
+      else hideHelp();
+    }
+
+    const hasGetUserMedia =
+      typeof navigator !== 'undefined' &&
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getUserMedia === 'function';
+    const AudioCtor =
+      (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || null;
+
+    function makeCapture() {
+      return createAudioCapture({
+        getUserMedia: hasGetUserMedia
+          ? function (constraints) {
+              return navigator.mediaDevices.getUserMedia(constraints);
+            }
+          : undefined,
+        AudioContextCtor: AudioCtor || undefined,
+        onChunk: function (chunk) {
+          sentChunks += 1;
+          renderReadout();
+          if (!dspWorker) return;
+          try {
+            // Transfer the buffer: zero-copy handoff, and the engine already
+            // allocated a fresh frame for the next poll.
+            dspWorker.postMessage(
+              {
+                type: 'audio-chunk',
+                seq: chunk.seq,
+                sampleRate: chunk.sampleRate,
+                samples: chunk.samples,
+              },
+              [chunk.samples.buffer]
+            );
+          } catch (err) {
+            workerStatus.textContent = 'DSP worker: chunk post failed — ' + err.message;
+            workerStatus.className = 'err';
+          }
+        },
+        onStatus: function (state, detail) {
+          if (state === 'requesting') {
+            sentChunks = 0;
+            lastAck = null;
+            renderReadout();
+          }
+          renderMic(state, detail);
+        },
+      });
+    }
+
+    let capture = makeCapture();
+
+    recordBtn.addEventListener('click', function () {
+      const state = capture.getState();
+      if (state === 'live' || state === 'requesting') {
+        capture.stop();
+        return;
+      }
+      // 'denied' / 'error' / 'unsupported' are terminal for an engine instance
+      // (start() is a documented no-op outside idle/stopped), so a retry after
+      // the user has fixed the permission gets a fresh engine — that is what
+      // "press Record again" in #mic-help actually does.
+      if (state !== 'idle' && state !== 'stopped') capture = makeCapture();
+      capture.start();
+    });
+
+    renderReadout();
+    renderMic(capture.getState());
   }
 
   if (document.readyState === 'loading') {
