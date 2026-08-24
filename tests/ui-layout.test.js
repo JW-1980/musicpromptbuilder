@@ -43,7 +43,7 @@ const INDEX = path.resolve(__dirname, '..', 'index.html');
  * two palettes must come before the Code Mode override, which wins on equal
  * specificity purely by sitting last. */
 const TOKEN_BLOCK_SELECTORS = [':root {', '.theme-light {', '.high-contrast {'];
-const EXPECTED_VERSION = '0.7.0';
+const EXPECTED_VERSION = '0.8.0';
 const PREFS_KEY = 'suno_ui_prefs';
 
 /* -------------------------------------------------------------------------- */
@@ -752,7 +752,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the user-configurable theming release`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the Layman Vibe Translators release`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });

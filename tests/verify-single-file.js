@@ -421,6 +421,30 @@ s.test('starts with <!DOCTYPE html>', () => {
   if (!scan.hasDoctype) throw new Error('no leading <!DOCTYPE html> declaration');
 });
 
+s.test('the bundle is plain text — no raw control bytes anywhere', () => {
+  /*
+   * A raw C0 control byte (a NUL smuggled in by an editor or a generation
+   * step, most often) makes index.html "binary" to grep, diff and every other
+   * text tool — and the HTML tokenizer silently rewrites U+0000 to U+FFFD, so
+   * a string literal holding one means something DIFFERENT in the browser
+   * than it does on disk. Control characters that are genuinely wanted inside
+   * a JS string belong there as an escape sequence ('\u0000'), which is plain
+   * ASCII in the file. Tab, LF and CR are the only bytes below 0x20 a source
+   * file has any business containing.
+   */
+  const buf = fs.readFileSync(INDEX);
+  const bad = [];
+  for (let i = 0; i < buf.length; i += 1) {
+    const byte = buf[i];
+    const control = (byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d) || byte === 0x7f;
+    if (!control) continue;
+    const line = buf.slice(0, i).toString('utf8').split('\n').length;
+    bad.push(`  line ${line}: byte 0x${byte.toString(16).padStart(2, '0')} at offset ${i}`);
+    if (bad.length >= 10) break;
+  }
+  if (bad.length) throw new Error(`${bad.length} raw control byte(s):\n${bad.join('\n')}`);
+});
+
 s.test('contains inline script #dsp-worker-src', () => {
   if (!scan.scriptIds.includes('dsp-worker-src')) {
     throw new Error(`no <script id="dsp-worker-src">; ids present: ${scan.scriptIds.join(', ') || '(none)'}`);

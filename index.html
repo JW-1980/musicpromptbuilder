@@ -28,13 +28,17 @@
        prompt builders, parseDissectorReply, createToastHost) and the single
        var CLOUD_API_PRESETS registry, which is the ONLY place in this file
        allowed to hold a remote URL (tests/verify-single-file.js enforces it)
-    4. the studio shell (createViewManager, tabKeyTarget, the theming layer —
+    4. the Layman Vibe Translators (FDD Domain C) — createPromptState, the
+       shared working set every translator writes into, plus the pure
+       sliderTags / sliderValueText (FEATURE-MECHANICS §4), matchScenes and
+       the Safe-Mode sanitizer (sanitizeSafeMode and its vocabulary helpers)
+    5. the studio shell (createViewManager, tabKeyTarget, the theming layer —
        THEMABLE_TOKENS, normalizeColorValue, parseColorParts,
        composeColorValue, createThemePrefs, applyThemeState)
-    5. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
+    6. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
        the pure mesh/level/colour helpers (buildRibbonGeometry, downsampleBuffer,
        valenceToColor, pushRibbonRow, perspectiveMatrix4) plus createRibbonRenderer
-    6. the boot IIFE
+    7. the boot IIFE
 -->
 <style>
   /* ==========================================================================
@@ -1017,6 +1021,229 @@
     border-radius: 10px;
   }
 
+  /* --- Layman vibe translators (docs/FDD.md Domain C) --------------------- */
+
+  /* One card treatment for all three translator panels, borrowed from the
+     metrics rail: a new card reads as a sibling of the panels that were
+     already here rather than as a new species of box. */
+  .vibe-card {
+    padding: 20px;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+  }
+
+  /* They answer to the SAME container name as the dissector columns, so every
+     control in this view reflows against its own column width. */
+  .scene-panel,
+  .slider-panel,
+  .draft-panel { container-name: dissector; }
+
+  .vibe-grid { margin-top: 24px; }
+
+  /* The shared pill. A span for a read-only tag, a <button> when it does
+     something — the button rule below adds the affordances rather than the
+     base rule promising them. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+  }
+
+  button.chip {
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+
+  button.chip:hover { color: var(--text); border-color: var(--accent-cyan); }
+
+  button.chip:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  .slider-chip { color: var(--accent-cyan); background: var(--tint-cyan); border-color: var(--tint-cyan-border); }
+
+  .tag-chip-x {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  /* Scene to sound (FDD #22) */
+
+  .scene-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .scene-quick {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Physical feel (FDD #23) */
+
+  .slider-row + .slider-row { margin-top: 18px; }
+
+  .slider-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .slider-name {
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .slider-value {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--accent-cyan);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .slider-input {
+    width: 100%;
+    margin: 10px 0 0;
+    accent-color: var(--accent-cyan);
+  }
+
+  .slider-input:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 4px;
+  }
+
+  .slider-tags {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .slider-empty {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+  }
+
+  /* Add-to-prompt row on the dissector results (FDD #24) */
+
+  .dissect-add-row {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .dissect-add-row[hidden] { display: none; }
+
+  .dissect-safe-note {
+    margin: 12px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--warning-amber);
+  }
+
+  .dissect-safe-note[hidden] { display: none; }
+
+  /* A badge Safe Mode refuses to hand to the prompt still SHOWS — hiding it
+     would misreport what the engine returned. It is struck through, dimmed and
+     disabled instead, so the refusal is visible rather than silent. */
+  .genre-badge.is-unsafe {
+    color: var(--text-dim);
+    background: var(--field-bg);
+    border-style: dashed;
+    text-decoration: line-through;
+    cursor: not-allowed;
+  }
+
+  /* Prompt draft (the seam the Structure Builder and the limiter attach to) */
+
+  .draft-panel { margin-top: 24px; }
+
+  .draft-group + .draft-group { margin-top: 16px; }
+
+  .draft-group-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .draft-group-name {
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .draft-chips {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .draft-empty {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .draft-empty[hidden] { display: none; }
+
+  .draft-text {
+    margin: 16px 0 0;
+    padding: 14px;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.6;
+    color: var(--text);
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .draft-text[hidden] { display: none; }
+
+  .draft-foot {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  /* A plain character count. It carries no budget verdict: the 1,000-character
+     gauge (FDD #67) is its own task and nothing here trims anything. */
+  .draft-counts {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* --- Toasts (FEATURE-MECHANICS.md §7.3 step 4) -------------------------- */
 
   .toast-host {
@@ -1072,6 +1299,10 @@
   /* Prompt Editor: dissector form on the left, results on the right. */
   @container editor-view (min-width: 880px) {
     .editor-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    /* Scene and sliders side by side; the draft spans the full view under
+       them, because a prompt draft that has to wrap in a half-width column
+       stops being readable at exactly the length it starts to matter. */
+    .vibe-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   }
 
   /* Nothing has been dissected yet, so there is no second column to make room
@@ -1095,6 +1326,9 @@
     .config-row .field { width: 100%; }
     .dissect-facts { grid-template-columns: 1fr; gap: 2px 0; }
     .dissect-facts dd { margin-bottom: 10px; }
+    .scene-row { flex-direction: column; align-items: stretch; }
+    .scene-row .field { width: 100%; }
+    .draft-foot { align-items: stretch; flex-direction: column; }
   }
 
   /* ==========================================================================
@@ -1210,12 +1444,14 @@
   .high-contrast .colors-note,
   .high-contrast .confidence-meter,
   .high-contrast .view-tabs,
+  .high-contrast .slider-chip,
   .high-contrast .view-tab[aria-selected="true"] {
     background: var(--bg);
   }
 
   .high-contrast .confidence-meter,
   .high-contrast .colors-note,
+  .high-contrast .slider-chip,
   .high-contrast .genre-badge {
     border: 1px solid var(--surface-border);
   }
@@ -1225,6 +1461,11 @@
   .high-contrast .view-tab[aria-selected="true"] {
     border: 1px solid var(--accent-cyan);
   }
+
+  /* The dashed edge is not decoration — it is the second, non-colour signal
+     that Safe Mode is holding this token back, so it survives the mode that
+     flattens every badge border to the same solid rule above. */
+  .high-contrast .genre-badge.is-unsafe { border-style: dashed; }
 
   .high-contrast .badge-weight { color: var(--text-dim); }
   .high-contrast .dissect-input::placeholder { color: var(--text-dim); }
@@ -1519,6 +1760,19 @@
           <dt>Mood</dt><dd id="dissect-mood">—</dd>
           <dt>Era</dt><dd id="dissect-era">—</dd>
         </dl>
+        <!-- FDD #24: every one of these routes its group through
+             sanitizeSafeMode() first, so a name the user typed can never
+             round-trip out of a result and into the copied prompt. -->
+        <div id="dissect-add-row" class="dissect-add-row" role="group"
+             aria-label="Add dissection results to the prompt draft">
+          <button type="button" id="btn-add-genres" class="btn-mini">Add genres</button>
+          <button type="button" id="btn-add-instruments" class="btn-mini">Add instruments</button>
+          <button type="button" id="btn-add-moods" class="btn-mini">Add moods</button>
+          <button type="button" id="btn-add-era" class="btn-mini">Add era</button>
+          <button type="button" id="btn-add-all" class="btn-mini">Add all</button>
+        </div>
+        <p id="dissect-safe-note" class="dissect-safe-note" role="status" aria-live="polite" hidden></p>
+
         <div class="confidence-block">
           <div class="confidence-head">
             <span>Confidence</span>
@@ -1540,6 +1794,91 @@
       </div>
     </div>
     </div>
+
+    <!-- Layman Vibe Translators (docs/FDD.md Domain C). Three ways in, one
+         working set out: everything below writes into the same prompt state
+         the draft card at the end renders. -->
+    <div class="view-grid vibe-grid">
+    <section class="view-col vibe-card scene-panel" aria-labelledby="scene-heading">
+      <h3 id="scene-heading" class="panel-heading">Scene to sound</h3>
+      <p class="panel-note">
+        Name a place or a moment and the embedded scene table answers with the
+        production tokens that make it sound like that. If nothing matches, nothing
+        is added — no plausible-looking guess is invented for you.
+      </p>
+      <div class="scene-row">
+        <span class="field field-grow">
+          <label class="field-label" for="scene-input">Scene</label>
+          <input type="text" id="scene-input" class="field-input" list="scene-options"
+                 autocomplete="off" spellcheck="false" placeholder="e.g. abandoned warehouse">
+        </span>
+        <button type="button" id="btn-scene-add" class="btn-mini">Add scene</button>
+      </div>
+      <datalist id="scene-options"></datalist>
+      <div id="scene-quick" class="scene-quick" role="group" aria-label="Scene triggers"></div>
+      <p id="scene-status" class="dissect-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="view-col vibe-card slider-panel" aria-labelledby="sliders-heading">
+      <h3 id="sliders-heading" class="panel-heading">Physical feel</h3>
+      <p class="panel-note">
+        Three physical axes, no jargon. The middle band (30–70) deliberately injects
+        nothing and leaves the vote with your genre; past either end it adds the exact
+        tag set from the mechanics spec. Moving a slider REPLACES that axis's tags
+        rather than stacking a second set on top.
+      </p>
+
+      <div class="slider-row">
+        <div class="slider-head">
+          <label class="slider-name" for="slider-energy">Energy</label>
+          <span class="slider-value" id="slider-energy-value">50</span>
+        </div>
+        <input type="range" id="slider-energy" class="slider-input" min="0" max="100" step="1"
+               value="50" aria-valuetext="50 of 100 — neutral: adds no energy tags">
+        <div class="slider-tags" id="slider-energy-tags"></div>
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-head">
+          <label class="slider-name" for="slider-warmth">Warmth</label>
+          <span class="slider-value" id="slider-warmth-value">50</span>
+        </div>
+        <input type="range" id="slider-warmth" class="slider-input" min="0" max="100" step="1"
+               value="50" aria-valuetext="50 of 100 — neutral: adds no warmth tags">
+        <div class="slider-tags" id="slider-warmth-tags"></div>
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-head">
+          <label class="slider-name" for="slider-density">Density</label>
+          <span class="slider-value" id="slider-density-value">50</span>
+        </div>
+        <input type="range" id="slider-density" class="slider-input" min="0" max="100" step="1"
+               value="50" aria-valuetext="50 of 100 — neutral: adds no density tags">
+        <div class="slider-tags" id="slider-density-tags"></div>
+      </div>
+    </section>
+    </div>
+
+    <section class="view-col vibe-card draft-panel" aria-labelledby="draft-heading">
+      <h3 id="draft-heading" class="panel-heading">Prompt draft</h3>
+      <p class="panel-note">
+        Everything the translators have contributed, grouped by what it describes.
+        Remove a chip, clear a group, or copy the draft as one comma-separated Suno
+        style prompt.
+      </p>
+      <p id="draft-empty" class="draft-empty">
+        Nothing added yet — dissect a description, match a scene, or move a slider.
+      </p>
+      <div id="draft-groups" class="draft-groups"></div>
+      <p id="draft-text" class="draft-text" hidden></p>
+      <div class="draft-foot">
+        <span id="draft-counts" class="draft-counts" role="status" aria-live="polite">
+          0 tags · 0 characters
+        </span>
+        <button type="button" id="btn-draft-copy" class="btn-mini">Copy draft</button>
+      </div>
+    </section>
   </section>
 
   </main>
@@ -2435,7 +2774,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -2876,7 +3215,7 @@ function createAudioCapture(deps) {
  *   cinematic score) or when a scene/era does not imply a tempo.
  */
 var MUSIC_KB = {
-  version: '1.0.0',
+  version: '1.1.0',
   genres: [
     {
       id: 'techno',
@@ -3611,6 +3950,96 @@ var MUSIC_KB = {
       bpm: null,
       instruments: ['soaring french horn', 'wide open wind texture', 'triumphant string swell', 'distant echo'],
       moods: ['triumphant', 'vast', 'awe inspiring', 'majestic'],
+      eras: []
+    },
+    {
+      id: 'midnight-drive',
+      label: 'Midnight drive',
+      phrases: ['midnight drive', 'night drive', 'late night driving'],
+      tokens: [
+        { tag: 'midnight drive', weight: 1 },
+        { tag: 'steady motorik pulse', weight: 0.85 },
+        { tag: 'analog arpeggio sequence', weight: 0.75 },
+        { tag: 'headlight glare pad', weight: 0.6 }
+      ],
+      bpm: [100, 118],
+      instruments: ['analog arpeggio sequence', 'steady motorik pulse', 'muted rhythm guitar', 'wide synth pad'],
+      moods: ['nocturnal', 'propulsive', 'focused', 'cool'],
+      eras: []
+    },
+    {
+      id: 'sunrise-rooftop',
+      label: 'Sunrise rooftop',
+      phrases: ['sunrise rooftop', 'rooftop sunrise', 'rooftop at dawn'],
+      tokens: [
+        { tag: 'sunrise rooftop', weight: 1 },
+        { tag: 'shimmering rhodes chords', weight: 0.85 },
+        { tag: 'soft brushed drums', weight: 0.7 },
+        { tag: 'city hum ambience', weight: 0.55 }
+      ],
+      bpm: [95, 115],
+      instruments: ['shimmering Rhodes chords', 'soft brushed drums', 'distant city hum', 'airy flugelhorn'],
+      moods: ['hopeful', 'calm', 'golden', 'open'],
+      eras: []
+    },
+    {
+      id: 'neon-arcade',
+      label: 'Neon arcade',
+      phrases: ['neon arcade', 'arcade', 'retro arcade'],
+      tokens: [
+        { tag: 'neon arcade', weight: 1 },
+        { tag: 'chiptune square lead', weight: 0.85 },
+        { tag: 'coin drop sound effect', weight: 0.7 },
+        { tag: 'punchy square wave bass', weight: 0.6 }
+      ],
+      bpm: [120, 140],
+      instruments: ['chiptune square lead', '8-bit noise percussion', 'coin drop sound effect', 'punchy square wave bass'],
+      moods: ['playful', 'energetic', 'nostalgic', 'electric'],
+      eras: ['1980s arcade chiptune production']
+    },
+    {
+      id: 'subway-platform',
+      label: 'Subway platform',
+      phrases: ['subway platform', 'underground station', 'metro platform'],
+      tokens: [
+        { tag: 'subway platform', weight: 1 },
+        { tag: 'tiled room reverb', weight: 0.85 },
+        { tag: 'distant train rumble', weight: 0.7 },
+        { tag: 'busker saxophone', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['tiled room reverb', 'distant train rumble', 'busker saxophone', 'crowd footstep texture'],
+      moods: ['urban', 'lonely', 'restless', 'transient'],
+      eras: []
+    },
+    {
+      id: 'smoky-jazz-bar',
+      label: 'Smoky jazz bar',
+      phrases: ['smoky jazz bar', 'jazz club', 'late night bar'],
+      tokens: [
+        { tag: 'smoky jazz bar', weight: 1 },
+        { tag: 'brushed snare swing', weight: 0.85 },
+        { tag: 'walking upright bass', weight: 0.75 },
+        { tag: 'room mic ambience', weight: 0.6 }
+      ],
+      bpm: [80, 120],
+      instruments: ['brushed snare kit', 'walking upright bass', 'muted trumpet', 'close-mic piano'],
+      moods: ['smoky', 'intimate', 'after hours', 'sultry'],
+      eras: []
+    },
+    {
+      id: 'northern-lights',
+      label: 'Northern lights',
+      phrases: ['northern lights', 'aurora borealis', 'arctic sky'],
+      tokens: [
+        { tag: 'northern lights', weight: 1 },
+        { tag: 'glacial pad swell', weight: 0.9 },
+        { tag: 'crystalline bell texture', weight: 0.75 },
+        { tag: 'slow sub bass drift', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['glacial pad swell', 'crystalline bell texture', 'bowed glass harmonics', 'slow sub bass drift'],
+      moods: ['awe inspiring', 'cold', 'serene', 'vast'],
       eras: []
     }
   ],
@@ -5077,6 +5506,917 @@ function createToastHost(doc, options) {
       while (host.firstChild) host.removeChild(host.firstChild);
     },
   };
+}
+
+/* ==========================================================================
+ * LAYMAN VIBE TRANSLATORS — docs/FDD.md Domain C (#22 Cinematic Scene
+ * Generator, #23 Tri-Axis Physical Sliders, #24 Artist Style Dissector in
+ * Safe-Mode) over ONE shared working set, plus docs/FEATURE-MECHANICS.md §4.
+ *
+ * WHY A STORE AND NOT THREE WIDGETS
+ * Every translator in this domain answers the same question — "what goes in
+ * the prompt?" — from a different angle. Left to themselves they would each
+ * grow a private list, and the moment the Structure Builder and the 1,000-
+ * character limiter arrive (PLANNING.md NEXT) there would be no single string
+ * to compile or measure. So all three write into createPromptState(): one
+ * ordered set of ingredients, one deterministic draftText(), one place for a
+ * later compiler to attach.
+ *
+ * WHAT IS DELIBERATELY NOT HERE
+ * No 1,000-character enforcement. counts() reports draftText().length and
+ * stops there. Trimming is the queued limiter task and it needs a compactor
+ * and a conflict resolver to do honestly; a truncation faked here would be a
+ * silent, lossy edit of the user's prompt (docs/ENGINEERING-STANDARD.md §1.1).
+ * ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* A. PROMPT STATE — the app's single working set of prompt ingredients        */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Emission order. Suno reads a style prompt front-to-back and weights what it
+ * sees first, so the genre leads, the feel follows, and the physical-slider
+ * tags (which colour everything before them) are appended last.
+ */
+var PROMPT_SECTION_ORDER = ['genre', 'mood', 'instrument', 'scene', 'era', 'custom'];
+
+/* The sliders share one section but NOT one source: 'slider' is the bucket the
+ * draft appends last, and the per-axis source is what makes a slider move a
+ * REPLACEMENT rather than an accumulation. */
+var PROMPT_SLIDER_SECTION = 'slider';
+var PROMPT_SLIDER_SOURCES = ['slider-energy', 'slider-warmth', 'slider-density'];
+
+var PROMPT_SECTIONS = PROMPT_SECTION_ORDER.concat([PROMPT_SLIDER_SECTION]);
+
+var PROMPT_SOURCES = ['dissector', 'scene', 'manual'].concat(PROMPT_SLIDER_SOURCES);
+
+/** Section a source writes to when an entry does not name one itself. */
+var PROMPT_SOURCE_SECTION = {
+  dissector: 'custom',
+  scene: 'scene',
+  manual: 'custom',
+  'slider-energy': PROMPT_SLIDER_SECTION,
+  'slider-warmth': PROMPT_SLIDER_SECTION,
+  'slider-density': PROMPT_SLIDER_SECTION,
+};
+
+/**
+ * The identity of a tag for de-duplication: case- and whitespace-insensitive,
+ * everything else significant ("lo-fi" and "lo fi" really are different tags).
+ * @param {string} tag
+ * @returns {string}
+ */
+function normalizePromptTag(tag) {
+  if (typeof tag !== 'string') return '';
+  return tag.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The working set of prompt ingredients.
+ *
+ * Entry: {id, section, tag, weight?, source}
+ *   section — one of PROMPT_SECTIONS
+ *   source  — one of PROMPT_SOURCES; identifies WHO put the tag there, which
+ *             is what setSource() uses to swap a whole contribution at once.
+ *
+ * Invariants:
+ *   - one tag per (section, normalised tag): add() returns null on a repeat
+ *     rather than silently growing a duplicate;
+ *   - ids are stable, unique and never reused for the life of the store;
+ *   - every mutation that CHANGED something notifies subscribers exactly once,
+ *     and a subscriber that throws can break neither the store nor its peers.
+ *
+ * @param {{idPrefix?: string}} [deps]
+ */
+function createPromptState(deps) {
+  var d = deps || {};
+  var prefix = typeof d.idPrefix === 'string' && d.idPrefix ? d.idPrefix : 'tag';
+
+  /** @type {Array<{id:string, section:string, tag:string, weight?:number, source:string, norm:string}>} */
+  var entries = [];
+  /* Dedupe index: section + NUL + normalised tag -> id. The separator is a
+   * character no section name and no normalised tag can contain, so two
+   * different (section, tag) pairs can never collide into one key. */
+  var index = {};
+  /** @type {Array<{fn: Function}>} */
+  var subscribers = [];
+  var seq = 0;
+  /* batch() bookkeeping — see notify() and the batch entry point below. */
+  var batchDepth = 0;
+  var batchDirty = false;
+
+  function keyOf(section, norm) {
+    return section + '\u0000' + norm;
+  }
+
+  /** The public shape of an entry — a copy, so a caller cannot edit the store. */
+  function publicEntry(entry) {
+    var out = { id: entry.id, section: entry.section, tag: entry.tag, source: entry.source };
+    if (typeof entry.weight === 'number') out.weight = entry.weight;
+    return out;
+  }
+
+  /**
+   * Validate and canonicalise an incoming entry. Returns null — never throws,
+   * never guesses — for anything the store will not hold.
+   */
+  function build(seed) {
+    if (!seed || typeof seed !== 'object') return null;
+
+    var source =
+      seed.source === undefined || seed.source === null ? 'manual' : String(seed.source);
+    if (PROMPT_SOURCES.indexOf(source) === -1) return null;
+
+    var section =
+      typeof seed.section === 'string' && seed.section.trim()
+        ? seed.section.trim().toLowerCase()
+        : PROMPT_SOURCE_SECTION[source] || 'custom';
+    if (PROMPT_SECTIONS.indexOf(section) === -1) return null;
+
+    var tag = typeof seed.tag === 'string' ? seed.tag.replace(/\s+/g, ' ').trim() : '';
+    if (!tag) return null;
+
+    var record = {
+      id: '',
+      section: section,
+      tag: tag,
+      source: source,
+      norm: normalizePromptTag(tag),
+    };
+    if (typeof seed.weight === 'number' && isFinite(seed.weight)) {
+      record.weight = clamp01(seed.weight);
+    }
+    return record;
+  }
+
+  /** Commit a built record, or null if its (section, tag) is already held. */
+  function insert(record) {
+    var key = keyOf(record.section, record.norm);
+    if (Object.prototype.hasOwnProperty.call(index, key)) return null;
+    seq += 1;
+    record.id = prefix + '-' + seq;
+    index[key] = record.id;
+    entries.push(record);
+    return record.id;
+  }
+
+  /**
+   * Fan out to subscribers. Each call is isolated: a listener that throws is
+   * skipped, the rest still run, and the store's own state is already settled
+   * before the first one is called.
+   *
+   * Inside a batch() nothing is published — the change is only remembered, and
+   * ONE notification goes out when the outermost batch closes.
+   */
+  function notify() {
+    if (batchDepth > 0) {
+      batchDirty = true;
+      return;
+    }
+    var snapshot = subscribers.slice();
+    var view = list();
+    var totals = counts();
+    for (var i = 0; i < snapshot.length; i += 1) {
+      try {
+        snapshot[i].fn(view, totals);
+      } catch (err) {
+        // A broken subscriber is the subscriber's problem, not the store's.
+      }
+    }
+  }
+
+  /** Drop every entry the predicate accepts. Returns how many went. */
+  function dropWhere(predicate) {
+    var kept = [];
+    var dropped = 0;
+    for (var i = 0; i < entries.length; i += 1) {
+      if (predicate(entries[i])) {
+        delete index[keyOf(entries[i].section, entries[i].norm)];
+        dropped += 1;
+      } else {
+        kept.push(entries[i]);
+      }
+    }
+    entries = kept;
+    return dropped;
+  }
+
+  function list(section) {
+    var wanted =
+      typeof section === 'string' && section.trim() ? section.trim().toLowerCase() : null;
+    var out = [];
+    for (var i = 0; i < entries.length; i += 1) {
+      if (wanted !== null && entries[i].section !== wanted) continue;
+      out.push(publicEntry(entries[i]));
+    }
+    return out;
+  }
+
+  /**
+   * The compiled draft: sections in PROMPT_SECTION_ORDER, insertion order
+   * within each, then the slider tags in energy -> warmth -> density order.
+   * Deterministic by construction — same entries, same string, every time.
+   */
+  function draftText() {
+    var parts = [];
+    var i;
+    var j;
+    for (i = 0; i < PROMPT_SECTION_ORDER.length; i += 1) {
+      for (j = 0; j < entries.length; j += 1) {
+        if (entries[j].section === PROMPT_SECTION_ORDER[i]) parts.push(entries[j].tag);
+      }
+    }
+    for (i = 0; i < PROMPT_SLIDER_SOURCES.length; i += 1) {
+      for (j = 0; j < entries.length; j += 1) {
+        if (entries[j].section !== PROMPT_SLIDER_SECTION) continue;
+        if (entries[j].source === PROMPT_SLIDER_SOURCES[i]) parts.push(entries[j].tag);
+      }
+    }
+    // A slider-section tag from some other source would otherwise never be
+    // emitted at all; it goes last rather than going missing.
+    for (j = 0; j < entries.length; j += 1) {
+      if (entries[j].section !== PROMPT_SLIDER_SECTION) continue;
+      if (PROMPT_SLIDER_SOURCES.indexOf(entries[j].source) === -1) parts.push(entries[j].tag);
+    }
+    return parts.join(', ');
+  }
+
+  /**
+   * Sizes only — NO budget verdict. `length` is the plain character count of
+   * draftText(); what to do about it belongs to the queued limiter task.
+   */
+  function counts() {
+    var sections = {};
+    var sources = {};
+    var i;
+    for (i = 0; i < PROMPT_SECTIONS.length; i += 1) sections[PROMPT_SECTIONS[i]] = 0;
+    for (i = 0; i < PROMPT_SOURCES.length; i += 1) sources[PROMPT_SOURCES[i]] = 0;
+    for (i = 0; i < entries.length; i += 1) {
+      sections[entries[i].section] += 1;
+      sources[entries[i].source] += 1;
+    }
+    return {
+      total: entries.length,
+      length: draftText().length,
+      sections: sections,
+      sources: sources,
+    };
+  }
+
+  return {
+    /**
+     * @param {{section?:string, tag:string, weight?:number, source?:string}} entry
+     * @returns {string|null} the new id, or null if rejected or already held
+     */
+    add: function (entry) {
+      var record = build(entry);
+      if (!record) return null;
+      var id = insert(record);
+      if (id !== null) notify();
+      return id;
+    },
+
+    /** @returns {boolean} true if an entry with that id was there to remove */
+    remove: function (id) {
+      var wanted = String(id);
+      var dropped = dropWhere(function (entry) {
+        return entry.id === wanted;
+      });
+      if (dropped > 0) notify();
+      return dropped > 0;
+    },
+
+    /** @returns {number} how many entries the section held */
+    clearSection: function (section) {
+      var wanted =
+        typeof section === 'string' && section.trim() ? section.trim().toLowerCase() : '';
+      if (PROMPT_SECTIONS.indexOf(wanted) === -1) return 0;
+      var dropped = dropWhere(function (entry) {
+        return entry.section === wanted;
+      });
+      if (dropped > 0) notify();
+      return dropped;
+    },
+
+    /**
+     * ATOMIC per-source replacement — the primitive the sliders are built on.
+     * Everything the source contributed is dropped and the new contribution
+     * inserted before a single notification goes out, so a subscriber can
+     * never observe the old tag set and the new one at the same time, and a
+     * slider dragged from one end to the other swaps 5 tags for 5 rather than
+     * accumulating 10.
+     *
+     * @param {string} source one of PROMPT_SOURCES
+     * @param {Array<string|{tag:string, section?:string, weight?:number}>} incoming
+     * @returns {number} how many entries the source now holds
+     */
+    setSource: function (source, incoming) {
+      var name = typeof source === 'string' ? source : '';
+      if (PROMPT_SOURCES.indexOf(name) === -1) return 0;
+
+      var built = [];
+      if (isArrayLike(incoming)) {
+        for (var i = 0; i < incoming.length; i += 1) {
+          var raw = incoming[i];
+          var seed = null;
+          if (typeof raw === 'string') seed = { tag: raw, source: name };
+          else if (raw && typeof raw === 'object') {
+            seed = { tag: raw.tag, section: raw.section, weight: raw.weight, source: name };
+          }
+          if (!seed) continue;
+          var record = build(seed);
+          if (record) built.push(record);
+        }
+      }
+
+      var dropped = dropWhere(function (entry) {
+        return entry.source === name;
+      });
+      var added = 0;
+      for (var j = 0; j < built.length; j += 1) {
+        if (insert(built[j]) !== null) added += 1;
+      }
+      if (dropped > 0 || added > 0) notify();
+      return added;
+    },
+
+    /**
+     * Run several mutations and publish ONE notification for the lot.
+     *
+     * "Add all" from a dissection is one user action that happens to be thirty
+     * add() calls; without this the draft would be torn down and rebuilt
+     * thirty times, and a subscriber would see twenty-nine half-finished
+     * states that no user ever asked for. Nested batches collapse into the
+     * outermost. A batch that changes nothing publishes nothing, and a
+     * callback that THROWS still publishes what it managed to do before it
+     * threw — the store is never left holding an unannounced change.
+     *
+     * @param {() => any} fn
+     * @returns {any} whatever fn returned
+     */
+    batch: function (fn) {
+      if (typeof fn !== 'function') return undefined;
+      batchDepth += 1;
+      try {
+        return fn();
+      } finally {
+        batchDepth -= 1;
+        if (batchDepth === 0 && batchDirty) {
+          batchDirty = false;
+          notify();
+        }
+      }
+    },
+
+    /** @param {string} [section] omit for everything, in insertion order */
+    list: list,
+
+    /**
+     * @param {(entries:Array<object>, counts:object) => void} fn
+     * @returns {() => void} unsubscribe; idempotent, safe to call any time
+     */
+    subscribe: function (fn) {
+      if (typeof fn !== 'function') {
+        return function () {};
+      }
+      var record = { fn: fn };
+      subscribers.push(record);
+      return function () {
+        var i = subscribers.indexOf(record);
+        if (i !== -1) subscribers.splice(i, 1);
+      };
+    },
+
+    draftText: draftText,
+    counts: counts,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* B. TRI-AXIS PHYSICAL SLIDERS (FDD #23) — FEATURE-MECHANICS.md §4           */
+/* -------------------------------------------------------------------------- */
+
+var SLIDER_AXES = ['energy', 'warmth', 'density'];
+/** §4: strictly below 30 is the low zone, strictly above 70 the high one. */
+var SLIDER_LOW_BELOW = 30;
+var SLIDER_HIGH_ABOVE = 70;
+var SLIDER_DEFAULT = 50;
+
+/*
+ * VERBATIM from docs/FEATURE-MECHANICS.md §4.1-§4.3. These strings are the
+ * specification, not a paraphrase of it: tests/vibe-translators.test.js holds
+ * a second, independently written copy and compares the two element by
+ * element. Do not reorder, re-word or "improve" them here.
+ */
+var SLIDER_TAG_SETS = {
+  energy: {
+    low: ['low energy', 'slow-tempo', 'restrained', 'acoustic', 'soft dynamics'],
+    high: ['high energy', 'driving rhythm', 'explosive', 'heavy compression', 'loud dynamics'],
+  },
+  warmth: {
+    low: [
+      'cold digital master',
+      'clinical mix',
+      'sterile',
+      'digital synthesis',
+      'wide stereo',
+      'hyper-clean',
+    ],
+    high: [
+      'warm analog saturation',
+      'vintage tube preamp',
+      'tape hiss',
+      'vinyl crackle',
+      'natural room acoustics',
+    ],
+  },
+  density: {
+    low: ['minimalist arrangement', 'sparse instrumentation', 'intimate', 'stripped down', 'raw'],
+    high: [
+      'wall of sound',
+      'dense arrangement',
+      'massive orchestration',
+      'heavily layered',
+      'complex production',
+    ],
+  },
+};
+
+/** Plain-language zone names — what the slider ANNOUNCES (FDD #18). */
+var SLIDER_ZONE_LABELS = {
+  energy: { low: 'restrained', neutral: 'neutral', high: 'explosive' },
+  warmth: { low: 'cold and digital', neutral: 'neutral', high: 'warm and analog' },
+  density: { low: 'sparse', neutral: 'neutral', high: 'wall of sound' },
+};
+
+/** Visible axis names, and what the middle of each axis actually means. */
+var SLIDER_AXIS_LABELS = {
+  energy: 'Energy',
+  warmth: 'Warmth',
+  density: 'Density',
+};
+
+function isSliderAxis(axis) {
+  return typeof axis === 'string' && Object.prototype.hasOwnProperty.call(SLIDER_TAG_SETS, axis);
+}
+
+/**
+ * A slider position, or null when there is not one.
+ *
+ * Numeric STRINGS count: `input.value` is one. `null`, `undefined`, `true` and
+ * `''` deliberately do NOT, even though Number() would happily fold them to 0
+ * — silently reading a missing value as "hard left" would inject five tags
+ * nobody asked for.
+ *
+ * @param {*} value
+ * @returns {number|null}
+ */
+function sliderValueOrNull(value) {
+  if (typeof value === 'number') return isFinite(value) ? value : null;
+  if (typeof value === 'string' && value.trim()) {
+    var n = Number(value);
+    return isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Which §4 band a value falls in.
+ * @returns {'low'|'neutral'|'high'|null} null for an axis that does not exist
+ */
+function sliderZone(axis, value) {
+  if (!isSliderAxis(axis)) return null;
+  var n = sliderValueOrNull(value);
+  // A slider with no readable value is at rest, not at an extreme.
+  if (n === null) return 'neutral';
+  if (n < SLIDER_LOW_BELOW) return 'low';
+  if (n > SLIDER_HIGH_ABOVE) return 'high';
+  return 'neutral';
+}
+
+/**
+ * The §4 tag injection for one axis position.
+ *
+ * The 30..70 band inclusive injects NOTHING: the mechanics say the base genre
+ * keeps the vote there, so a slider the user has not touched adds no words to
+ * the prompt. An axis that does not exist returns [] rather than throwing —
+ * this runs on every `input` event, and the rest of this file answers a bad
+ * argument with emptiness rather than an exception.
+ *
+ * @param {'energy'|'warmth'|'density'} axis
+ * @param {number} value 0..100
+ * @returns {string[]} a fresh array; the constants above are never handed out
+ */
+function sliderTags(axis, value) {
+  var zone = sliderZone(axis, value);
+  if (zone === null || zone === 'neutral') return [];
+  return SLIDER_TAG_SETS[axis][zone].slice();
+}
+
+/** The zone's plain-language name, or '' for an unknown axis. */
+function sliderZoneLabel(axis, value) {
+  var zone = sliderZone(axis, value);
+  if (zone === null) return '';
+  return SLIDER_ZONE_LABELS[axis][zone];
+}
+
+/**
+ * aria-valuetext for one slider: the position, the zone it is in, and the
+ * exact words that position puts in the prompt. A screen-reader user gets the
+ * same information the chips under the slider show (FDD #18).
+ */
+function sliderValueText(axis, value) {
+  var zone = sliderZone(axis, value);
+  if (zone === null) return '';
+  var n = sliderValueOrNull(value);
+  if (n === null) n = SLIDER_DEFAULT;
+  var tags = sliderTags(axis, value);
+  return (
+    Math.round(n) +
+    ' of 100 — ' +
+    SLIDER_ZONE_LABELS[axis][zone] +
+    (tags.length ? ': adds ' + tags.join(', ') : ': adds no ' + axis + ' tags')
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* C. CINEMATIC SCENE GENERATOR (FDD #22)                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Turn a visual scenario into production tokens.
+ *
+ * It reuses the dissector's own normaliser and matcher, so "Neon Rain!!" and
+ * "neon rain" reach the same entry and a longer scene phrase still consumes a
+ * shorter one inside it. Only the `scenes` group is kept — a sentence that
+ * happens to name a genre is a job for the dissector, not for this card.
+ *
+ * Nothing is invented: text that matches no scene returns an EMPTY array, and
+ * the UI says so instead of offering a plausible guess
+ * (docs/ENGINEERING-STANDARD.md §1.2).
+ *
+ * @param {string} text free-form scene description
+ * @param {object} [kb] defaults to MUSIC_KB
+ * @returns {Array<{id:string, label:string, phrase:string,
+ *                  tokens:Array<{tag:string, weight:number}>}>} in match order
+ */
+function matchScenes(text, kb) {
+  var book = kb || MUSIC_KB;
+  var normalized = normalizeDissectorText(text);
+  if (!normalized) return [];
+
+  var matches = findKbMatches(normalized, book);
+  var out = [];
+  var seen = {};
+
+  for (var i = 0; i < matches.length; i += 1) {
+    if (matches[i].kind !== 'scenes') continue;
+    var entry = matches[i].entry;
+    var id = String(entry.id || '');
+    if (!id || Object.prototype.hasOwnProperty.call(seen, id)) continue;
+
+    var tokens = [];
+    if (isArrayLike(entry.tokens)) {
+      for (var t = 0; t < entry.tokens.length; t += 1) {
+        var token = entry.tokens[t];
+        if (!token || typeof token.tag !== 'string') continue;
+        var tag = token.tag.trim();
+        if (!tag) continue;
+        tokens.push({ tag: tag, weight: clamp01(token.weight) });
+      }
+    }
+    if (!tokens.length) continue;
+
+    seen[id] = true;
+    out.push({
+      id: id,
+      label: String(entry.label || id),
+      phrase: String(matches[i].phrase || ''),
+      tokens: tokens,
+    });
+  }
+  return out;
+}
+
+/**
+ * Every scene the card can offer as a quick chip / datalist option, using each
+ * entry's FIRST phrase — the one its label is written from — so a click puts
+ * text in the box that is guaranteed to match it back.
+ *
+ * @param {object} [kb]
+ * @returns {Array<{id:string, label:string, phrase:string}>}
+ */
+function sceneTriggerList(kb) {
+  var book = kb || MUSIC_KB;
+  var scenes = book && book.scenes;
+  var out = [];
+  if (!isArrayLike(scenes)) return out;
+  for (var i = 0; i < scenes.length; i += 1) {
+    var entry = scenes[i];
+    if (!entry || typeof entry !== 'object') continue;
+    var phrase = isArrayLike(entry.phrases) && typeof entry.phrases[0] === 'string' ? entry.phrases[0] : '';
+    if (!phrase) continue;
+    out.push({ id: String(entry.id || ''), label: String(entry.label || phrase), phrase: phrase });
+  }
+  return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* D. SAFE-MODE ARTIST DISSECTOR (FDD #24)                                    */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * THE SAFE-MODE HEURISTIC, in full.
+ *
+ * FDD #24 promises artists are deconstructed into GENERIC musical attributes.
+ * The prompt handed to a cloud or Ollama model already forbids naming an
+ * artist (see dissectorSchemaBlock), but that is an instruction to someone
+ * else's model. This is the belt-and-braces on OUR side of the line: it runs
+ * on the way INTO the prompt, for every mode including the local engine, so a
+ * name the user typed can never round-trip out of a result and into the text
+ * they copy.
+ *
+ *   1. VOCABULARY. Every word this app already speaks — MUSIC_KB trigger
+ *      phrases, token tags, instruments, moods, eras and labels, plus the §4
+ *      slider tags — is folded into one lowercase set, together with a short
+ *      list of ordinary describing words (SAFE_MODE_STOPWORDS: "sounds",
+ *      "like", "vibe"…). Anything in that set is musical language, never a
+ *      name: "techno" survives "dark techno like <someone>".
+ *      Adjacent word PAIRS from the same sources are collected too, so a real
+ *      two-word term ("deep house", "warm analog") is recognised as language
+ *      rather than as a name.
+ *   2. CANDIDATES. The input is folded with the dissector's own normaliser,
+ *      then scanned for what an unknown proper noun looks like:
+ *        - single words longer than 3 characters that the vocabulary does not
+ *          contain — "daft", "punk", "burna";
+ *        - adjacent word pairs the vocabulary does not contain, where neither
+ *          half is a stopword and at least one half is an unknown word —
+ *          "daft punk", "burna boy", "lil nas". The pair rule is what catches
+ *          a name built from words too SHORT to be single candidates; a pair
+ *          of two known musical words ("pop vocal", "dark techno") is
+ *          language, so it is deliberately left alone.
+ *      The >3 floor is deliberate: "boy", "the", "kid" as single words would
+ *      be a wrecking ball through the taxonomy.
+ *   3. STRIP. Any result string that contains a candidate AT A WORD BOUNDARY
+ *      is dropped — from genre_tokens, instruments, mood and era alike.
+ *      Word boundaries, not bare substrings: "mood" typed in a description
+ *      must not swallow the mood "moody". A candidate of five characters or
+ *      more may also match a word PREFIX, because a name with an accent or an
+ *      inflection fragments under the normaliser ("Beyoncé" -> "beyonc") and
+ *      would otherwise slip past its own token.
+ *
+ * KNOWN TRADE-OFFS, stated rather than hidden:
+ *   - It over-strips before it under-strips. Losing a generic token costs a
+ *     shade of description; leaking a name costs the promise the feature is
+ *     named after.
+ *   - A one- or two-letter stage name ("Jay Z") is under the length floor and
+ *     will not be caught. It is a floor under the promise, not an oracle.
+ *   - It never edits the dissector's own output: sanitizeSafeMode returns a
+ *     NEW result and the raw JSON panel keeps showing what the engine said.
+ */
+
+/** Words below this length are never treated as a name on their own. */
+var SAFE_MODE_MIN_WORD = 4;
+/** From this length up, a candidate may also match a word PREFIX (see §3). */
+var SAFE_MODE_PREFIX_MIN = 5;
+
+/*
+ * Ordinary describing words. They are in the vocabulary for exactly the same
+ * reason "techno" is: whatever else they are, they are not somebody's name.
+ */
+var SAFE_MODE_STOPWORDS = [
+  'a', 'an', 'and', 'the', 'but', 'for', 'nor', 'or', 'so', 'yet',
+  'is', 'are', 'was', 'were', 'be', 'been', 'am', 'has', 'have', 'had',
+  'do', 'does', 'did', 'can', 'could', 'will', 'would', 'shall', 'should',
+  'in', 'of', 'on', 'at', 'to', 'by', 'up', 'off', 'out', 'from', 'into',
+  'over', 'under', 'with', 'without', 'about', 'like', 'unlike', 'than',
+  'that', 'this', 'these', 'those', 'there', 'their', 'them', 'they', 'it',
+  'its', 'my', 'me', 'you', 'your', 'we', 'us', 'his', 'her', 'him',
+  'sound', 'sounds', 'sounding', 'sounded', 'similar', 'style', 'styled',
+  'vibe', 'vibes', 'feel', 'feels', 'feeling', 'kind', 'sort', 'type',
+  'mood', 'moods', 'genre', 'genres', 'sample', 'samples', 'version',
+  'song', 'songs', 'track', 'tracks', 'tune', 'tunes', 'artist', 'artists',
+  'band', 'bands', 'singer', 'singers', 'group', 'thing', 'things', 'stuff',
+  'make', 'makes', 'made', 'want', 'wants', 'need', 'needs', 'give', 'gives',
+  'something', 'anything', 'everything', 'nothing', 'some', 'same', 'more',
+  'most', 'much', 'very', 'really', 'quite', 'just', 'also', 'then', 'when',
+  'where', 'what', 'which', 'while', 'who', 'how', 'why', 'not', 'no',
+];
+
+/** Memo for the MUSIC_KB vocabulary — one build per knowledge base object. */
+var _safeModeVocabCache = null;
+var _safeModeVocabSource = null;
+
+/**
+ * Fold one vocabulary string into the word and pair sets.
+ * @param {string} text
+ * @param {{words:object, pairs:object}} into
+ */
+function collectVocabulary(text, into) {
+  if (typeof text !== 'string' || !text) return;
+  var folded = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!folded) return;
+  var words = folded.split(' ');
+  for (var i = 0; i < words.length; i += 1) {
+    if (!words[i]) continue;
+    into.words[words[i]] = true;
+    if (i + 1 < words.length && words[i + 1]) {
+      into.pairs[words[i] + ' ' + words[i + 1]] = true;
+    }
+  }
+}
+
+/**
+ * Every word and adjacent word-pair this app speaks: the whole knowledge base,
+ * the §4 slider tags and the stopword list.
+ *
+ * @param {object} [kb]
+ * @returns {{words:object, pairs:object}}
+ */
+function safeModeVocabulary(kb) {
+  var book = kb || MUSIC_KB;
+  if (_safeModeVocabCache && _safeModeVocabSource === book) return _safeModeVocabCache;
+
+  var into = { words: Object.create(null), pairs: Object.create(null) };
+  var groups = ['genres', 'scenes', 'eras'];
+  var g;
+  var i;
+
+  for (g = 0; g < groups.length; g += 1) {
+    var list = book && book[groups[g]];
+    if (!isArrayLike(list)) continue;
+    for (i = 0; i < list.length; i += 1) {
+      var entry = list[i];
+      if (!entry || typeof entry !== 'object') continue;
+      collectVocabulary(entry.label, into);
+      collectVocabulary(String(entry.id || '').replace(/-/g, ' '), into);
+      var fields = ['phrases', 'instruments', 'moods', 'eras'];
+      for (var f = 0; f < fields.length; f += 1) {
+        var values = entry[fields[f]];
+        if (!isArrayLike(values)) continue;
+        for (var v = 0; v < values.length; v += 1) collectVocabulary(values[v], into);
+      }
+      if (isArrayLike(entry.tokens)) {
+        for (var t = 0; t < entry.tokens.length; t += 1) {
+          if (entry.tokens[t]) collectVocabulary(entry.tokens[t].tag, into);
+        }
+      }
+    }
+  }
+
+  // The physical-slider vocabulary is this app's language too.
+  for (var a = 0; a < SLIDER_AXES.length; a += 1) {
+    var sets = SLIDER_TAG_SETS[SLIDER_AXES[a]];
+    var zones = ['low', 'high'];
+    for (var z = 0; z < zones.length; z += 1) {
+      var tags = sets[zones[z]];
+      for (var k = 0; k < tags.length; k += 1) collectVocabulary(tags[k], into);
+    }
+  }
+
+  for (i = 0; i < SAFE_MODE_STOPWORDS.length; i += 1) into.words[SAFE_MODE_STOPWORDS[i]] = true;
+
+  _safeModeVocabCache = into;
+  _safeModeVocabSource = book;
+  return into;
+}
+
+/**
+ * The name-like fragments of an input.
+ *
+ * Ordered longest-first purely so the most specific fragment is tested first
+ * and the common case short-circuits sooner; the strip is a boolean, so the
+ * order cannot change WHICH strings are dropped. Deterministic either way:
+ * ties break alphabetically, never by discovery order.
+ *
+ * @param {string} text
+ * @param {object} [kb]
+ * @returns {string[]} normalised candidate fragments, possibly empty
+ */
+function safeModeNameCandidates(text, kb) {
+  var normalized = normalizeDissectorText(text);
+  if (!normalized) return [];
+  var vocab = safeModeVocabulary(kb);
+  var words = normalized.trim().split(' ');
+  var out = [];
+  var seen = Object.create(null);
+
+  function push(candidate) {
+    if (!candidate || Object.prototype.hasOwnProperty.call(seen, candidate)) return;
+    seen[candidate] = true;
+    out.push(candidate);
+  }
+
+  for (var i = 0; i < words.length; i += 1) {
+    var word = words[i];
+    if (!word) continue;
+    var known = vocab.words[word] === true;
+    if (!known && word.length >= SAFE_MODE_MIN_WORD) push(word);
+
+    if (i + 1 < words.length && words[i + 1]) {
+      var next = words[i + 1];
+      var pair = word + ' ' + next;
+      var pairKnown = vocab.pairs[pair] === true;
+      // A pair is only a name shape when BOTH halves are content words — "of
+      // sound" and "like daft" are grammar, not somebody's stage name — AND at
+      // least one half is a word the vocabulary has never heard of. Two known
+      // musical words next to each other ("pop vocal") are language.
+      var contentful =
+        SAFE_MODE_STOPWORDS.indexOf(word) === -1 && SAFE_MODE_STOPWORDS.indexOf(next) === -1;
+      var strange = !known || vocab.words[next] !== true;
+      if (!pairKnown && contentful && strange && pair.length > SAFE_MODE_MIN_WORD) {
+        push(pair);
+      }
+    }
+  }
+
+  out.sort(function (a, b) {
+    if (a.length !== b.length) return b.length - a.length;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  return out;
+}
+
+/**
+ * True when `value` carries one of the candidate fragments at a word boundary.
+ *
+ * The padding turns `indexOf(' needle ')` into a whole-word search with no
+ * regex building and no escaping worries. The second, prefix-only test is the
+ * §3 allowance for names the normaliser fragments.
+ *
+ * @param {string} value
+ * @param {string[]} candidates normalised, from safeModeNameCandidates
+ */
+function safeModeHitsName(value, candidates) {
+  if (typeof value !== 'string' || !value) return false;
+  var folded = value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!folded) return false;
+  var padded = ' ' + folded + ' ';
+  for (var i = 0; i < candidates.length; i += 1) {
+    var needle = candidates[i];
+    if (padded.indexOf(' ' + needle + ' ') !== -1) return true;
+    if (needle.length >= SAFE_MODE_PREFIX_MIN && padded.indexOf(' ' + needle) !== -1) return true;
+  }
+  return false;
+}
+
+/**
+ * Strip every name-like token out of a dissection result (FDD #24).
+ *
+ * Pure: the input result is never mutated, and the returned object carries the
+ * same schema so it can be rendered, added to the prompt state or re-sanitised
+ * without a special case. Applied on EVERY add-to-prompt from the dissector,
+ * local and remote alike.
+ *
+ * @param {string} inputText the text the user actually typed
+ * @param {object} result a dissection result
+ * @param {object} [kb]
+ * @returns {object} a new result with the same shape
+ */
+function sanitizeSafeMode(inputText, result, kb) {
+  var source = result && typeof result === 'object' ? result.source : null;
+  var out = emptyDissection(source === undefined ? null : source);
+  if (!result || typeof result !== 'object') return out;
+
+  out.bpm_range = isArrayLike(result.bpm_range) && result.bpm_range.length >= 2
+    ? [result.bpm_range[0], result.bpm_range[1]]
+    : null;
+  out.confidence = clamp01(result.confidence);
+
+  var candidates = safeModeNameCandidates(inputText, kb);
+
+  if (isArrayLike(result.genre_tokens)) {
+    for (var i = 0; i < result.genre_tokens.length; i += 1) {
+      var token = result.genre_tokens[i];
+      if (!token || typeof token.tag !== 'string') continue;
+      if (safeModeHitsName(token.tag, candidates)) continue;
+      out.genre_tokens.push({ tag: token.tag, weight: clamp01(token.weight) });
+    }
+  }
+
+  var names = ['instruments', 'mood', 'era'];
+  for (var n = 0; n < names.length; n += 1) {
+    var values = result[names[n]];
+    if (!isArrayLike(values)) continue;
+    for (var v = 0; v < values.length; v += 1) {
+      if (typeof values[v] !== 'string') continue;
+      if (safeModeHitsName(values[v], candidates)) continue;
+      out[names[n]].push(values[v]);
+    }
+  }
+
+  // Nothing survived the strip, so there is no evidence left to be confident
+  // about. Reporting the original score here would be the dishonest half of a
+  // safety feature (docs/ENGINEERING-STANDARD.md §1.1).
+  if (
+    !out.genre_tokens.length &&
+    !out.instruments.length &&
+    !out.mood.length &&
+    !out.era.length
+  ) {
+    out.confidence = 0;
+  }
+  return out;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -7144,6 +8484,11 @@ function createRibbonRenderer(deps) {
 
     const toastHost = createToastHost(document);
 
+    // The one working set every translator writes into (FDD Domain C). It is
+    // created before the dissector wiring because the dissector's badges are
+    // add-to-prompt controls that push straight into it.
+    const promptState = createPromptState();
+
     const dissectInput = $('dissect-input');
     const dissectHint = $('dissect-hint');
     const dissectMode = $('dissect-mode');
@@ -7170,6 +8515,14 @@ function createRibbonRenderer(deps) {
     const sourceLine = $('dissect-source');
     const fellBackFlag = $('dissect-fellback');
     const rawJson = $('dissect-json');
+    const addRow = $('dissect-add-row');
+    const safeNote = $('dissect-safe-note');
+
+    /* The last dissection, kept in both forms: what the engine said, and what
+     * Safe Mode will actually let into the prompt (FDD #24). */
+    let lastDissectInput = '';
+    let lastResult = null;
+    let lastSafeResult = null;
 
     const dissector = createDissector({
       // The real fetch is injected here and ONLY here; the engine itself never
@@ -7249,6 +8602,17 @@ function createRibbonRenderer(deps) {
     function renderDissection(outcome) {
       const result = outcome.result;
 
+      // FDD #24. The engine's own output is left exactly as it came back —
+      // the Raw JSON panel below still shows it verbatim — and the SAFE copy
+      // is what every add-to-prompt path reads from.
+      lastDissectInput = dissectInput.value;
+      lastResult = result;
+      lastSafeResult = sanitizeSafeMode(lastDissectInput, result);
+      const safeTags = Object.create(null);
+      for (let s = 0; s < lastSafeResult.genre_tokens.length; s += 1) {
+        safeTags[lastSafeResult.genre_tokens[s].tag] = true;
+      }
+
       badgeHost.textContent = '';
       if (!result.genre_tokens.length) {
         const none = document.createElement('span');
@@ -7258,11 +8622,19 @@ function createRibbonRenderer(deps) {
       }
       for (let i = 0; i < result.genre_tokens.length; i += 1) {
         const token = result.genre_tokens[i];
-        const badge = document.createElement('span');
-        badge.className = 'genre-badge';
+        const safe = safeTags[token.tag] === true;
+        // A badge is the click-to-add control for its own token, so it is a
+        // real button; one Safe Mode refuses is disabled rather than hidden.
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = safe ? 'genre-badge' : 'genre-badge is-unsafe';
         // FEATURE-MECHANICS.md §7.2: token weight 0..1 -> opacity 0.4..1.0.
         badge.style.opacity = String(Math.round((0.4 + 0.6 * token.weight) * 100) / 100);
-        badge.title = token.tag + ' — weight ' + token.weight.toFixed(2);
+        badge.title = safe
+          ? 'Add “' + token.tag + '” to the draft — weight ' + token.weight.toFixed(2)
+          : token.tag + ' — held back by Safe Mode: it repeats a name from your description';
+        badge.setAttribute('aria-label', badge.title);
+        badge.disabled = !safe;
         const label = document.createElement('span');
         label.textContent = token.tag;
         const weight = document.createElement('span');
@@ -7270,8 +8642,26 @@ function createRibbonRenderer(deps) {
         weight.textContent = token.weight.toFixed(2);
         badge.appendChild(label);
         badge.appendChild(weight);
+        if (safe) {
+          badge.addEventListener('click', function () {
+            const id = promptState.add({
+              section: 'genre',
+              tag: token.tag,
+              weight: token.weight,
+              source: 'dissector',
+            });
+            toastHost.show(
+              id
+                ? 'Added “' + token.tag + '” to the draft.'
+                : '“' + token.tag + '” is already in the draft.',
+              id ? 'info' : 'warn'
+            );
+          });
+        }
         badgeHost.appendChild(badge);
       }
+
+      renderSafeNote();
 
       factBpm.textContent = result.bpm_range
         ? result.bpm_range[0] + '–' + result.bpm_range[1] + ' BPM'
@@ -7329,6 +8719,11 @@ function createRibbonRenderer(deps) {
         function (outcome) {
           settleDissectButton();
           if (!outcome.ok) {
+            // No result means no add-to-prompt source: the previous one must
+            // not linger behind a hidden panel and be added later by mistake.
+            lastResult = null;
+            lastSafeResult = null;
+            renderSafeNote();
             dissectResults.hidden = true;
             dissectStatus.className = 'dissect-status err';
             dissectStatus.textContent = outcome.error;
@@ -7357,6 +8752,529 @@ function createRibbonRenderer(deps) {
     }
 
     dissectBtn.addEventListener('click', runDissection);
+
+    /* ---------------- layman vibe translators (FDD Domain C) ---------------- */
+
+    /* Human names for the draft's groups. The store's section ids are the
+     * contract; these are what a person reads. */
+    const SECTION_LABELS = {
+      genre: 'Genre',
+      mood: 'Mood',
+      instrument: 'Instruments',
+      scene: 'Scene',
+      era: 'Era',
+      custom: 'Other',
+      slider: 'Physical feel',
+    };
+
+    /* -- E. the prompt draft card -- */
+
+    const draftGroups = $('draft-groups');
+    const draftEmpty = $('draft-empty');
+    const draftTextEl = $('draft-text');
+    const draftCounts = $('draft-counts');
+    const draftCopyBtn = $('btn-draft-copy');
+
+    function plural(n, word) {
+      return n + ' ' + word + (n === 1 ? '' : 's');
+    }
+
+    /*
+     * FOCUS ACROSS A REBUILD.
+     *
+     * renderDraft() replaces the whole group tree, and it runs FROM the click
+     * handler of a button inside that tree — so the button the user just
+     * pressed is destroyed mid-click and focus falls back to <body>. For a
+     * keyboard or screen-reader user that ends the interaction: they clear one
+     * group and are dumped at the top of the document.
+     *
+     * Every control the draft renders therefore carries a stable focus key.
+     * After a rebuild focus goes to the same key if it still exists (removing
+     * a chip from a group that still has a Clear button), otherwise to
+     * whatever now sits at the same position in the tree (the next chip along,
+     * or the next group's Clear), and if the tree is empty, to the Copy button
+     * — which is where the user's attention would go next anyway.
+     */
+    const FOCUS_KEY_ATTR = 'data-focus-key';
+
+    function draftFocusables() {
+      return Array.prototype.slice.call(draftGroups.querySelectorAll('[' + FOCUS_KEY_ATTR + ']'));
+    }
+
+    /** What is focused inside the draft right now, if anything. */
+    function captureDraftFocus() {
+      const active = document.activeElement;
+      if (!active || !draftGroups.contains(active)) return null;
+      const all = draftFocusables();
+      return { key: active.getAttribute(FOCUS_KEY_ATTR), index: all.indexOf(active) };
+    }
+
+    function restoreDraftFocus(previous) {
+      if (!previous) return;
+      const all = draftFocusables();
+      let target = null;
+      for (let i = 0; i < all.length; i += 1) {
+        if (all[i].getAttribute(FOCUS_KEY_ATTR) === previous.key) {
+          target = all[i];
+          break;
+        }
+      }
+      if (!target && all.length) target = all[Math.min(previous.index, all.length - 1)] || all[all.length - 1];
+      if (!target) target = draftCopyBtn;
+      if (target && typeof target.focus === 'function') target.focus();
+    }
+
+    /** One chip: the tag, and a click that removes exactly that entry. */
+    function draftChip(entry) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip tag-chip';
+      chip.setAttribute(FOCUS_KEY_ATTR, 'chip:' + entry.id);
+      chip.title = 'Remove “' + entry.tag + '” from the draft';
+      chip.setAttribute('aria-label', chip.title);
+      const label = document.createElement('span');
+      label.textContent = entry.tag;
+      const cross = document.createElement('span');
+      cross.className = 'tag-chip-x';
+      cross.setAttribute('aria-hidden', 'true');
+      cross.textContent = '×';
+      chip.appendChild(label);
+      chip.appendChild(cross);
+      chip.addEventListener('click', function () {
+        promptState.remove(entry.id);
+      });
+      return chip;
+    }
+
+    /**
+     * The single render path for the draft. It is a SUBSCRIBER, so no mutation
+     * anywhere else has to remember to repaint: the store notifies, this runs.
+     */
+    function renderDraft() {
+      const totals = promptState.counts();
+      const text = promptState.draftText();
+      const focused = captureDraftFocus();
+
+      draftGroups.textContent = '';
+      for (let s = 0; s < PROMPT_SECTIONS.length; s += 1) {
+        const section = PROMPT_SECTIONS[s];
+        const entries = promptState.list(section);
+        if (!entries.length) continue;
+
+        const group = document.createElement('div');
+        group.className = 'draft-group';
+
+        const head = document.createElement('div');
+        head.className = 'draft-group-head';
+        const name = document.createElement('span');
+        name.className = 'draft-group-name';
+        name.textContent = SECTION_LABELS[section] + ' · ' + entries.length;
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'btn-mini';
+        clear.textContent = 'Clear';
+        clear.setAttribute(FOCUS_KEY_ATTR, 'clear:' + section);
+        clear.setAttribute('aria-label', 'Clear every ' + SECTION_LABELS[section] + ' tag');
+        clear.addEventListener('click', function () {
+          // The slider tags are not free-standing: their source is a handle
+          // position. Dropping them without moving the handles would leave the
+          // control claiming 95 while the prompt says nothing — and the very
+          // next repaint would put them straight back. Returning the handles
+          // to neutral IS the clear for this group.
+          if (section === PROMPT_SLIDER_SECTION) {
+            const dropped = neutraliseSliders();
+            if (dropped) toastHost.show('Sliders back to neutral — ' + plural(dropped, 'tag') + ' removed.');
+            return;
+          }
+          const dropped = promptState.clearSection(section);
+          if (dropped) toastHost.show('Cleared ' + plural(dropped, 'tag') + ' from ' + SECTION_LABELS[section] + '.');
+        });
+        head.appendChild(name);
+        head.appendChild(clear);
+        group.appendChild(head);
+
+        const chips = document.createElement('div');
+        chips.className = 'draft-chips';
+        for (let e = 0; e < entries.length; e += 1) chips.appendChild(draftChip(entries[e]));
+        group.appendChild(chips);
+
+        draftGroups.appendChild(group);
+      }
+
+      draftEmpty.hidden = totals.total > 0;
+      draftTextEl.hidden = totals.total === 0;
+      draftTextEl.textContent = text;
+      // Two plain numbers. NOT a budget: the 1,000-character gauge (FDD #67)
+      // is the next task and nothing in this release trims anything.
+      draftCounts.textContent = plural(totals.total, 'tag') + ' · ' + plural(text.length, 'character');
+
+      restoreDraftFocus(focused);
+    }
+
+    promptState.subscribe(renderDraft);
+
+    /* A clipboard write that never settles would mean no toast and no
+     * fallback, ever — so the async path is raced against a short budget. */
+    const COPY_TIMEOUT_MS = 1200;
+
+    /**
+     * Async clipboard first: it is the only path that needs no gesture-scoped
+     * selection. Two guards around it, both learned the hard way:
+     *   - Chrome leaves writeText() PENDING FOREVER while the document is not
+     *     focused (background tab, unfocused window), so an unfocused document
+     *     goes straight to the fallback rather than waiting for nothing;
+     *   - and the call is raced against COPY_TIMEOUT_MS anyway, so no other
+     *     engine's quirk can strand the button in silence.
+     */
+    function copyViaClipboard(text) {
+      if (
+        typeof navigator === 'undefined' ||
+        !navigator.clipboard ||
+        typeof navigator.clipboard.writeText !== 'function'
+      ) {
+        return Promise.reject(new Error('clipboard API unavailable'));
+      }
+      if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
+        return Promise.reject(new Error('document is not focused'));
+      }
+      return new Promise(function (resolve, reject) {
+        let settled = false;
+        const finish = function (ok, err) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (ok) resolve();
+          else reject(err);
+        };
+        const timer = setTimeout(function () {
+          finish(false, new Error('clipboard write timed out'));
+        }, COPY_TIMEOUT_MS);
+        let pending;
+        try {
+          pending = navigator.clipboard.writeText(text);
+        } catch (err) {
+          finish(false, err);
+          return;
+        }
+        // Both handlers are attached, so a late rejection after the timeout is
+        // observed rather than escaping unhandled (ENGINEERING-STANDARD §2.3).
+        Promise.resolve(pending).then(
+          function () {
+            finish(true);
+          },
+          function (err) {
+            finish(false, err);
+          }
+        );
+      });
+    }
+
+    /**
+     * The pre-async-clipboard path, and the one that still works on an
+     * insecure origin such as file:// — a real off-screen selection plus
+     * execCommand('copy').
+     */
+    function copyViaExecCommand(text) {
+      if (typeof document.execCommand !== 'function') return false;
+      const holder = document.createElement('textarea');
+      holder.value = text;
+      holder.setAttribute('readonly', 'readonly');
+      holder.setAttribute('aria-hidden', 'true');
+      holder.style.position = 'fixed';
+      holder.style.top = '-1000px';
+      holder.style.opacity = '0';
+      document.body.appendChild(holder);
+      let ok = false;
+      try {
+        holder.select();
+        ok = document.execCommand('copy') === true;
+      } catch (err) {
+        ok = false;
+      }
+      document.body.removeChild(holder);
+      return ok;
+    }
+
+    draftCopyBtn.addEventListener('click', function () {
+      const text = promptState.draftText();
+      if (!text) {
+        toastHost.show('Nothing to copy yet — the draft is empty.', 'warn');
+        return;
+      }
+      const done = function () {
+        toastHost.show('Prompt draft copied — ' + plural(text.length, 'character') + '.');
+      };
+      copyViaClipboard(text).then(done, function () {
+        if (copyViaExecCommand(text)) done();
+        else toastHost.show('Could not reach the clipboard — select the draft text and copy it manually.', 'error');
+      });
+    });
+
+    /* -- B. the tri-axis physical sliders -- */
+
+    /** @type {Array<{input: HTMLInputElement, paint: () => void}>} one per axis. */
+    const sliderControls = [];
+
+    /**
+     * Put every handle back in the neutral band and repaint, which drops all
+     * three contributions through the normal slider path rather than around it.
+     * @returns {number} how many slider tags the draft lost
+     */
+    function neutraliseSliders() {
+      const before = promptState.counts().sections[PROMPT_SLIDER_SECTION];
+      // One user action, one repaint: without the batch each axis would
+      // publish its own change and the draft would rebuild three times.
+      promptState.batch(function () {
+        for (let i = 0; i < sliderControls.length; i += 1) {
+          sliderControls[i].input.value = String(SLIDER_DEFAULT);
+          sliderControls[i].paint();
+        }
+      });
+      return before - promptState.counts().sections[PROMPT_SLIDER_SECTION];
+    }
+
+    for (let a = 0; a < SLIDER_AXES.length; a += 1) {
+      const axis = SLIDER_AXES[a];
+      const input = $('slider-' + axis);
+      const valueOut = $('slider-' + axis + '-value');
+      const tagHost = $('slider-' + axis + '-tags');
+      const source = 'slider-' + axis;
+
+      const paint = function () {
+        const raw = sliderValueOrNull(input.value);
+        const value = raw === null ? SLIDER_DEFAULT : raw;
+        const tags = sliderTags(axis, value);
+
+        valueOut.textContent = String(Math.round(value));
+        // FDD #18: the announced value is the position AND what it does.
+        input.setAttribute('aria-valuetext', sliderValueText(axis, value));
+
+        // The chips mirror what THIS axis asks for, which is exactly what the
+        // aria-valuetext just announced; the draft card below shows what the
+        // store actually holds.
+        tagHost.textContent = '';
+        if (!tags.length) {
+          const none = document.createElement('span');
+          none.className = 'slider-empty';
+          none.textContent = 'neutral — no tags injected';
+          tagHost.appendChild(none);
+        } else {
+          for (let t = 0; t < tags.length; t += 1) {
+            const chip = document.createElement('span');
+            chip.className = 'chip slider-chip';
+            chip.textContent = tags[t];
+            tagHost.appendChild(chip);
+          }
+        }
+
+        // Per-source REPLACEMENT (never accumulation): the axis's previous
+        // contribution leaves and the new one arrives in one atomic swap.
+        promptState.setSource(source, tags);
+      };
+
+      input.addEventListener('input', paint);
+      input.addEventListener('change', paint);
+      sliderControls.push({ input: input, paint: paint });
+      paint();
+    }
+
+    /* -- C. the cinematic scene generator -- */
+
+    const sceneInput = $('scene-input');
+    const sceneOptions = $('scene-options');
+    const sceneQuick = $('scene-quick');
+    const sceneStatus = $('scene-status');
+    const sceneAddBtn = $('btn-scene-add');
+
+    /**
+     * Match whatever is in the box and file the result under 'scene'. An
+     * unmatched phrase is reported as unmatched — the honest answer — rather
+     * than being turned into invented tokens.
+     */
+    function addScene() {
+      const typed = sceneInput.value.trim();
+      const scenes = matchScenes(sceneInput.value, MUSIC_KB);
+
+      if (!scenes.length) {
+        sceneStatus.className = 'dissect-status warn';
+        sceneStatus.textContent = typed
+          ? 'no scene match for “' + typed + '” — nothing was added. Try one of the triggers below.'
+          : 'type a scene, or pick one of the triggers below.';
+        return;
+      }
+
+      const labels = [];
+      // One scene is one action, however many tokens it carries.
+      const added = promptState.batch(function () {
+        let count = 0;
+        for (let i = 0; i < scenes.length; i += 1) {
+          labels.push(scenes[i].label);
+          const tokens = scenes[i].tokens;
+          for (let t = 0; t < tokens.length; t += 1) {
+            const id = promptState.add({
+              section: 'scene',
+              tag: tokens[t].tag,
+              weight: tokens[t].weight,
+              source: 'scene',
+            });
+            if (id) count += 1;
+          }
+        }
+        return count;
+      });
+
+      sceneStatus.className = 'dissect-status';
+      sceneStatus.textContent =
+        'matched ' + labels.join(', ') + ' — ' + plural(added, 'new token') + ' added.';
+      sceneInput.value = '';
+    }
+
+    // Both a datalist (type-ahead) and a chip row (browse), from the same KB
+    // list, so the card is usable whether the user knows what to type or not.
+    const sceneTriggers = sceneTriggerList(MUSIC_KB);
+    for (let i = 0; i < sceneTriggers.length; i += 1) {
+      const trigger = sceneTriggers[i];
+
+      const option = document.createElement('option');
+      option.value = trigger.phrase;
+      option.textContent = trigger.label;
+      sceneOptions.appendChild(option);
+
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip scene-trigger';
+      chip.textContent = trigger.label;
+      chip.title = 'Add the “' + trigger.label + '” scene tokens';
+      chip.addEventListener('click', function () {
+        sceneInput.value = trigger.phrase;
+        addScene();
+      });
+      sceneQuick.appendChild(chip);
+    }
+
+    sceneAddBtn.addEventListener('click', addScene);
+    sceneInput.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      addScene();
+    });
+
+    /* -- D. safe-mode add-to-prompt from the dissector -- */
+
+    /** How many strings Safe Mode held back from the last result. */
+    function strippedCount() {
+      if (!lastResult || !lastSafeResult) return 0;
+      const size = function (result) {
+        return (
+          result.genre_tokens.length +
+          result.instruments.length +
+          result.mood.length +
+          result.era.length
+        );
+      };
+      return size(lastResult) - size(lastSafeResult);
+    }
+
+    function renderSafeNote() {
+      const held = strippedCount();
+      safeNote.hidden = held === 0;
+      safeNote.textContent = held
+        ? 'Safe Mode held back ' +
+          plural(held, 'token') +
+          ' that repeated a name from your description. They stay in the raw JSON below but never reach the prompt.'
+        : '';
+    }
+
+    const ADD_GROUPS = {
+      genre: { label: 'genre', field: 'genre_tokens' },
+      mood: { label: 'mood', field: 'mood' },
+      instrument: { label: 'instrument', field: 'instruments' },
+      era: { label: 'era', field: 'era' },
+    };
+
+    /**
+     * Add one group of the last dissection to the draft.
+     *
+     * Reads from lastSafeResult, never from lastResult: the sanitiser is the
+     * gate every dissector-sourced tag passes through, in local, cloud and
+     * Ollama modes alike (FDD #24).
+     */
+    function addFromDissector(section) {
+      const group = ADD_GROUPS[section];
+      // `offered` is what the dissection actually had to give, which is NOT the
+      // same as what was new. Reporting only `added` would tell a user whose
+      // dissection found no era at all that "those are already in the draft".
+      const tally = { offered: 0, added: 0 };
+      if (!group || !lastSafeResult) return tally;
+      const values = lastSafeResult[group.field];
+      tally.offered = values.length;
+      promptState.batch(function () {
+        for (let i = 0; i < values.length; i += 1) {
+          const value = values[i];
+          const seed =
+            section === 'genre'
+              ? { section: 'genre', tag: value.tag, weight: value.weight, source: 'dissector' }
+              : { section: section, tag: value, source: 'dissector' };
+          if (promptState.add(seed)) tally.added += 1;
+        }
+      });
+      return tally;
+    }
+
+    /** Say what actually happened — all four outcomes are different. */
+    function announceAdd(tally, what) {
+      if (!lastSafeResult) {
+        toastHost.show('Dissect something first.', 'warn');
+        return;
+      }
+      if (tally.added > 0) {
+        toastHost.show('Added ' + plural(tally.added, what + ' tag') + ' to the draft.');
+        return;
+      }
+      if (tally.offered === 0) {
+        const nothing =
+          what === 'dissected'
+            ? 'That dissection produced nothing to add'
+            : 'That dissection found no ' + what + ' tags to add';
+        toastHost.show(
+          nothing + (strippedCount() ? ' — Safe Mode held back what it did find.' : '.'),
+          'warn'
+        );
+        return;
+      }
+      toastHost.show(
+        'Nothing new — ' + plural(tally.offered, what + ' tag') + ' already in the draft.',
+        'warn'
+      );
+    }
+
+    $('btn-add-genres').addEventListener('click', function () {
+      announceAdd(addFromDissector('genre'), 'genre');
+    });
+    $('btn-add-instruments').addEventListener('click', function () {
+      announceAdd(addFromDissector('instrument'), 'instrument');
+    });
+    $('btn-add-moods').addEventListener('click', function () {
+      announceAdd(addFromDissector('mood'), 'mood');
+    });
+    $('btn-add-era').addEventListener('click', function () {
+      announceAdd(addFromDissector('era'), 'era');
+    });
+    $('btn-add-all').addEventListener('click', function () {
+      // One outer batch: four groups, up to thirty tags, ONE draft repaint.
+      const tally = promptState.batch(function () {
+        const total = { offered: 0, added: 0 };
+        for (const section of ['genre', 'mood', 'instrument', 'era']) {
+          const part = addFromDissector(section);
+          total.offered += part.offered;
+          total.added += part.added;
+        }
+        return total;
+      });
+      announceAdd(tally, 'dissected');
+    });
+
+    renderDraft();
 
     applyPreset();
     syncModeUi();

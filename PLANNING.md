@@ -2,16 +2,16 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Implement Layman Vibe Translators (Scene generator, 3-axis physical sliders, Safe-Mode artist dissector).
+- [ ] Build the Drag-and-Drop Structure Builder (`[Intro]`, `[Chorus]`, etc.) with the `Ctrl+Z` undo/redo stack.
 
 ## NEXT
-- [ ] Build the Drag-and-Drop Structure Builder (`[Intro]`, `[Chorus]`, etc.) with the `Ctrl+Z` undo/redo stack.
 - [ ] Implement the Live 1,000-Character Limiter, Token Compactor, and Tag Conflict Resolution Engine.
 - [ ] Develop the `.mid` export function, translating the tracked pitch contour into MIDI events for direct import into Ableton or FL Studio.
 - [ ] Implement `localStorage` state persistence, virtualized DOM lists for presets, and JSON backup/restore.
 - [ ] Run the comprehensive nightly E2E verification across all 50 features and tag `v1.0.0-release`.
 
 ## DONE
+- [x] Implement Layman Vibe Translators (Scene generator, 3-axis physical sliders, Safe-Mode artist dissector).
 - [x] Full theming system (owner request): configurable color tokens, dark/light switcher, Studio Daylight light theme.
 - [x] Implement the 3D WebGL Frequency Visualizer and bind it to the Web Worker's output array.
 - [x] Scaffold the Obsidian Studio CSS layout using CSS Container Queries and native View Transitions.
