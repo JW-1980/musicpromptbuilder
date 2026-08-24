@@ -32,13 +32,18 @@
        shared working set every translator writes into, plus the pure
        sliderTags / sliderValueText (FEATURE-MECHANICS §4), matchScenes and
        the Safe-Mode sanitizer (sanitizeSafeMode and its vocabulary helpers)
-    5. the studio shell (createViewManager, tabKeyTarget, the theming layer —
+    5. the Song Structure Builder (FDD Domain D) — the SUNO_METATAGS taxonomy
+       and its sanitiser/compiler (validateMetatag, sanitizeStructureTag,
+       formatStructureTag), createStructureState with the §2.3 auto-chorus
+       refrain, and createHistoryStack plus the pure keybinding predicates
+       (isTextEntryTarget, structureShortcut, structureMoveShortcut)
+    6. the studio shell (createViewManager, tabKeyTarget, the theming layer —
        THEMABLE_TOKENS, normalizeColorValue, parseColorParts,
        composeColorValue, createThemePrefs, applyThemeState)
-    6. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
+    7. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
        the pure mesh/level/colour helpers (buildRibbonGeometry, downsampleBuffer,
        valenceToColor, pushRibbonRow, perspectiveMatrix4) plus createRibbonRenderer
-    7. the boot IIFE
+    8. the boot IIFE
 -->
 <style>
   /* ==========================================================================
@@ -1037,6 +1042,7 @@
      control in this view reflows against its own column width. */
   .scene-panel,
   .slider-panel,
+  .structure-panel,
   .draft-panel { container-name: dissector; }
 
   .vibe-grid { margin-top: 24px; }
@@ -1244,6 +1250,242 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* --- Song structure builder (FDD #39/#40/#42/#50) ----------------------- */
+
+  .structure-panel { margin-top: 24px; }
+
+  kbd {
+    padding: 1px 5px;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--text);
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 5px;
+  }
+
+  /* The metatag library (FDD #42). Two rows because §3.1 is two lists, and a
+     tag's row is the only thing that says which kind it is. */
+  .structure-palette {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .structure-palette-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .structure-palette-label {
+    min-width: 46px;
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .structure-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .metatag-chip { font-family: var(--font-mono); }
+
+  .structure-toolbar {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .structure-history {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* A disabled Undo says so with a dashed edge and dim text, never with
+     opacity: Code Mode's whole job is legibility and a faded control is the
+     first thing it would lose. */
+  .btn-mini[disabled] {
+    color: var(--text-dim);
+    border-style: dashed;
+    cursor: not-allowed;
+  }
+
+  .btn-mini[disabled]:hover {
+    color: var(--text-dim);
+    border-color: var(--surface-border);
+  }
+
+  .structure-status {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  .structure-blocks {
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .structure-blocks:empty { display: none; }
+
+  .structure-block {
+    padding: 12px;
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+  }
+
+  /* Drag feedback (FDD #39). The insertion indicator is an inset edge rather
+     than a moved placeholder, so the list never reflows under the pointer
+     mid-drag and the drop lands where the line says it will. */
+  .structure-block.is-dragging { border-color: var(--accent-cyan); border-style: dashed; }
+  .structure-block.is-drop-before { box-shadow: inset 0 3px 0 0 var(--accent-cyan); }
+  .structure-block.is-drop-after { box-shadow: inset 0 -3px 0 0 var(--accent-cyan); }
+
+  .structure-block-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .structure-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    cursor: grab;
+  }
+
+  .structure-handle:active { cursor: grabbing; }
+  .structure-handle:hover { color: var(--text); border-color: var(--accent-cyan); }
+
+  .structure-handle:focus-visible,
+  .structure-lyrics:focus-visible,
+  .structure-mods:focus-visible,
+  .structure-preview:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  /* The compiled tag line. Violet is the metatag colour everywhere in this app
+     (FDD #15), so a block reads as the same object as its compiled line. */
+  .structure-tag {
+    flex: 1 1 160px;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--accent-violet);
+    overflow-wrap: anywhere;
+  }
+
+  .structure-block-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .structure-block-body {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .structure-mods {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+  }
+
+  .structure-mods-note {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    line-height: 1.45;
+    color: var(--warning-amber);
+  }
+
+  .structure-mods-note[hidden] { display: none; }
+
+  .structure-lyrics {
+    width: 100%;
+    min-height: 56px;
+    margin-top: 6px;
+    padding: 10px 12px;
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.6;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    resize: vertical;
+    /* auto, never hidden: the box is sized to its content, and if a resize
+       ever leaves that height stale the extra lines scroll rather than
+       becoming invisible. Lyrics must never be silently clipped. */
+    overflow: auto;
+  }
+
+  .structure-preview-heading {
+    margin: 20px 0 0;
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .structure-preview-heading[hidden] { display: none; }
+
+  .structure-refrain-note {
+    margin: 10px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--accent-cyan);
+  }
+
+  .structure-refrain-note[hidden] { display: none; }
+
+  .structure-preview {
+    margin: 8px 0 0;
+    max-height: 340px;
+    padding: 14px;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.6;
+    color: var(--text);
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+    white-space: pre-wrap;
+    overflow: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .structure-preview[hidden] { display: none; }
+
   /* --- Toasts (FEATURE-MECHANICS.md §7.3 step 4) -------------------------- */
 
   .toast-host {
@@ -1329,6 +1571,12 @@
     .scene-row { flex-direction: column; align-items: stretch; }
     .scene-row .field { width: 100%; }
     .draft-foot { align-items: stretch; flex-direction: column; }
+    /* A narrow structure card stacks the block toolbar rather than letting the
+       tag line, the handle and four buttons fight over one line. */
+    .structure-toolbar { align-items: stretch; flex-direction: column; }
+    .structure-block-head { align-items: stretch; flex-direction: column; }
+    .structure-tag { flex: 1 1 auto; }
+    .structure-palette-row { flex-direction: column; align-items: flex-start; gap: 6px; }
   }
 
   /* ==========================================================================
@@ -1466,6 +1714,23 @@
      that Safe Mode is holding this token back, so it survives the mode that
      flattens every badge border to the same solid rule above. */
   .high-contrast .genre-badge.is-unsafe { border-style: dashed; }
+
+  /* The structure card's own recessed surfaces. Code Mode flattens every
+     ground to black, so the block and its lyric box are told apart by their
+     borders alone — which the token above has already made legible. */
+  .high-contrast .structure-block,
+  .high-contrast .structure-lyrics,
+  .high-contrast .structure-handle,
+  .high-contrast kbd {
+    background: var(--bg);
+    border: 1px solid var(--surface-border);
+  }
+
+  /* A block's tag line is primary text, not a badge. Violet is 3.52:1 on black
+     (see the table above) — enough for a label, not for a line you read — so
+     in the legibility mode it takes the full-contrast foreground instead. The
+     compiled sheet below it already reads at --text in every mode. */
+  .high-contrast .structure-tag { color: var(--text); }
 
   .high-contrast .badge-weight { color: var(--text-dim); }
   .high-contrast .dissect-input::placeholder { color: var(--text-dim); }
@@ -1859,6 +2124,69 @@
       </div>
     </section>
     </div>
+
+    <!-- Song structure (docs/FDD.md Domain D #39/#40/#42/#50, over
+         FEATURE-MECHANICS.md §2.3 and §3.1-§3.2). It sits ABOVE the prompt
+         draft because a Suno submission is two fields: the style prompt the
+         draft card compiles, and the structure sheet compiled here. Reading
+         order follows the order they are filled in. -->
+    <section class="view-col vibe-card structure-panel" aria-labelledby="structure-heading">
+      <h3 id="structure-heading" class="panel-heading">Song structure</h3>
+      <p class="panel-note">
+        Click a metatag to append a block, then reorder the flow by dragging a handle,
+        pressing Move up / Move down, or holding <kbd>Alt</kbd> with the arrow keys.
+        Only the official Suno v5.5 tags reach the sheet — anything else is replaced
+        rather than passed through — and a tag carries at most four modifiers.
+        <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes, <kbd>Ctrl</kbd>+<kbd>Y</kbd> redoes,
+        except while you are typing in a lyric box, where those keys stay the
+        browser's own.
+      </p>
+
+      <div class="structure-palette" role="group" aria-label="Suno v5.5 metatag library">
+        <div class="structure-palette-row">
+          <span class="structure-palette-label" id="structure-core-label">Core</span>
+          <div id="structure-core" class="structure-chips" role="group"
+               aria-labelledby="structure-core-label"></div>
+        </div>
+        <div class="structure-palette-row">
+          <span class="structure-palette-label" id="structure-action-label">Action</span>
+          <div id="structure-action" class="structure-chips" role="group"
+               aria-labelledby="structure-action-label"></div>
+        </div>
+      </div>
+
+      <div class="structure-toolbar">
+        <div class="structure-history" role="group" aria-label="Structure history">
+          <button type="button" id="btn-undo" class="btn-mini" disabled
+                  aria-keyshortcuts="Control+Z">Undo</button>
+          <button type="button" id="btn-redo" class="btn-mini" disabled
+                  aria-keyshortcuts="Control+Y Control+Shift+Z">Redo</button>
+        </div>
+        <span id="structure-status" class="structure-status" role="status" aria-live="polite"></span>
+      </div>
+
+      <p id="structure-empty" class="draft-empty">
+        No blocks yet — pick a metatag above and the song flow starts there.
+      </p>
+      <ol id="structure-blocks" class="structure-blocks" aria-label="Song flow blocks"></ol>
+
+      <h4 id="structure-preview-heading" class="structure-preview-heading" hidden>
+        Compiled structure sheet
+      </h4>
+      <p id="structure-refrain-note" class="structure-refrain-note" role="status"
+         aria-live="polite" hidden></p>
+      <pre id="structure-preview" class="structure-preview" role="region" tabindex="0"
+           aria-labelledby="structure-preview-heading" hidden></pre>
+      <div class="draft-foot">
+        <!-- Deliberately NOT a live region, unlike the draft card's counts:
+             this number changes on every keystroke in a lyric box, and a
+             screen reader announcing "241 characters, 242 characters…" over
+             the words being typed would be unusable. #structure-status above
+             is the live region, and it announces the discrete actions. -->
+        <span id="structure-counts" class="draft-counts">0 blocks · 0 characters</span>
+        <button type="button" id="btn-structure-copy" class="btn-mini">Copy structure</button>
+      </div>
+    </section>
 
     <section class="view-col vibe-card draft-panel" aria-labelledby="draft-heading">
       <h3 id="draft-heading" class="panel-heading">Prompt draft</h3>
@@ -2774,7 +3102,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.9.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -6419,6 +6747,843 @@ function sanitizeSafeMode(inputText, result, kb) {
   return out;
 }
 
+/* ==========================================================================
+ * SONG STRUCTURE BUILDER — docs/FDD.md Domain D, over
+ * docs/FEATURE-MECHANICS.md §2.3, §3.1 and §3.2.
+ *
+ *   #39 Drag-and-drop song flow canvas    #40 Undo/redo history stack
+ *   #42 Official Suno v5.5 metatag library #50 Auto-chorus refrain
+ *
+ * THREE PIECES, ONE DIRECTION OF FLOW
+ *   taxonomy (pure)  — what a tag may be, and what an invalid one becomes;
+ *   state    (store) — the ordered list of blocks and the compiled sheet;
+ *   history  (pure)  — snapshots of that store, walked by Ctrl+Z / Ctrl+Y.
+ * Only the boot IIFE below knows about the DOM; every rule here is testable
+ * without one, which is what tests/structure-builder.test.js does.
+ *
+ * WHAT IS DELIBERATELY NOT HERE
+ *   No syllable heatmap, no rhyme-scheme highlighting, no duet cue formatting
+ *   (FDD #43/#44/#51/#52): those are their own queued tasks and faking a
+ *   half of one here would be a stub (docs/ENGINEERING-STANDARD.md §1.1).
+ *   No character budget either — the compiled sheet is measured and reported,
+ *   never trimmed, because the 1,000-character limiter (FDD #67) is the NEXT
+ *   task and a truncation faked here would silently edit the user's lyrics.
+ * ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* A. METATAG TAXONOMY — FEATURE-MECHANICS.md §3.1 (validation) and §3.2      */
+/*    (the three-level hierarchy)                                             */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * VERBATIM from docs/FEATURE-MECHANICS.md §3.1 — the Core Base Tags and the
+ * Special Action Tags, in the order the spec lists them (which is the order
+ * the palette renders). tests/structure-builder.test.js holds a second,
+ * independently typed copy and compares the two element by element, so a typo
+ * here fails a test instead of quietly redefining the taxonomy.
+ */
+var SUNO_METATAGS = {
+  core: ['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Post-Chorus', 'Bridge', 'Outro', 'End'],
+  action: ['Instrumental', 'Interlude', 'Break', 'Drop', 'Build', 'Hook'],
+};
+
+/*
+ * §3.1's own worked example of the rejection rule is "[Epic Solo Part 2] ->
+ * [Guitar Solo]", so [Guitar Solo] is a legal OUTPUT of the sanitiser even
+ * though it is not one of the fourteen taxonomy tags. That asymmetry is
+ * deliberate and it is why validateMetatag() and sanitizeStructureTag() are
+ * two different questions:
+ *   validateMetatag('Guitar Solo')      -> {valid: false} — not §3.1 taxonomy
+ *   sanitizeStructureTag('Guitar Solo') -> 'Guitar Solo'  — the standard tag
+ *                                                           a solo becomes
+ */
+var STRUCTURE_SOLO_TAG = 'Guitar Solo';
+
+/** Where a tag nothing in the table recognises lands. Never a guess. */
+var STRUCTURE_FALLBACK_TAG = 'Interlude';
+
+/** §3.2: "Modifiers inside brackets must not exceed 4 comma-separated terms". */
+var STRUCTURE_MAX_MODIFIERS = 4;
+
+/** Bumped only if the toJSON() shape ever changes incompatibly. */
+var STRUCTURE_STATE_VERSION = 1;
+
+/*
+ * ALIAS TABLE — the §3.1 rejection rule, written out.
+ *
+ * Matching is case-insensitive and at WORD BOUNDARIES, and the table is
+ * ordered longest-idea-first so a compound never loses to its own suffix
+ * ("breakdown" must be read before "break").
+ *
+ *   typed (anything containing…)            ->  standard tag
+ *   ------------------------------------------------------------------
+ *   beat drop / bass drop / beatdrop            [Drop]
+ *   build-up / buildup / build up / riser       [Build]
+ *   breakdown                                   [Break]
+ *   solo  (e.g. "Epic Solo Part 2")             [Guitar Solo]   <- §3.1's own
+ *   pre-chorus / prechorus / pre chorus         [Pre-Chorus]       example
+ *   post-chorus / postchorus / post chorus      [Post-Chorus]
+ *   refrain                                     [Chorus]
+ *   chorus                                      [Chorus]
+ *   verse                                       [Verse]
+ *   intro / introduction                        [Intro]
+ *   outro                                       [Outro]
+ *   bridge / middle eight                       [Bridge]
+ *   hook                                        [Hook]
+ *   drop                                        [Drop]
+ *   build                                       [Build]
+ *   break                                       [Break]
+ *   instrumental                                [Instrumental]
+ *   interlude                                   [Interlude]
+ *   end / ending / finale / fade out            [End]
+ *   ------------------------------------------------------------------
+ *   anything else                               [Interlude]  (the fallback)
+ *
+ * A NUMBER SURVIVES ONLY A DIRECT NAMING. "Verse 2" and "refrain 3" are the
+ * user naming a numbered section, so they compile to [Verse 2] and [Chorus 3];
+ * "Epic Solo Part 2" is a hallucinated tag that merely happens to end in a
+ * digit, so it compiles to [Guitar Solo] and the 2 goes with the rest of it.
+ */
+var STRUCTURE_ALIASES = [
+  { words: '(?:beat|bass)[\\s-]?drop', tag: 'Drop' },
+  { words: 'build[\\s-]?up|risers?', tag: 'Build' },
+  { words: 'break[\\s-]?down', tag: 'Break' },
+  { words: 'solos?', tag: STRUCTURE_SOLO_TAG },
+  { words: 'pre[\\s-]?chorus', tag: 'Pre-Chorus' },
+  { words: 'post[\\s-]?chorus', tag: 'Post-Chorus' },
+  { words: 'refrains?', tag: 'Chorus' },
+  { words: 'chorus(?:es)?', tag: 'Chorus' },
+  { words: 'verses?', tag: 'Verse' },
+  { words: 'intro(?:duction)?', tag: 'Intro' },
+  { words: 'outro', tag: 'Outro' },
+  { words: 'bridge|middle\\s?eight', tag: 'Bridge' },
+  { words: 'hooks?', tag: 'Hook' },
+  { words: 'drops?', tag: 'Drop' },
+  { words: 'builds?', tag: 'Build' },
+  { words: 'breaks?', tag: 'Break' },
+  { words: 'instrumental', tag: 'Instrumental' },
+  { words: 'interlude', tag: 'Interlude' },
+  { words: 'end(?:ing)?|finale|fade[\\s-]?out', tag: 'End' },
+];
+
+/**
+ * The text of a tag as the taxonomy sees it: whitespace collapsed, brackets
+ * removed. A tag pasted WITH its brackets ("[Chorus]") is the same request as
+ * one without, and a stray bracket in the middle is dropped rather than
+ * carried into the compiled output where it would break the syntax.
+ *
+ * @param {*} raw
+ * @returns {string}
+ */
+function structureTagText(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/[[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The §3.1 tag this text names exactly, in the taxonomy's own casing.
+ * @param {string} text
+ * @returns {string|null}
+ */
+function standardMetatag(text) {
+  var all = SUNO_METATAGS.core.concat(SUNO_METATAGS.action);
+  var lower = String(text === undefined || text === null ? '' : text).toLowerCase();
+  for (var i = 0; i < all.length; i += 1) {
+    if (all[i].toLowerCase() === lower) return all[i];
+  }
+  return null;
+}
+
+/** Alias lookup where the WHOLE text is the alias ("refrain", "build up"). */
+function structureAliasExact(text) {
+  var value = String(text === undefined || text === null ? '' : text);
+  for (var i = 0; i < STRUCTURE_ALIASES.length; i += 1) {
+    if (new RegExp('^(?:' + STRUCTURE_ALIASES[i].words + ')$', 'i').test(value)) {
+      return STRUCTURE_ALIASES[i].tag;
+    }
+  }
+  return null;
+}
+
+/** Alias lookup where the alias appears SOMEWHERE ("Epic Solo Part 2"). */
+function structureAliasWithin(text) {
+  var value = String(text === undefined || text === null ? '' : text);
+  for (var i = 0; i < STRUCTURE_ALIASES.length; i += 1) {
+    if (new RegExp('\\b(?:' + STRUCTURE_ALIASES[i].words + ')\\b', 'i').test(value)) {
+      return STRUCTURE_ALIASES[i].tag;
+    }
+  }
+  return null;
+}
+
+/**
+ * Is this one of the fourteen §3.1 taxonomy tags?
+ *
+ * The honest, narrow question — it answers for the LIBRARY, not for the
+ * sanitiser. Case-insensitive, bracket-tolerant, and it never invents a tag:
+ * anything else comes back {valid: false, tag: null}.
+ *
+ * @param {*} raw
+ * @returns {{valid: boolean, tag: string|null}}
+ */
+function validateMetatag(raw) {
+  var text = structureTagText(raw);
+  if (!text) return { valid: false, tag: null };
+  var tag = standardMetatag(text);
+  return tag ? { valid: true, tag: tag } : { valid: false, tag: null };
+}
+
+/**
+ * The §3.1 rejection rule: every input becomes a STANDARD tag, always.
+ *
+ *   1. an exact taxonomy tag passes through in the taxonomy's casing;
+ *   2. a taxonomy tag or a whole-string alias followed by a number keeps that
+ *      number ("verse 2" -> "Verse 2", "refrain 3" -> "Chorus 3");
+ *   3. anything containing a known alias becomes that alias's tag
+ *      ("Epic Solo Part 2" -> "Guitar Solo");
+ *   4. anything else becomes the [Interlude] fallback — a real section that
+ *      says "something happens here", rather than a hallucinated tag Suno
+ *      would ignore or misread.
+ *
+ * @param {*} raw
+ * @returns {string} always a standard tag, never '' and never null
+ */
+function sanitizeStructureTag(raw) {
+  var text = structureTagText(raw);
+  if (!text) return STRUCTURE_FALLBACK_TAG;
+
+  var exact = standardMetatag(text);
+  if (exact) return exact;
+
+  var numbered = /^(.*?)[\s:_.-]*(\d{1,3})$/.exec(text);
+  if (numbered) {
+    var head = numbered[1].replace(/\s+/g, ' ').trim();
+    var count = parseInt(numbered[2], 10);
+    if (head) {
+      var named = standardMetatag(head) || structureAliasExact(head);
+      if (named) return count >= 1 ? named + ' ' + count : named;
+    }
+  }
+
+  var alias = structureAliasWithin(text);
+  if (alias) return alias;
+
+  return STRUCTURE_FALLBACK_TAG;
+}
+
+/**
+ * Split a sanitised tag into its section and the number written into it, so
+ * "Verse 2" and ("Verse", 2) are the same thing however they arrive.
+ *
+ * @param {*} raw
+ * @returns {{section: string, number: number|null}}
+ */
+function splitStructureTag(raw) {
+  var tag = sanitizeStructureTag(raw);
+  var m = /^(.*\S)\s(\d{1,3})$/.exec(tag);
+  if (m) return { section: m[1], number: parseInt(m[2], 10) };
+  return { section: tag, number: null };
+}
+
+/** A section number, or null for "this section is not numbered". */
+function structureNumber(value) {
+  if (typeof value !== 'number' || !isFinite(value)) return null;
+  var n = Math.floor(value);
+  return n >= 1 ? n : null;
+}
+
+/**
+ * Split a typed modifier line into terms. UNCLAMPED on purpose: the UI needs
+ * to know how many the user asked for before it can say how many were
+ * discarded. clampModifiers() is what enforces §3.2's ceiling.
+ *
+ * @param {*} text
+ * @returns {string[]}
+ */
+function parseModifierList(text) {
+  if (typeof text !== 'string') return [];
+  var parts = text.split(',');
+  var out = [];
+  for (var i = 0; i < parts.length; i += 1) {
+    var value = parts[i].replace(/\s+/g, ' ').trim();
+    if (value) out.push(value);
+  }
+  return out;
+}
+
+/**
+ * §3.2's constraint: "must not exceed 4 comma-separated terms. Discard
+ * lowest-priority traits if exceeded."
+ *
+ * PRIORITY IS THE GIVEN ORDER. The user (or the caller) writes the most
+ * important modifier first, exactly as Suno reads it, so the first four
+ * survive and the rest are dropped — no re-ranking is invented here.
+ *
+ * Commas and brackets are stripped from inside a term as well, so a term
+ * cannot smuggle a fifth trait past the ceiling or break the bracket syntax.
+ *
+ * @param {*} list
+ * @returns {string[]} at most STRUCTURE_MAX_MODIFIERS entries
+ */
+function clampModifiers(list) {
+  var out = [];
+  if (!isArrayLike(list)) return out;
+  for (var i = 0; i < list.length; i += 1) {
+    if (out.length >= STRUCTURE_MAX_MODIFIERS) break;
+    if (typeof list[i] !== 'string') continue;
+    var value = list[i].replace(/[[\],]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (value) out.push(value);
+  }
+  return out;
+}
+
+/**
+ * The §3.2 three-level hierarchy, compiled:
+ *
+ *   1. Section          'Verse', plus its number      -> "Verse 1"
+ *   2. Local modifiers  ['intimate', 'sparse']        -> "intimate, sparse"
+ *   3. Compiled output                                -> "[Verse 1 - intimate, sparse]"
+ *
+ * The section is sanitised on the way through, so no invalid tag can reach a
+ * compiled sheet by any path. A number written into the section itself is
+ * honoured when no explicit one is given.
+ *
+ * @param {string} section
+ * @param {number|null} [number]
+ * @param {string[]} [modifiers]
+ * @returns {string}
+ */
+function formatStructureTag(section, number, modifiers) {
+  var parsed = splitStructureTag(section);
+  var explicit = structureNumber(number);
+  var n = explicit === null ? parsed.number : explicit;
+  var mods = clampModifiers(modifiers);
+  var head = parsed.section + (n === null ? '' : ' ' + n);
+  return '[' + head + (mods.length ? ' - ' + mods.join(', ') : '') + ']';
+}
+
+/* -------------------------------------------------------------------------- */
+/* B. STRUCTURE STATE — the ordered song flow and its compiled sheet          */
+/* -------------------------------------------------------------------------- */
+
+/** Line endings normalised, so a pasted Windows lyric compiles identically. */
+function normalizeLyrics(text) {
+  if (typeof text !== 'string') return '';
+  return text.replace(/\r\n?/g, '\n');
+}
+
+/**
+ * The lyric text as it is WRITTEN INTO the sheet: leading blank lines and
+ * trailing whitespace removed, everything the user typed in between kept
+ * exactly. Also the emptiness test — a block holding only blank lines has no
+ * lyrics to recall, so it can never trigger the auto-chorus refrain.
+ */
+function lyricBody(text) {
+  return normalizeLyrics(text).replace(/^\n+/, '').replace(/\s+$/, '');
+}
+
+/**
+ * The song flow: an ordered list of section blocks, and the compiler that
+ * turns them into the structure sheet the user pastes into Suno.
+ *
+ * Block: {id, section, number, modifiers, lyrics}
+ *   section   — always a STANDARD tag (sanitizeStructureTag), never raw input
+ *   number    — derived, never stored by a caller; see the numbering rule
+ *   modifiers — at most STRUCTURE_MAX_MODIFIERS, in priority order
+ *
+ * THE NUMBERING RULE. A section is numbered only when the flow holds TWO OR
+ * MORE of it, and the whole flow is renumbered after every change. One verse
+ * compiles to [Verse]; add a second and they become [Verse 1] and [Verse 2];
+ * delete the first and the survivor goes back to [Verse]. The alternative —
+ * always numbering — ships "[Verse 1]" in a song with one verse, which tells
+ * Suno a second verse exists somewhere and never arrives.
+ *
+ * Invariants:
+ *   - ids are stable, unique, and never reused for the life of the store;
+ *   - every mutation that CHANGED something notifies subscribers exactly once,
+ *     and a subscriber that throws can break neither the store nor its peers;
+ *   - nothing is ever rejected silently: an unusable section is sanitised into
+ *     a standard tag and that tag is what gets used.
+ *
+ * @param {{idPrefix?: string}} [deps]
+ */
+function createStructureState(deps) {
+  var d = deps || {};
+  var prefix = typeof d.idPrefix === 'string' && d.idPrefix ? d.idPrefix : 'block';
+
+  /** @type {Array<{id:string, section:string, number:number|null, modifiers:string[], lyrics:string}>} */
+  var blocks = [];
+  /** @type {Array<{fn: Function}>} */
+  var subscribers = [];
+  var seq = 0;
+
+  function publicBlock(block) {
+    return {
+      id: block.id,
+      section: block.section,
+      number: block.number,
+      modifiers: block.modifiers.slice(),
+      lyrics: block.lyrics,
+    };
+  }
+
+  function list() {
+    var out = [];
+    for (var i = 0; i < blocks.length; i += 1) out.push(publicBlock(blocks[i]));
+    return out;
+  }
+
+  function indexOfId(id) {
+    var wanted = String(id);
+    for (var i = 0; i < blocks.length; i += 1) {
+      if (blocks[i].id === wanted) return i;
+    }
+    return -1;
+  }
+
+  /** THE NUMBERING RULE, applied to the whole flow after every change. */
+  function renumber() {
+    var totals = {};
+    var seen = {};
+    var i;
+    for (i = 0; i < blocks.length; i += 1) {
+      totals[blocks[i].section] = (totals[blocks[i].section] || 0) + 1;
+    }
+    for (i = 0; i < blocks.length; i += 1) {
+      var section = blocks[i].section;
+      if (totals[section] < 2) {
+        blocks[i].number = null;
+        continue;
+      }
+      seen[section] = (seen[section] || 0) + 1;
+      blocks[i].number = seen[section];
+    }
+  }
+
+  /**
+   * An insertion/target position: anything unreadable means "the end", and
+   * anything out of range is CLAMPED rather than refused — a drop past the
+   * last block is a drop at the last block, which is what the gesture meant.
+   */
+  function clampIndex(value, max) {
+    if (typeof value !== 'number' || !isFinite(value)) return max;
+    var n = Math.round(value);
+    if (n < 0) return 0;
+    if (n > max) return max;
+    return n;
+  }
+
+  /** Same isolation contract as createPromptState: the store settles first. */
+  function notify() {
+    var snapshot = subscribers.slice();
+    var view = list();
+    for (var i = 0; i < snapshot.length; i += 1) {
+      try {
+        snapshot[i].fn(view);
+      } catch (err) {
+        // A broken subscriber is the subscriber's problem, not the store's.
+      }
+    }
+  }
+
+  /** One block as it appears in the sheet: its tag line, then its lyrics. */
+  function blockSheet(block) {
+    var tag = formatStructureTag(block.section, block.number, block.modifiers);
+    var body = lyricBody(block.lyrics);
+    return body ? tag + '\n' + body : tag;
+  }
+
+  /**
+   * THE AUTO-CHORUS REFRAIN — docs/FEATURE-MECHANICS.md §2.3, exactly.
+   *
+   * "If the user creates a [Chorus] block in the drag-and-drop builder, the
+   *  engine stores the text inside it. When the prompt is compiled, if the
+   *  structure ends without a final chorus, the engine must automatically
+   *  append [Chorus] and the exact stored text before the [Outro] metatag to
+   *  force Suno to recall the melody."
+   *
+   * Read literally, which is what this does:
+   *   - the text comes from the FIRST chorus that has any (a later chorus is
+   *     a variation; the first is the one the listener learned);
+   *   - "ends without a final chorus" is judged on the last CONTENT block —
+   *     the closing [Outro]/[End] pair is the frame, not the ending;
+   *   - the refrain lands immediately before that frame, so it precedes the
+   *     [Outro] (and therefore the [End] behind it) as the rule requires;
+   *   - with no closing frame at all there is nothing to precede, so it goes
+   *     at the very end;
+   *   - and it is never appended twice, because a flow that already ends on a
+   *     chorus already does what the rule is for.
+   *
+   * @returns {{applied: boolean, index: number, lyrics: string, sourceId: string|null, reason: string}}
+   */
+  function autoChorus() {
+    var i;
+    var source = null;
+    for (i = 0; i < blocks.length; i += 1) {
+      if (blocks[i].section === 'Chorus' && lyricBody(blocks[i].lyrics)) {
+        source = blocks[i];
+        break;
+      }
+    }
+    if (!source) {
+      return {
+        applied: false,
+        index: -1,
+        lyrics: '',
+        sourceId: null,
+        reason: 'no chorus block holds any lyrics to recall',
+      };
+    }
+
+    var tail = blocks.length;
+    while (tail > 0 && (blocks[tail - 1].section === 'Outro' || blocks[tail - 1].section === 'End')) {
+      tail -= 1;
+    }
+    if (tail > 0 && blocks[tail - 1].section === 'Chorus') {
+      return {
+        applied: false,
+        index: -1,
+        lyrics: '',
+        sourceId: source.id,
+        reason: 'the flow already ends on a chorus',
+      };
+    }
+
+    return {
+      applied: true,
+      index: tail,
+      lyrics: lyricBody(source.lyrics),
+      sourceId: source.id,
+      reason:
+        tail < blocks.length
+          ? 'repeated before the closing ' + blocks[tail].section.toLowerCase()
+          : 'repeated at the end of the flow',
+    };
+  }
+
+  /**
+   * The structure sheet: one formatted tag line per block, its lyrics under
+   * it, a blank line between blocks, plus the §2.3 refrain when it applies.
+   */
+  function compile() {
+    var parts = [];
+    var i;
+    for (i = 0; i < blocks.length; i += 1) parts.push(blockSheet(blocks[i]));
+    var refrain = autoChorus();
+    if (refrain.applied) parts.splice(refrain.index, 0, '[Chorus]\n' + refrain.lyrics);
+    return parts.join('\n\n');
+  }
+
+  return {
+    /**
+     * @param {string} section any text; it is sanitised into a standard tag
+     * @param {number} [index] where to insert; omitted or out of range appends
+     * @returns {string} the new block's id
+     */
+    addBlock: function (section, index) {
+      // A number typed into the section is dropped here on purpose: numbering
+      // is DERIVED from the flow, so honouring "Verse 7" would produce a
+      // number the very next renumber() overwrites.
+      var parsed = splitStructureTag(section);
+      seq += 1;
+      var block = {
+        id: prefix + '-' + seq,
+        section: parsed.section,
+        number: null,
+        modifiers: [],
+        lyrics: '',
+      };
+      blocks.splice(clampIndex(index, blocks.length), 0, block);
+      renumber();
+      notify();
+      return block.id;
+    },
+
+    /** @returns {boolean} true if a block with that id was there to remove */
+    removeBlock: function (id) {
+      var at = indexOfId(id);
+      if (at === -1) return false;
+      blocks.splice(at, 1);
+      renumber();
+      notify();
+      return true;
+    },
+
+    /**
+     * Move a block to a position in the RESULTING list. Out of range clamps to
+     * the ends; a move to where it already is changes nothing and publishes
+     * nothing, so a drag that lands where it started costs no undo step.
+     *
+     * @returns {boolean} true if the order actually changed
+     */
+    moveBlock: function (id, toIndex) {
+      var from = indexOfId(id);
+      if (from === -1) return false;
+      var to = clampIndex(toIndex, blocks.length - 1);
+      if (to === from) return false;
+      var moved = blocks.splice(from, 1)[0];
+      blocks.splice(to, 0, moved);
+      renumber();
+      notify();
+      return true;
+    },
+
+    /**
+     * @param {string} id
+     * @param {string[]} mods clamped to STRUCTURE_MAX_MODIFIERS (§3.2)
+     * @returns {string[]|null} the modifiers now held, or null for an unknown id
+     */
+    setModifiers: function (id, mods) {
+      var at = indexOfId(id);
+      if (at === -1) return null;
+      var next = clampModifiers(mods);
+      var before = blocks[at].modifiers;
+      var same = before.length === next.length;
+      for (var i = 0; same && i < next.length; i += 1) {
+        if (before[i] !== next[i]) same = false;
+      }
+      if (same) return next.slice();
+      blocks[at].modifiers = next;
+      notify();
+      return next.slice();
+    },
+
+    /** @returns {boolean} true if the stored text actually changed */
+    setLyrics: function (id, text) {
+      var at = indexOfId(id);
+      if (at === -1) return false;
+      var next = normalizeLyrics(text);
+      if (blocks[at].lyrics === next) return false;
+      blocks[at].lyrics = next;
+      notify();
+      return true;
+    },
+
+    /** @returns {Array<object>} copies, in flow order — never the store's own */
+    blocks: list,
+
+    compile: compile,
+
+    /**
+     * Why the compiled sheet does (or does not) carry a repeated chorus, so
+     * the UI can say so instead of the refrain appearing from nowhere.
+     */
+    autoChorus: autoChorus,
+
+    /**
+     * @param {(blocks:Array<object>) => void} fn
+     * @returns {() => void} unsubscribe; idempotent, safe to call any time
+     */
+    subscribe: function (fn) {
+      if (typeof fn !== 'function') {
+        return function () {};
+      }
+      var record = { fn: fn };
+      subscribers.push(record);
+      return function () {
+        var i = subscribers.indexOf(record);
+        if (i !== -1) subscribers.splice(i, 1);
+      };
+    },
+
+    /**
+     * A snapshot: plain, serialisable data. This is what the history stack
+     * stores and what a later localStorage/IndexedDB task will persist.
+     */
+    toJSON: function () {
+      return { version: STRUCTURE_STATE_VERSION, blocks: list() };
+    },
+
+    /**
+     * Restore a snapshot. Ids are kept so that focus, which is addressed by
+     * block id, survives an undo; the id counter is pushed past whatever the
+     * snapshot held so a later add can never collide with a restored block.
+     * A malformed member is sanitised, not trusted, and never throws.
+     *
+     * @returns {boolean} true if the payload was a snapshot at all
+     */
+    fromJSON: function (data) {
+      if (!data || typeof data !== 'object') return false;
+      if (!isArrayLike(data.blocks)) return false;
+
+      var next = [];
+      var used = {};
+      var highest = 0;
+      for (var i = 0; i < data.blocks.length; i += 1) {
+        var raw = data.blocks[i];
+        if (!raw || typeof raw !== 'object') continue;
+        var parsed = splitStructureTag(raw.section);
+        var id = typeof raw.id === 'string' && raw.id ? raw.id : '';
+        if (!id || Object.prototype.hasOwnProperty.call(used, id)) {
+          seq += 1;
+          id = prefix + '-' + seq;
+        }
+        used[id] = true;
+        var tail = /-(\d+)$/.exec(id);
+        if (tail && Number(tail[1]) > highest) highest = Number(tail[1]);
+        next.push({
+          id: id,
+          section: parsed.section,
+          number: null,
+          modifiers: clampModifiers(raw.modifiers),
+          lyrics: normalizeLyrics(raw.lyrics),
+        });
+      }
+
+      blocks = next;
+      if (highest > seq) seq = highest;
+      renumber();
+      notify();
+      return true;
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* C. UNDO / REDO — FDD #40                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** FDD #40 says nothing about depth; 100 steps is the history bank's cap too. */
+var HISTORY_DEFAULT_LIMIT = 100;
+
+/**
+ * A snapshot stack with a cursor.
+ *
+ * WHY SNAPSHOTS AND NOT COMMANDS. An inverse-command stack has to know how to
+ * undo every operation, and it grows a new bug every time an operation is
+ * added. A snapshot of a store that is already plain serialisable data has
+ * exactly one way to be wrong, and toJSON()/fromJSON() are tested anyway.
+ *
+ * The stack stores what it is handed, as it is handed: createStructureState's
+ * toJSON() returns a fresh object every call, so nothing here can be mutated
+ * behind the stack's back.
+ *
+ * @param {number} [limit] entries kept; the OLDEST is dropped past it
+ */
+function createHistoryStack(limit) {
+  var cap =
+    typeof limit === 'number' && isFinite(limit) && limit >= 1
+      ? Math.floor(limit)
+      : HISTORY_DEFAULT_LIMIT;
+
+  var entries = [];
+  var cursor = -1;
+
+  return {
+    /**
+     * Record a state. A push after an undo CLEARS the redo branch: the user
+     * went back and did something else, so the future they abandoned is gone
+     * — keeping it would let Redo replay a state that never followed.
+     *
+     * @returns {number} the cursor's new position
+     */
+    push: function (snapshot) {
+      if (cursor < entries.length - 1) entries = entries.slice(0, cursor + 1);
+      entries.push(snapshot);
+      if (entries.length > cap) entries = entries.slice(entries.length - cap);
+      cursor = entries.length - 1;
+      return cursor;
+    },
+
+    /** @returns {*} the previous snapshot, or null at the oldest one */
+    undo: function () {
+      if (cursor <= 0) return null;
+      cursor -= 1;
+      return entries[cursor];
+    },
+
+    /** @returns {*} the next snapshot, or null at the newest one */
+    redo: function () {
+      if (cursor >= entries.length - 1) return null;
+      cursor += 1;
+      return entries[cursor];
+    },
+
+    canUndo: function () {
+      return cursor > 0;
+    },
+
+    canRedo: function () {
+      return cursor < entries.length - 1;
+    },
+
+    size: function () {
+      return entries.length;
+    },
+
+    /** The snapshot the cursor is on — what the app is showing right now. */
+    current: function () {
+      return cursor >= 0 ? entries[cursor] : null;
+    },
+
+    limit: function () {
+      return cap;
+    },
+  };
+}
+
+/**
+ * Is this event target somewhere text is being edited?
+ *
+ * THE GUARD ON THE KEYBINDING. Ctrl+Z inside a textarea is the browser's own
+ * undo for the characters the user just typed, and hijacking it would make
+ * typing lyrics feel broken in a way no amount of app-level undo makes up
+ * for. So the structure shortcuts step aside for any real text entry, and
+ * only there: a range slider or a checkbox has no text to undo.
+ *
+ * @param {*} target
+ * @returns {boolean}
+ */
+function isTextEntryTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  if (target.isContentEditable === true) return true;
+  var tag = typeof target.tagName === 'string' ? target.tagName.toUpperCase() : '';
+  if (tag === 'TEXTAREA') return true;
+  if (tag !== 'INPUT') return false;
+  var type = typeof target.type === 'string' ? target.type.toLowerCase() : 'text';
+  return (
+    ['text', 'search', 'url', 'tel', 'email', 'password', 'number', 'date', 'time'].indexOf(type) !==
+    -1
+  );
+}
+
+/**
+ * The FDD #40 keyboard contract, as a pure function of the event.
+ *
+ *   Ctrl/Cmd + Z          -> undo
+ *   Ctrl/Cmd + Y          -> redo   (the Windows convention the FDD names)
+ *   Ctrl/Cmd + Shift + Z  -> redo   (the alias every editor also honours)
+ *
+ * Alt is excluded so this can never collide with the Alt+Arrow reordering
+ * keys below, and Ctrl+Shift+Y is left alone rather than guessed at.
+ *
+ * @param {{ctrlKey?:boolean, metaKey?:boolean, shiftKey?:boolean, altKey?:boolean, key?:string}} event
+ * @returns {'undo'|'redo'|null}
+ */
+function structureShortcut(event) {
+  if (!event || typeof event !== 'object') return null;
+  if (!event.ctrlKey && !event.metaKey) return null;
+  if (event.altKey) return null;
+  var key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+  if (key === 'z') return event.shiftKey ? 'redo' : 'undo';
+  if (key === 'y') return event.shiftKey ? null : 'redo';
+  return null;
+}
+
+/**
+ * The accessible alternative to dragging (FDD #39 must not be mouse-only):
+ * Alt+ArrowUp / Alt+ArrowDown move the focused block one position.
+ *
+ * @returns {number} -1 up, +1 down, 0 for anything else
+ */
+function structureMoveShortcut(event) {
+  if (!event || typeof event !== 'object') return 0;
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return 0;
+  if (event.key === 'ArrowUp') return -1;
+  if (event.key === 'ArrowDown') return 1;
+  return 0;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Studio shell — two-view switching + lightweight UI preferences             */
 /* -------------------------------------------------------------------------- */
@@ -9275,6 +10440,677 @@ function createRibbonRenderer(deps) {
     });
 
     renderDraft();
+
+    /* ---------------- song structure builder (FDD Domain D) ---------------- */
+
+    const structure = createStructureState();
+    const history = createHistoryStack();
+
+    const structureCore = $('structure-core');
+    const structureAction = $('structure-action');
+    const structureList = $('structure-blocks');
+    const structureEmpty = $('structure-empty');
+    const structureStatus = $('structure-status');
+    const structurePreview = $('structure-preview');
+    const structurePreviewHeading = $('structure-preview-heading');
+    const structureRefrainNote = $('structure-refrain-note');
+    const structureCountsEl = $('structure-counts');
+    const structureCopyBtn = $('btn-structure-copy');
+    const undoBtn = $('btn-undo');
+    const redoBtn = $('btn-redo');
+
+    /** id -> the live nodes of one block, so an edit can repaint just that row. */
+    let blockViews = {};
+    /** The id order the DOM currently shows; see the two render paths below. */
+    let renderedSignature = null;
+    /** Set while a snapshot is being restored — always a full rebuild. */
+    let restoring = false;
+    /** The last state banked in the history stack, as text, for comparison. */
+    let lastCommitted = '';
+
+    let dragId = null;
+    let dropIndex = -1;
+
+    function structureSnapshotText() {
+      return JSON.stringify(structure.toJSON());
+    }
+
+    function syncHistoryButtons() {
+      undoBtn.disabled = !history.canUndo();
+      redoBtn.disabled = !history.canRedo();
+    }
+
+    function setStructureStatus(text) {
+      structureStatus.textContent = text;
+    }
+
+    /**
+     * Bank the current state IF it has drifted from the last banked one.
+     *
+     * Typing does not push a snapshot per keystroke — a hundred characters
+     * would bury every structural step in the stack and Ctrl+Z would stop
+     * meaning anything. A lyric edit is banked when it is committed (blur, or
+     * the moment some other action happens), which is exactly one undo step
+     * for one sitting at the keyboard.
+     */
+    function commitStructure() {
+      const text = structureSnapshotText();
+      if (text === lastCommitted) return false;
+      history.push(structure.toJSON());
+      lastCommitted = text;
+      syncHistoryButtons();
+      return true;
+    }
+
+    /**
+     * One user action, one undo step. Pending typing is banked FIRST so that
+     * undoing the action does not also swallow the words typed before it.
+     */
+    function asOneStep(fn) {
+      commitStructure();
+      fn();
+      commitStructure();
+    }
+
+    function applySnapshot(snapshot) {
+      if (!snapshot) return false;
+      restoring = true;
+      try {
+        structure.fromJSON(snapshot);
+      } finally {
+        restoring = false;
+      }
+      lastCommitted = structureSnapshotText();
+      syncHistoryButtons();
+      return true;
+    }
+
+    function undoStructure() {
+      commitStructure();
+      const snapshot = history.undo();
+      if (!snapshot) {
+        setStructureStatus('Nothing left to undo.');
+        return false;
+      }
+      applySnapshot(snapshot);
+      setStructureStatus('Undone.');
+      return true;
+    }
+
+    function redoStructure() {
+      // A commit here is not a no-op by accident: if there IS pending typing,
+      // banking it is what correctly destroys the redo branch the user just
+      // walked away from, and the redo below then finds nothing — which is
+      // the truth, rather than replaying a future that no longer follows.
+      commitStructure();
+      const snapshot = history.redo();
+      if (!snapshot) {
+        setStructureStatus('Nothing left to redo.');
+        return false;
+      }
+      applySnapshot(snapshot);
+      setStructureStatus('Redone.');
+      return true;
+    }
+
+    /* -- rendering: one full rebuild path, one in-place repaint path -- */
+
+    /*
+     * WHY TWO PATHS. The block list is rebuilt from scratch whenever the FLOW
+     * changes, because that is the only way to get the order, the numbering
+     * and the focus keys right at once. But a rebuild also destroys the
+     * textarea the user is typing in, taking the caret and any IME
+     * composition with it — so an edit that changes only the CONTENT of a
+     * block repaints the tag line, the preview and the counts in place and
+     * leaves the fields the user is holding alone.
+     */
+    function structureSignature() {
+      const list = structure.blocks();
+      const ids = [];
+      for (let i = 0; i < list.length; i += 1) ids.push(list[i].id);
+      return ids.join('|');
+    }
+
+    function structureFocusables() {
+      return Array.prototype.slice.call(structureList.querySelectorAll('[' + FOCUS_KEY_ATTR + ']'));
+    }
+
+    /** What is focused inside the list, and where the caret sits in it. */
+    function captureStructureFocus() {
+      const active = document.activeElement;
+      if (!active || !structureList.contains(active)) return null;
+      const all = structureFocusables();
+      const state = {
+        key: active.getAttribute(FOCUS_KEY_ATTR),
+        index: all.indexOf(active),
+        start: null,
+        end: null,
+      };
+      if (typeof active.selectionStart === 'number') {
+        state.start = active.selectionStart;
+        state.end = active.selectionEnd;
+      }
+      return state;
+    }
+
+    /**
+     * Focus follows the BLOCK, not the position: the key carries the block id,
+     * so after a move the same control on the same block is refocused wherever
+     * it ended up. If the block is gone (a removal) focus falls to whatever now
+     * sits at the same position, and to the Copy button if the list is empty.
+     */
+    function restoreStructureFocus(previous) {
+      if (!previous) return;
+      const all = structureFocusables();
+      let target = null;
+      for (let i = 0; i < all.length; i += 1) {
+        if (all[i].getAttribute(FOCUS_KEY_ATTR) === previous.key) {
+          target = all[i];
+          break;
+        }
+      }
+      if (!target && all.length) target = all[Math.min(previous.index, all.length - 1)];
+      if (!target) target = structureCopyBtn;
+      if (!target || typeof target.focus !== 'function') return;
+      target.focus();
+      if (previous.start !== null && typeof target.setSelectionRange === 'function') {
+        try {
+          target.setSelectionRange(previous.start, previous.end);
+        } catch (err) {
+          // The control at that key is no longer a text field. Focus is what
+          // mattered; the caret simply has nowhere to go.
+        }
+      }
+    }
+
+    /** A lyric box grows to its content rather than hiding it behind a scrollbar. */
+    function growLyrics(area) {
+      if (!area || typeof area.scrollHeight !== 'number') return;
+      // A placeholder is not content. Measuring one would freeze the box at
+      // whatever height that sentence happened to wrap to at that width.
+      if (!area.value) {
+        area.style.height = '';
+        return;
+      }
+      area.style.height = 'auto';
+      if (area.scrollHeight > 0) area.style.height = area.scrollHeight + 'px';
+    }
+
+    /** Re-measure every box: a height computed at one width is wrong at another. */
+    function growAllLyrics() {
+      const list = structure.blocks();
+      for (let i = 0; i < list.length; i += 1) {
+        const view = blockViews[list[i].id];
+        if (view) growLyrics(view.lyrics);
+      }
+    }
+
+    function blockAt(id) {
+      const list = structure.blocks();
+      for (let i = 0; i < list.length; i += 1) {
+        if (list[i].id === id) return { block: list[i], index: i, total: list.length };
+      }
+      return null;
+    }
+
+    function closestStructureBlock(node) {
+      let el = node;
+      while (el && el !== structureList) {
+        if (el.getAttribute && el.getAttribute('data-block-id')) return el;
+        el = el.parentNode;
+      }
+      return null;
+    }
+
+    function clearDropMarks() {
+      const marked = structureList.querySelectorAll('.is-drop-before, .is-drop-after');
+      for (let i = 0; i < marked.length; i += 1) {
+        marked[i].classList.remove('is-drop-before');
+        marked[i].classList.remove('is-drop-after');
+      }
+    }
+
+    function endDrag() {
+      const items = structureList.children;
+      for (let i = 0; i < items.length; i += 1) {
+        items[i].classList.remove('is-dragging');
+        // Back to non-draggable the moment the gesture ends: a permanently
+        // draggable row would hijack every text selection inside it.
+        items[i].draggable = false;
+      }
+      clearDropMarks();
+      dragId = null;
+      dropIndex = -1;
+    }
+
+    /** Move one block by one position, or say why it cannot go further. */
+    function moveBy(id, delta) {
+      const found = blockAt(id);
+      if (!found) return false;
+      const name = found.block.section.toLowerCase();
+      const to = found.index + delta;
+      if (to < 0 || to >= found.total) {
+        setStructureStatus('The ' + name + ' block is already ' + (delta < 0 ? 'first' : 'last') + '.');
+        return false;
+      }
+      let moved = false;
+      asOneStep(function () {
+        moved = structure.moveBlock(id, to);
+      });
+      if (moved) {
+        setStructureStatus(
+          'Moved the ' + name + ' block to position ' + (to + 1) + ' of ' + found.total + '.'
+        );
+      }
+      return moved;
+    }
+
+    function removeStructureBlock(id) {
+      const found = blockAt(id);
+      if (!found) return;
+      let removed = false;
+      asOneStep(function () {
+        removed = structure.removeBlock(id);
+      });
+      if (removed) setStructureStatus('Removed the ' + found.block.section.toLowerCase() + ' block.');
+    }
+
+    function addMetatag(section) {
+      asOneStep(function () {
+        structure.addBlock(section);
+      });
+      setStructureStatus('Added ' + formatStructureTag(section) + ' to the flow.');
+    }
+
+    /** One block row: the compiled tag, its controls, its modifiers, its lyrics. */
+    function buildBlock(block) {
+      const li = document.createElement('li');
+      li.className = 'structure-block';
+      li.setAttribute('data-block-id', block.id);
+
+      const head = document.createElement('div');
+      head.className = 'structure-block-head';
+
+      const handle = document.createElement('button');
+      handle.type = 'button';
+      handle.className = 'structure-handle';
+      handle.setAttribute(FOCUS_KEY_ATTR, 'handle:' + block.id);
+      const glyph = document.createElement('span');
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.textContent = '⠿';
+      handle.appendChild(glyph);
+
+      const tag = document.createElement('code');
+      tag.className = 'structure-tag';
+
+      const actions = document.createElement('div');
+      actions.className = 'structure-block-actions';
+
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.className = 'btn-mini';
+      up.textContent = 'Move up';
+      up.setAttribute(FOCUS_KEY_ATTR, 'up:' + block.id);
+
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.className = 'btn-mini';
+      down.textContent = 'Move down';
+      down.setAttribute(FOCUS_KEY_ATTR, 'down:' + block.id);
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn-mini';
+      remove.textContent = 'Remove';
+      remove.setAttribute(FOCUS_KEY_ATTR, 'remove:' + block.id);
+
+      actions.appendChild(up);
+      actions.appendChild(down);
+      actions.appendChild(remove);
+      head.appendChild(handle);
+      head.appendChild(tag);
+      head.appendChild(actions);
+
+      const body = document.createElement('div');
+      body.className = 'structure-block-body';
+
+      const modsId = 'structure-mods-' + block.id;
+      const modsLabel = document.createElement('label');
+      modsLabel.className = 'field-label';
+      modsLabel.setAttribute('for', modsId);
+      modsLabel.textContent = 'Modifiers — up to ' + STRUCTURE_MAX_MODIFIERS + ', comma separated';
+
+      const mods = document.createElement('input');
+      mods.type = 'text';
+      mods.id = modsId;
+      mods.className = 'field-input structure-mods';
+      mods.setAttribute('autocomplete', 'off');
+      mods.setAttribute('spellcheck', 'false');
+      mods.setAttribute('placeholder', 'e.g. intimate, sparse');
+      mods.setAttribute(FOCUS_KEY_ATTR, 'mods:' + block.id);
+      mods.setAttribute('aria-describedby', modsId + '-note');
+      mods.value = block.modifiers.join(', ');
+
+      const modsNote = document.createElement('p');
+      modsNote.className = 'structure-mods-note';
+      modsNote.id = modsId + '-note';
+      modsNote.setAttribute('role', 'status');
+      modsNote.hidden = true;
+
+      const lyricsId = 'structure-lyrics-' + block.id;
+      const lyricsLabel = document.createElement('label');
+      lyricsLabel.className = 'field-label';
+      lyricsLabel.setAttribute('for', lyricsId);
+      lyricsLabel.textContent = 'Lyrics — optional';
+
+      const lyrics = document.createElement('textarea');
+      lyrics.id = lyricsId;
+      lyrics.className = 'structure-lyrics';
+      lyrics.rows = 2;
+      lyrics.setAttribute(FOCUS_KEY_ATTR, 'lyrics:' + block.id);
+      lyrics.value = block.lyrics;
+      if (block.section === 'Chorus') {
+        lyrics.setAttribute(
+          'placeholder',
+          'Chorus lyrics are repeated automatically before the outro'
+        );
+      }
+
+      body.appendChild(modsLabel);
+      body.appendChild(mods);
+      body.appendChild(modsNote);
+      body.appendChild(lyricsLabel);
+      body.appendChild(lyrics);
+
+      li.appendChild(head);
+      li.appendChild(body);
+
+      /* -- events -- */
+
+      // The row becomes draggable only while the handle is held, so text
+      // selection inside the block keeps working everywhere else.
+      handle.addEventListener('pointerdown', function () {
+        li.draggable = true;
+      });
+      handle.addEventListener('pointerup', function () {
+        li.draggable = false;
+      });
+
+      li.addEventListener('dragstart', function (event) {
+        dragId = block.id;
+        dropIndex = -1;
+        li.classList.add('is-dragging');
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          try {
+            event.dataTransfer.setData('text/plain', block.id);
+          } catch (err) {
+            // Some engines refuse setData outside a real user gesture. The id
+            // is already in dragId; the drag does not depend on the payload.
+          }
+        }
+      });
+
+      li.addEventListener('dragend', function () {
+        endDrag();
+      });
+
+      up.addEventListener('click', function () {
+        moveBy(block.id, -1);
+      });
+      down.addEventListener('click', function () {
+        moveBy(block.id, 1);
+      });
+      remove.addEventListener('click', function () {
+        removeStructureBlock(block.id);
+      });
+
+      mods.addEventListener('input', function () {
+        // The store clamps to four (§3.2); this reports what that cost, and
+        // never rewrites the box under the user's cursor while they type.
+        const asked = parseModifierList(mods.value);
+        structure.setModifiers(block.id, asked);
+        setModsNote(modsNote, asked.length - STRUCTURE_MAX_MODIFIERS);
+      });
+      mods.addEventListener('change', function () {
+        commitStructure();
+      });
+
+      lyrics.addEventListener('input', function () {
+        structure.setLyrics(block.id, lyrics.value);
+        growLyrics(lyrics);
+      });
+      lyrics.addEventListener('change', function () {
+        commitStructure();
+      });
+
+      blockViews[block.id] = {
+        li: li,
+        handle: handle,
+        tag: tag,
+        up: up,
+        down: down,
+        remove: remove,
+        mods: mods,
+        modsNote: modsNote,
+        lyrics: lyrics,
+      };
+      setModsNote(modsNote, parseModifierList(mods.value).length - STRUCTURE_MAX_MODIFIERS);
+      return li;
+    }
+
+    function setModsNote(note, over) {
+      const text =
+        over > 0
+          ? 'Only the first ' +
+            STRUCTURE_MAX_MODIFIERS +
+            ' reach the tag — ' +
+            plural(over, 'term') +
+            ' discarded.'
+          : '';
+      if (note.textContent === text) return;
+      note.textContent = text;
+      note.hidden = !text;
+    }
+
+    /** Repaint everything that is derived, touching no field the user holds. */
+    function refreshStructure() {
+      const list = structure.blocks();
+      for (let i = 0; i < list.length; i += 1) {
+        const view = blockViews[list[i].id];
+        if (!view) continue;
+        const text = formatStructureTag(list[i].section, list[i].number, list[i].modifiers);
+        if (view.tag.textContent === text) continue;
+        view.tag.textContent = text;
+        view.handle.setAttribute(
+          'aria-label',
+          'Reorder ' + text + ' — drag this handle, or hold Alt and press the arrow keys'
+        );
+        view.up.setAttribute('aria-label', 'Move ' + text + ' up');
+        view.down.setAttribute('aria-label', 'Move ' + text + ' down');
+        view.remove.setAttribute('aria-label', 'Remove ' + text);
+      }
+
+      const sheet = structure.compile();
+      const refrain = structure.autoChorus();
+      const empty = list.length === 0;
+
+      structureEmpty.hidden = !empty;
+      structurePreviewHeading.hidden = empty;
+      structurePreview.hidden = empty;
+      structurePreview.textContent = sheet;
+
+      const refrainText = refrain.applied
+        ? 'Auto-chorus refrain: the first chorus and its exact lyrics are ' +
+          refrain.reason +
+          ', so Suno recalls the melody.'
+        : '';
+      if (structureRefrainNote.textContent !== refrainText) {
+        structureRefrainNote.textContent = refrainText;
+        structureRefrainNote.hidden = !refrainText;
+      }
+
+      // Two plain numbers, exactly like the draft card: no budget verdict, no
+      // trimming. The 1,000-character gauge (FDD #67) is the next task.
+      structureCountsEl.textContent =
+        plural(list.length, 'block') + ' · ' + plural(sheet.length, 'character');
+      syncHistoryButtons();
+    }
+
+    function renderStructure() {
+      const focused = captureStructureFocus();
+      const list = structure.blocks();
+
+      structureList.textContent = '';
+      blockViews = {};
+      for (let i = 0; i < list.length; i += 1) structureList.appendChild(buildBlock(list[i]));
+
+      renderedSignature = structureSignature();
+      refreshStructure();
+      restoreStructureFocus(focused);
+      // Heights are measured only once the rows are in the document.
+      growAllLyrics();
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', growAllLyrics);
+    }
+
+    structure.subscribe(function () {
+      if (restoring || structureSignature() !== renderedSignature) renderStructure();
+      else refreshStructure();
+    });
+
+    /* -- the metatag library (FDD #42): one chip per §3.1 tag, click to inject -- */
+
+    function buildPalette(host, tags) {
+      for (let i = 0; i < tags.length; i += 1) {
+        const tag = tags[i];
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip metatag-chip';
+        chip.textContent = '[' + tag + ']';
+        chip.title = 'Append a ' + tag + ' block to the song flow';
+        chip.setAttribute('aria-label', chip.title);
+        chip.addEventListener('click', function () {
+          addMetatag(tag);
+        });
+        host.appendChild(chip);
+      }
+    }
+
+    buildPalette(structureCore, SUNO_METATAGS.core);
+    buildPalette(structureAction, SUNO_METATAGS.action);
+
+    /* -- drag and drop (FDD #39) -- */
+
+    structureList.addEventListener('dragover', function (event) {
+      if (dragId === null) return;
+      // Without preventDefault the browser refuses the drop outright.
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+
+      const items = structureList.children;
+      const target = closestStructureBlock(event.target);
+      clearDropMarks();
+      if (!target) {
+        dropIndex = items.length;
+        return;
+      }
+      const rect =
+        typeof target.getBoundingClientRect === 'function' ? target.getBoundingClientRect() : null;
+      const after = rect ? event.clientY > rect.top + rect.height / 2 : false;
+      let index = 0;
+      for (let i = 0; i < items.length; i += 1) {
+        if (items[i] === target) index = i;
+      }
+      dropIndex = index + (after ? 1 : 0);
+      target.classList.add(after ? 'is-drop-after' : 'is-drop-before');
+    });
+
+    structureList.addEventListener('dragleave', function (event) {
+      if (dragId === null) return;
+      if (event.relatedTarget && structureList.contains(event.relatedTarget)) return;
+      clearDropMarks();
+    });
+
+    structureList.addEventListener('drop', function (event) {
+      if (dragId === null) return;
+      event.preventDefault();
+      const id = dragId;
+      const found = blockAt(id);
+      // dropIndex is a slot in the list AS IT STANDS; lifting the dragged block
+      // out shifts every slot after it down by one, so a downward move lands
+      // one earlier than the indicator's slot number suggests.
+      let to = dropIndex < 0 ? structure.blocks().length : dropIndex;
+      endDrag();
+      if (!found) return;
+      if (to > found.index) to -= 1;
+      let moved = false;
+      asOneStep(function () {
+        moved = structure.moveBlock(id, to);
+      });
+      setStructureStatus(
+        moved
+          ? 'Moved the ' + found.block.section.toLowerCase() + ' block to position ' + (to + 1) +
+            ' of ' + found.total + '.'
+          : 'The ' + found.block.section.toLowerCase() + ' block stayed where it was.'
+      );
+    });
+
+    /* -- keyboard (FDD #40, plus the accessible reorder) -- */
+
+    undoBtn.addEventListener('click', undoStructure);
+    redoBtn.addEventListener('click', redoStructure);
+
+    /*
+     * Bound on the document, but only live while the Prompt Editor is the
+     * showing view — the Hum Studio has no structure to undo, and a global
+     * Ctrl+Z there would be a shortcut that appears to do nothing.
+     */
+    document.addEventListener('keydown', function (event) {
+      if (viewManager.current() !== 'editor') return;
+
+      const move = structureMoveShortcut(event);
+      if (move !== 0) {
+        const row = closestStructureBlock(event.target);
+        if (!row) return;
+        event.preventDefault();
+        moveBy(row.getAttribute('data-block-id'), move);
+        return;
+      }
+
+      const action = structureShortcut(event);
+      if (!action) return;
+      // Never hijack the browser's own undo for the text being typed.
+      if (isTextEntryTarget(event.target)) return;
+      event.preventDefault();
+      if (action === 'undo') undoStructure();
+      else redoStructure();
+    });
+
+    structureCopyBtn.addEventListener('click', function () {
+      const text = structure.compile();
+      if (!text) {
+        toastHost.show('Nothing to copy yet — the song flow is empty.', 'warn');
+        return;
+      }
+      const done = function () {
+        toastHost.show('Structure sheet copied — ' + plural(text.length, 'character') + '.');
+      };
+      copyViaClipboard(text).then(done, function () {
+        if (copyViaExecCommand(text)) done();
+        else
+          toastHost.show(
+            'Could not reach the clipboard — select the structure sheet and copy it manually.',
+            'error'
+          );
+      });
+    });
+
+    lastCommitted = structureSnapshotText();
+    history.push(structure.toJSON());
+    renderStructure();
 
     applyPreset();
     syncModeUi();

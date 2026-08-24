@@ -27,6 +27,7 @@ const SUITES = [
   { id: 'visualizer', script: path.join(TESTS_DIR, 'visualizer.test.js') },
   { id: 'theming', script: path.join(TESTS_DIR, 'theming.test.js') },
   { id: 'vibe-translators', script: path.join(TESTS_DIR, 'vibe-translators.test.js') },
+  { id: 'structure-builder', script: path.join(TESTS_DIR, 'structure-builder.test.js') },
   { id: 'limiter-eval', script: path.join(TESTS_DIR, 'limiter-eval.js') },
 ];
 
