@@ -20,6 +20,15 @@
     a node:vm context object; top-level `const`/`let` are lexical and do not.
     The boot IIFE is guarded by `typeof document !== 'undefined'` so the whole
     block can be evaluated in a DOM-free sandbox without side effects.
+
+  #app-main running order:
+    1. capture engine (createAudioCapture and its helpers)
+    2. var MUSIC_KB — the embedded offline music taxonomy knowledge base
+    3. the Tri-Mode AI Acoustic Dissector (createDissector, dissectLocal,
+       prompt builders, parseDissectorReply, createToastHost) and the single
+       var CLOUD_API_PRESETS registry, which is the ONLY place in this file
+       allowed to hold a remote URL (tests/verify-single-file.js enforces it)
+    4. the boot IIFE
 -->
 <style>
   :root {
@@ -269,9 +278,293 @@
 
   .mic-help-detail:empty { display: none; }
 
+  /* --- AI acoustic dissector panel --------------------------------------- */
+
+  .dissector-panel {
+    max-width: 860px;
+    margin-top: 30px;
+    padding-top: 24px;
+    border-top: 1px solid var(--surface-border);
+    container-type: inline-size;
+    container-name: dissector;
+  }
+
+  .dissect-input {
+    width: 100%;
+    min-height: 82px;
+    padding: 12px 14px;
+    font: inherit;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+    resize: vertical;
+  }
+
+  .dissect-input::placeholder { color: rgba(255, 255, 255, 0.35); }
+  .dissect-input:focus-visible,
+  .field-input:focus-visible,
+  .field-select:focus-visible {
+    outline: 2px solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  .dissect-hint {
+    margin: 8px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  .dissect-controls {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 14px;
+  }
+
+  .field {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .field-grow { flex: 1 1 220px; }
+
+  .field-label {
+    font-size: 0.66rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .field-input,
+  .field-select {
+    padding: 9px 12px;
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+  }
+
+  .field-input { min-width: 0; }
+  .field-select { cursor: pointer; }
+
+  .config-row {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+  }
+
+  .config-row[hidden] { display: none; }
+
+  .config-note {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .dissect-status {
+    margin-top: 14px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+
+  .dissect-status.err { color: var(--danger-crimson); }
+  .dissect-status.warn { color: var(--warning-amber); }
+  .dissect-status:empty { display: none; }
+
+  .dissect-results { margin-top: 16px; }
+  .dissect-results[hidden] { display: none; }
+
+  .genre-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Weight -> opacity 0.4..1.0 is set inline per badge (FEATURE-MECHANICS §7.2). */
+  .genre-badge {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 13px;
+    font-size: 0.82rem;
+    color: var(--accent-cyan);
+    background: rgba(0, 240, 255, 0.10);
+    border: 1px solid rgba(0, 240, 255, 0.42);
+    border-radius: 999px;
+  }
+
+  .badge-weight {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: rgba(255, 255, 255, 0.6);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dissect-facts {
+    margin: 16px 0 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+
+  .dissect-facts dt {
+    font-size: 0.66rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding-top: 3px;
+  }
+
+  .dissect-facts dd { margin: 0; }
+
+  .confidence-block { margin-top: 18px; }
+
+  .confidence-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 0.66rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .confidence-value {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    letter-spacing: 0;
+    color: var(--accent-cyan);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .confidence-meter {
+    margin-top: 6px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  .confidence-fill {
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-violet), var(--accent-cyan));
+    transition: width 220ms ease;
+  }
+
+  .dissect-source {
+    margin: 14px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-dim);
+  }
+
+  .source-flag {
+    margin-left: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    color: var(--warning-amber);
+    background: rgba(255, 184, 0, 0.10);
+    border: 1px solid rgba(255, 184, 0, 0.38);
+  }
+
+  .source-flag[hidden] { display: none; }
+
+  .dissect-raw { margin-top: 14px; }
+
+  .dissect-raw summary {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+
+  .dissect-raw pre {
+    margin: 10px 0 0;
+    padding: 14px;
+    max-height: 320px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    line-height: 1.55;
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.34);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+  }
+
+  /* --- Toasts (FEATURE-MECHANICS.md §7.3 step 4) -------------------------- */
+
+  .toast-host {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: min(380px, calc(100vw - 40px));
+    pointer-events: none;
+  }
+
+  .toast {
+    padding: 12px 16px;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: var(--text);
+    background: rgba(18, 18, 24, 0.94);
+    border: 1px solid var(--surface-border);
+    border-left: 3px solid var(--accent-cyan);
+    border-radius: 10px;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(12px);
+    animation: toast-in 180ms ease-out;
+  }
+
+  .toast-warn { border-left-color: var(--warning-amber); }
+  .toast-error { border-left-color: var(--danger-crimson); }
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+
   @container app-shell (max-width: 560px) {
     .capture-controls { align-items: stretch; flex-direction: column; }
     .btn-record { justify-content: center; }
+  }
+
+  @container dissector (max-width: 520px) {
+    .dissect-controls { flex-direction: column; align-items: stretch; }
+    .dissect-controls .field,
+    .config-row .field { width: 100%; }
+    .dissect-facts { grid-template-columns: 1fr; gap: 2px 0; }
+    .dissect-facts dd { margin-bottom: 10px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toast { animation: none; }
+    .confidence-fill { transition: none; }
   }
 </style>
 </head>
@@ -353,6 +646,113 @@
           </li>
         </ol>
         <p id="mic-help-detail" class="mic-help-detail"></p>
+      </div>
+    </section>
+
+    <section class="dissector-panel" aria-labelledby="dissect-heading">
+      <h2 id="dissect-heading" class="panel-heading">AI acoustic dissector</h2>
+      <p class="panel-note">
+        Describe a vibe, a scene or a reference sound in plain language and it is deconstructed into
+        generic, copyright-safe Suno tokens. <strong>Local</strong> runs a deterministic taxonomy
+        engine embedded in this file — no network, no download. <strong>Cloud</strong> and
+        <strong>Ollama</strong> hand the same prompt to a language model. <strong>Auto</strong> tries
+        the cloud and falls back to the local engine if it is busy, slow or unreachable.
+      </p>
+
+      <div class="field field-grow" style="width: 100%;">
+        <label class="field-label" for="dissect-input">Description</label>
+        <textarea id="dissect-input" class="dissect-input" rows="3" spellcheck="false"
+                  placeholder="e.g. sounds like French electro with a neon rain mood"></textarea>
+      </div>
+      <p id="dissect-hint" class="dissect-hint">
+        Paste up to 5 tracks on separate lines for a blended batch dissection.
+      </p>
+
+      <div class="dissect-controls">
+        <span class="field">
+          <label class="field-label" for="dissect-mode">Mode</label>
+          <select id="dissect-mode" class="field-select">
+            <option value="auto" selected>Auto (cloud, then local)</option>
+            <option value="local">Local offline engine</option>
+            <option value="cloud">Cloud API</option>
+            <option value="ollama">Local Ollama</option>
+          </select>
+        </span>
+        <button type="button" id="btn-dissect" class="btn-record">
+          <span id="btn-dissect-label">Dissect</span>
+        </button>
+        <span id="dissect-mode-detail" class="capture-readout"></span>
+      </div>
+
+      <div id="dissect-cloud-config" class="config-row" hidden>
+        <p class="config-note">
+          The API key is used for this request only: it is held in memory, never written to
+          <code>localStorage</code>, never put in a URL and never leaves this page except as an
+          <code>Authorization</code> header on the request you trigger. Leave the endpoint blank in
+          Auto mode to stay fully offline.
+        </p>
+        <span class="field">
+          <label class="field-label" for="dissect-preset">Provider</label>
+          <select id="dissect-preset" class="field-select"></select>
+        </span>
+        <span class="field field-grow">
+          <label class="field-label" for="dissect-endpoint">Endpoint</label>
+          <input type="url" id="dissect-endpoint" class="field-input" autocomplete="off"
+                 spellcheck="false" placeholder="https://…/v1/chat/completions">
+        </span>
+        <span class="field">
+          <label class="field-label" for="dissect-key">API key</label>
+          <input type="password" id="dissect-key" class="field-input" autocomplete="off"
+                 spellcheck="false" placeholder="in memory only">
+        </span>
+        <span class="field">
+          <label class="field-label" for="dissect-model">Model</label>
+          <input type="text" id="dissect-model" class="field-input" autocomplete="off"
+                 spellcheck="false">
+        </span>
+      </div>
+
+      <div id="dissect-ollama-config" class="config-row" hidden>
+        <p class="config-note">
+          Requires a local Ollama server. Start it with
+          <code>ollama serve</code>, then <code>ollama pull llama3.2</code>. Requests go to
+          <code>localhost:11434</code> and never leave your machine.
+        </p>
+        <span class="field">
+          <label class="field-label" for="dissect-ollama-model">Ollama model</label>
+          <input type="text" id="dissect-ollama-model" class="field-input" autocomplete="off"
+                 spellcheck="false" value="llama3.2">
+        </span>
+      </div>
+
+      <p id="dissect-status" class="dissect-status" role="status" aria-live="polite"></p>
+
+      <div id="dissect-results" class="dissect-results" hidden>
+        <div id="dissect-badges" class="genre-badges"></div>
+        <dl class="dissect-facts">
+          <dt>BPM</dt><dd id="dissect-bpm">—</dd>
+          <dt>Instruments</dt><dd id="dissect-instruments">—</dd>
+          <dt>Mood</dt><dd id="dissect-mood">—</dd>
+          <dt>Era</dt><dd id="dissect-era">—</dd>
+        </dl>
+        <div class="confidence-block">
+          <div class="confidence-head">
+            <span>Confidence</span>
+            <span id="dissect-confidence-value" class="confidence-value">0%</span>
+          </div>
+          <div class="confidence-meter" role="img" id="dissect-confidence-meter"
+               aria-label="Dissection confidence: 0 percent">
+            <div id="dissect-confidence-fill" class="confidence-fill"></div>
+          </div>
+        </div>
+        <p class="dissect-source">
+          <span id="dissect-source">source: —</span>
+          <span id="dissect-fellback" class="source-flag" hidden>fell back to local</span>
+        </p>
+        <details class="dissect-raw">
+          <summary>Raw JSON</summary>
+          <pre id="dissect-json"></pre>
+        </details>
       </div>
     </section>
   </main>
@@ -1006,7 +1406,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -1377,6 +1777,2264 @@ function createAudioCapture(deps) {
   };
 }
 
+/*
+ * MUSIC_KB - offline music taxonomy knowledge base for a deterministic
+ * genre / attribute dissector.
+ *
+ * PURPOSE
+ * This file is a static data table, not code that calls out anywhere.
+ * A separate matching engine normalizes free-form user text (lowercases
+ * it, replaces every character outside [a-z0-9] with a single space, and
+ * collapses repeated spaces) and then looks for literal whole-word phrase
+ * matches against the "phrases" list of every entry below. Longer phrases
+ * are preferred over shorter ones and consume the words they match. Each
+ * matched entry contributes its "tokens" (weighted Suno-style prompt
+ * tags), "bpm" range, "instruments" and "moods" to the generated prompt.
+ *
+ * SCHEMA
+ * MUSIC_KB = {
+ *   version: semver string,
+ *   genres:  entry[],   musical genre / subgenre definitions
+ *   scenes:  entry[],   cinematic / visual scene to sound-texture mappings
+ *   eras:    entry[]    decade and production-signature triggers
+ * }
+ *
+ * entry = {
+ *   id:          unique kebab-case identifier, stable across versions
+ *   label:       human readable display name
+ *   phrases:     normalized (lowercase, [a-z0-9] words, single spaces)
+ *                trigger strings the matcher looks for in user text
+ *   tokens:      [{ tag, weight }] ranked Suno prompt tags, weight in (0,1]
+ *   bpm:         [lowInclusive, highExclusive-ish real range] or null
+ *   instruments: concrete instrument / sound-source names
+ *   moods:       2-4 short mood descriptors
+ *   eras:        0-2 production-era / signature hint strings
+ * }
+ *
+ * PROVENANCE
+ * Values are drawn from general, widely documented music-production
+ * knowledge: standard genre BPM ranges used by DJs and producers, common
+ * production vocabulary (drum machine names, synthesis terms, mixing and
+ * effects terminology), and well known genre-history facts (e.g. the
+ * Ed Banger / Justice "bloghaus" sound, Berlin warehouse techno, 1980s
+ * gated reverb drum production, South African amapiano log drums). No
+ * network access, external database, or language model is used to
+ * generate or resolve this data at runtime - it is a fully offline,
+ * hand-authored lookup table.
+ *
+ * EDITING NOTES
+ * - Every phrase string must already be normalized (lowercase a-z, 0-9,
+ *   single spaces only) because the matcher does literal comparison.
+ * - Every phrase string must be unique across the ENTIRE file.
+ * - Token "tag" strings only need to be unique within their own entry.
+ * - Keep bpm ranges realistic for the named genre; use null when tempo
+ *   genuinely varies too widely to be useful (ambient, classical, jazz,
+ *   cinematic score) or when a scene/era does not imply a tempo.
+ */
+var MUSIC_KB = {
+  version: '1.0.0',
+  genres: [
+    {
+      id: 'techno',
+      label: 'Techno (Berlin industrial)',
+      phrases: ['techno', 'berlin techno', 'industrial techno', 'hypnotic techno', 'warehouse techno', 'minimal techno'],
+      tokens: [
+        { tag: 'techno', weight: 1 },
+        { tag: 'hypnotic loop', weight: 0.9 },
+        { tag: 'rumbling kick', weight: 0.85 },
+        { tag: 'modular bleeps', weight: 0.75 },
+        { tag: 'reduced hi hat pattern', weight: 0.65 },
+        { tag: 'warehouse reverb', weight: 0.55 }
+      ],
+      bpm: [130, 145],
+      instruments: ['TR-909 kick', 'modular synth bleeps', 'analog delay throws', 'sub bass rumble', 'metallic percussion'],
+      moods: ['hypnotic', 'dark', 'relentless', 'industrial'],
+      eras: ['1990s Berlin rave era']
+    },
+    {
+      id: 'french-electro',
+      label: 'French electro / bloghaus',
+      phrases: ['french electro', 'bloghaus', 'blog house', 'ed banger', 'justice style', 'french touch'],
+      tokens: [
+        { tag: 'french electro', weight: 1 },
+        { tag: 'distorted disco bass', weight: 0.9 },
+        { tag: 'sidechain pumping', weight: 0.85 },
+        { tag: 'talkbox vocal', weight: 0.75 },
+        { tag: 'compressed drum bus', weight: 0.65 },
+        { tag: 'crunchy filter distortion', weight: 0.55 }
+      ],
+      bpm: [122, 130],
+      instruments: ['distorted analog bass', 'talkbox vocoder', 'crunchy drum machine', 'filtered disco strings', 'saturated synth stabs'],
+      moods: ['gritty', 'euphoric', 'aggressive', 'party'],
+      eras: ['2000s blog house era']
+    },
+    {
+      id: 'scandinavian-house',
+      label: 'Scandinavian house',
+      phrases: ['scandinavian house', 'nordic house', 'swedish house', 'nordic disco', 'nu disco'],
+      tokens: [
+        { tag: 'scandinavian house', weight: 1 },
+        { tag: 'warm analog synths', weight: 0.9 },
+        { tag: 'filtered chords', weight: 0.8 },
+        { tag: 'sunny melancholy pads', weight: 0.7 },
+        { tag: 'nu disco bassline', weight: 0.6 }
+      ],
+      bpm: [118, 124],
+      instruments: ['warm analog synth pads', 'filtered chord stabs', 'nu-disco bassline', 'soft piano stabs', 'shimmering strings'],
+      moods: ['sunny', 'melancholic', 'warm', 'uplifting'],
+      eras: ['2010s Scandinavian house era']
+    },
+    {
+      id: 'progressive-trance',
+      label: 'Progressive trance',
+      phrases: ['progressive trance', 'prog trance', 'rolling bassline trance', 'melodic trance'],
+      tokens: [
+        { tag: 'progressive trance', weight: 1 },
+        { tag: 'rolling bassline', weight: 0.9 },
+        { tag: 'ethereal vocal chops', weight: 0.85 },
+        { tag: 'long build', weight: 0.7 },
+        { tag: 'supersaw stack', weight: 0.65 },
+        { tag: 'airy pad wash', weight: 0.55 }
+      ],
+      bpm: [132, 138],
+      instruments: ['supersaw stack', 'rolling sub bassline', 'ethereal vocal chops', 'airy pad wash', 'plucked arpeggio'],
+      moods: ['euphoric', 'dreamy', 'building', 'uplifting'],
+      eras: []
+    },
+    {
+      id: 'afro-house',
+      label: 'Afro house',
+      phrases: ['afro house', 'afrohouse', 'tribal house', 'afro tech'],
+      tokens: [
+        { tag: 'afro house', weight: 1 },
+        { tag: 'rolling percussion', weight: 0.9 },
+        { tag: 'tribal chants', weight: 0.85 },
+        { tag: 'deep dubby chords', weight: 0.7 },
+        { tag: 'congas and shakers', weight: 0.6 }
+      ],
+      bpm: [118, 124],
+      instruments: ['congas and shakers', 'tribal chant vocals', 'deep dubby chords', 'marimba loop', 'log percussion'],
+      moods: ['tribal', 'hypnotic', 'earthy', 'uplifting'],
+      eras: []
+    },
+    {
+      id: 'amapiano',
+      label: 'Amapiano',
+      phrases: ['amapiano', 'piano house', 'yanos', 'amapiano beat'],
+      tokens: [
+        { tag: 'amapiano', weight: 1 },
+        { tag: 'log drums', weight: 0.9 },
+        { tag: 'jazz chords', weight: 0.8 },
+        { tag: 'wide open hi hats', weight: 0.7 },
+        { tag: 'shakers', weight: 0.6 },
+        { tag: 'soulful vocal ad libs', weight: 0.5 }
+      ],
+      bpm: [108, 115],
+      instruments: ['log drums', 'jazzy piano chords', 'wide open hi-hats', 'shakers', 'deep sub bass'],
+      moods: ['laid back', 'soulful', 'groovy', 'spacious'],
+      eras: ['2020s South African amapiano era']
+    },
+    {
+      id: 'house',
+      label: 'House',
+      phrases: ['house', 'classic house', 'four on the floor house', 'house beat'],
+      tokens: [
+        { tag: 'house', weight: 1 },
+        { tag: 'four on the floor kick', weight: 0.9 },
+        { tag: 'swung hi hats', weight: 0.8 },
+        { tag: 'classic piano stabs', weight: 0.7 },
+        { tag: 'disco sample chop', weight: 0.6 }
+      ],
+      bpm: [118, 128],
+      instruments: ['four-on-the-floor kick', 'swung hi-hats', 'piano stabs', 'chopped disco samples', 'warm sub bass'],
+      moods: ['groovy', 'uplifting', 'classic', 'warm'],
+      eras: []
+    },
+    {
+      id: 'deep-house',
+      label: 'Deep house',
+      phrases: ['deep house', 'deep house groove', 'soulful deep house', 'chicago deep house'],
+      tokens: [
+        { tag: 'deep house', weight: 1 },
+        { tag: 'jazzy chord stabs', weight: 0.85 },
+        { tag: 'muted rhodes', weight: 0.75 },
+        { tag: 'rounded sub bass', weight: 0.65 },
+        { tag: 'soulful vocal sample', weight: 0.55 }
+      ],
+      bpm: [118, 124],
+      instruments: ['jazzy chord stabs', 'muted Rhodes chords', 'rounded sub bass', 'soulful vocal sample', 'soft shaker groove'],
+      moods: ['smooth', 'soulful', 'relaxed', 'nocturnal'],
+      eras: []
+    },
+    {
+      id: 'tech-house',
+      label: 'Tech house',
+      phrases: ['tech house', 'techhouse', 'minimal tech house', 'tech house groove'],
+      tokens: [
+        { tag: 'tech house', weight: 1 },
+        { tag: 'rolling groove', weight: 0.9 },
+        { tag: 'tribal percussion loop', weight: 0.75 },
+        { tag: 'stripped back kick', weight: 0.65 },
+        { tag: 'squelchy bassline', weight: 0.55 }
+      ],
+      bpm: [122, 128],
+      instruments: ['rolling groove percussion', 'squelchy bassline', 'stripped-back kick', 'sparse vocal chops', 'tight hi-hat pattern'],
+      moods: ['groovy', 'minimal', 'driving', 'club-ready'],
+      eras: []
+    },
+    {
+      id: 'trance',
+      label: 'Uplifting trance',
+      phrases: ['trance', 'uplifting trance', 'anthem trance', 'vocal trance'],
+      tokens: [
+        { tag: 'uplifting trance', weight: 1 },
+        { tag: 'soaring lead melody', weight: 0.9 },
+        { tag: 'euphoric breakdown', weight: 0.85 },
+        { tag: 'gated pad stabs', weight: 0.7 },
+        { tag: 'massive supersaw lead', weight: 0.6 }
+      ],
+      bpm: [136, 142],
+      instruments: ['soaring lead synth', 'gated pad stabs', 'massive supersaw lead', 'fast plucked arpeggio', 'reverb-drenched vocal'],
+      moods: ['euphoric', 'soaring', 'emotional', 'anthemic'],
+      eras: []
+    },
+    {
+      id: 'ambient',
+      label: 'Ambient',
+      phrases: ['ambient', 'drone ambient', 'ambient soundscape', 'atmospheric drone'],
+      tokens: [
+        { tag: 'ambient', weight: 1 },
+        { tag: 'evolving pad texture', weight: 0.85 },
+        { tag: 'field recording texture', weight: 0.7 },
+        { tag: 'granular drone', weight: 0.6 },
+        { tag: 'reverb wash', weight: 0.5 }
+      ],
+      bpm: null,
+      instruments: ['evolving synth pad', 'field recording texture', 'granular drone', 'sparse piano notes', 'soft reverb wash'],
+      moods: ['calm', 'spacious', 'meditative', 'ethereal'],
+      eras: []
+    },
+    {
+      id: 'synthwave',
+      label: 'Synthwave',
+      phrases: ['synthwave', 'retrowave', 'outrun', 'dark synthwave'],
+      tokens: [
+        { tag: 'synthwave', weight: 1 },
+        { tag: 'analog synth arpeggio', weight: 0.9 },
+        { tag: 'gated reverb drums', weight: 0.8 },
+        { tag: 'fm bass', weight: 0.7 },
+        { tag: 'retro drum machine', weight: 0.6 }
+      ],
+      bpm: [85, 115],
+      instruments: ['analog synth arpeggio', 'gated reverb drums', 'FM bass', 'retro drum machine', 'neon synth lead'],
+      moods: ['nostalgic', 'neon', 'cinematic', 'driving'],
+      eras: ['1980s inspired retro production']
+    },
+    {
+      id: 'hip-hop',
+      label: 'Hip hop',
+      phrases: ['hip hop', 'hiphop', 'boom bap', 'rap beat', 'east coast hip hop'],
+      tokens: [
+        { tag: 'hip hop', weight: 1 },
+        { tag: 'boom bap drums', weight: 0.85 },
+        { tag: '808 sub bass', weight: 0.8 },
+        { tag: 'chopped sample loop', weight: 0.7 },
+        { tag: 'vinyl crackle', weight: 0.6 },
+        { tag: 'scratch fx', weight: 0.5 }
+      ],
+      bpm: [80, 100],
+      instruments: ['boom bap drum break', '808 sub bass', 'chopped sample loop', 'vinyl crackle', 'turntable scratch'],
+      moods: ['confident', 'gritty', 'laid back', 'street'],
+      eras: []
+    },
+    {
+      id: 'rock',
+      label: 'Rock',
+      phrases: ['rock', 'classic rock', 'guitar rock', 'hard rock'],
+      tokens: [
+        { tag: 'rock', weight: 1 },
+        { tag: 'distorted electric guitar', weight: 0.9 },
+        { tag: 'driving drum kit', weight: 0.8 },
+        { tag: 'power chords', weight: 0.7 },
+        { tag: 'guitar solo', weight: 0.55 }
+      ],
+      bpm: [110, 140],
+      instruments: ['distorted electric guitar', 'driving drum kit', 'power chords', 'bass guitar', 'live room ambience'],
+      moods: ['energetic', 'raw', 'rebellious', 'powerful'],
+      eras: []
+    },
+    {
+      id: 'jazz',
+      label: 'Jazz',
+      phrases: ['jazz', 'swing jazz', 'bebop', 'jazz combo'],
+      tokens: [
+        { tag: 'jazz', weight: 1 },
+        { tag: 'walking bassline', weight: 0.85 },
+        { tag: 'brushed drums', weight: 0.75 },
+        { tag: 'swung ride cymbal', weight: 0.65 },
+        { tag: 'extended piano chords', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['upright walking bass', 'brushed snare drums', 'swung ride cymbal', 'saxophone', 'extended jazz piano chords'],
+      moods: ['sophisticated', 'improvisational', 'smoky', 'relaxed'],
+      eras: []
+    },
+    {
+      id: 'classical',
+      label: 'Classical',
+      phrases: ['classical', 'orchestral', 'symphony', 'chamber music'],
+      tokens: [
+        { tag: 'classical', weight: 1 },
+        { tag: 'string section', weight: 0.85 },
+        { tag: 'woodwind ensemble', weight: 0.75 },
+        { tag: 'dynamic crescendo', weight: 0.65 },
+        { tag: 'counterpoint melody', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['string section', 'woodwind ensemble', 'french horn', 'timpani', 'grand piano'],
+      moods: ['elegant', 'dramatic', 'refined', 'timeless'],
+      eras: []
+    },
+    {
+      id: 'drum-and-bass',
+      label: 'Drum and bass',
+      phrases: ['drum and bass', 'drum bass', 'drum n bass', 'dnb', 'jungle'],
+      tokens: [
+        { tag: 'drum and bass', weight: 1 },
+        { tag: 'breakbeat chopped drums', weight: 0.9 },
+        { tag: 'sub bass wobble', weight: 0.8 },
+        { tag: 'fast amen break', weight: 0.7 },
+        { tag: 'reese bass', weight: 0.6 }
+      ],
+      bpm: [165, 180],
+      instruments: ['chopped breakbeat drums', 'reese bassline', 'sub bass wobble', 'amen break', 'atmospheric pad'],
+      moods: ['energetic', 'dark', 'fast', 'intense'],
+      eras: []
+    },
+    {
+      id: 'dubstep',
+      label: 'Dubstep',
+      phrases: ['dubstep', 'brostep', 'wobble bass', 'dub step'],
+      tokens: [
+        { tag: 'dubstep', weight: 1 },
+        { tag: 'wobble bass', weight: 0.9 },
+        { tag: 'half time drop', weight: 0.85 },
+        { tag: 'growl bass', weight: 0.7 },
+        { tag: 'metallic snare', weight: 0.55 }
+      ],
+      bpm: [138, 145],
+      instruments: ['wobble bass synth', 'growl bass', 'half-time snare', 'sparse dub chords', 'metallic percussion'],
+      moods: ['heavy', 'aggressive', 'dark', 'intense'],
+      eras: []
+    },
+    {
+      id: 'disco',
+      label: 'Disco',
+      phrases: ['disco', 'disco groove', 'disco strings', 'boogie disco'],
+      tokens: [
+        { tag: 'disco', weight: 1 },
+        { tag: 'four on the floor groove', weight: 0.85 },
+        { tag: 'funky disco bassline', weight: 0.8 },
+        { tag: 'lush string stabs', weight: 0.7 },
+        { tag: 'wah guitar', weight: 0.6 },
+        { tag: 'handclap groove', weight: 0.5 }
+      ],
+      bpm: [110, 120],
+      instruments: ['funky disco bassline', 'lush string stabs', 'wah-wah guitar', 'handclap groove', 'brass stabs'],
+      moods: ['groovy', 'glamorous', 'joyful', 'danceable'],
+      eras: ['1970s disco era']
+    },
+    {
+      id: 'funk',
+      label: 'Funk',
+      phrases: ['funk', 'funky groove', 'funk bassline', 'p funk'],
+      tokens: [
+        { tag: 'funk', weight: 1 },
+        { tag: 'slap bass groove', weight: 0.9 },
+        { tag: 'tight rhythm guitar', weight: 0.8 },
+        { tag: 'horn stabs', weight: 0.7 },
+        { tag: 'syncopated drum groove', weight: 0.6 },
+        { tag: 'clavinet riff', weight: 0.5 }
+      ],
+      bpm: [95, 115],
+      instruments: ['slap bass', 'tight rhythm guitar', 'horn section stabs', 'syncopated drum groove', 'clavinet riff'],
+      moods: ['groovy', 'energetic', 'funky', 'playful'],
+      eras: []
+    },
+    {
+      id: 'soul',
+      label: 'Soul',
+      phrases: ['soul', 'soul ballad', 'motown soul', 'northern soul'],
+      tokens: [
+        { tag: 'soul', weight: 1 },
+        { tag: 'gospel style vocal', weight: 0.85 },
+        { tag: 'warm horn section', weight: 0.75 },
+        { tag: 'rhodes electric piano', weight: 0.65 },
+        { tag: 'tambourine groove', weight: 0.55 }
+      ],
+      bpm: [70, 100],
+      instruments: ['warm horn section', 'Rhodes electric piano', 'tambourine groove', 'string swell', 'soulful lead vocal'],
+      moods: ['heartfelt', 'warm', 'passionate', 'nostalgic'],
+      eras: []
+    },
+    {
+      id: 'pop',
+      label: 'Pop',
+      phrases: ['pop', 'pop anthem', 'radio pop', 'pop hook'],
+      tokens: [
+        { tag: 'pop', weight: 1 },
+        { tag: 'catchy vocal hook', weight: 0.85 },
+        { tag: 'polished production', weight: 0.75 },
+        { tag: 'bright synth chords', weight: 0.65 },
+        { tag: 'layered vocal harmonies', weight: 0.55 }
+      ],
+      bpm: [100, 126],
+      instruments: ['bright synth chords', 'punchy programmed drums', 'layered vocal harmonies', 'clean electric guitar', 'sub bass'],
+      moods: ['catchy', 'bright', 'polished', 'upbeat'],
+      eras: []
+    },
+    {
+      id: 'metal',
+      label: 'Metal',
+      phrases: ['metal', 'heavy metal', 'thrash metal', 'death metal', 'metal riff'],
+      tokens: [
+        { tag: 'metal', weight: 1 },
+        { tag: 'palm muted riff', weight: 0.9 },
+        { tag: 'double kick drum', weight: 0.85 },
+        { tag: 'distorted rhythm guitar', weight: 0.75 },
+        { tag: 'screamed vocal', weight: 0.6 },
+        { tag: 'guitar shred solo', weight: 0.5 }
+      ],
+      bpm: [120, 200],
+      instruments: ['palm-muted rhythm guitar', 'double kick drum pedal', 'distorted rhythm guitar', 'screamed vocal', 'shredding guitar solo'],
+      moods: ['aggressive', 'intense', 'dark', 'powerful'],
+      eras: []
+    },
+    {
+      id: 'lo-fi',
+      label: 'Lo-fi',
+      phrases: ['lo fi', 'lofi', 'lo fi hip hop', 'chillhop'],
+      tokens: [
+        { tag: 'lo fi', weight: 1 },
+        { tag: 'tape hiss texture', weight: 0.85 },
+        { tag: 'dusty vinyl crackle', weight: 0.75 },
+        { tag: 'mellow rhodes chords', weight: 0.65 },
+        { tag: 'muffled drum loop', weight: 0.55 }
+      ],
+      bpm: [70, 90],
+      instruments: ['dusty vinyl crackle', 'mellow Rhodes chords', 'muffled drum loop', 'tape hiss texture', 'soft jazzy bass'],
+      moods: ['relaxed', 'nostalgic', 'cozy', 'mellow'],
+      eras: []
+    },
+    {
+      id: 'cinematic-score',
+      label: 'Cinematic / orchestral score',
+      phrases: ['cinematic score', 'orchestral score', 'film score', 'epic trailer music'],
+      tokens: [
+        { tag: 'cinematic score', weight: 1 },
+        { tag: 'sweeping string section', weight: 0.9 },
+        { tag: 'booming trailer percussion', weight: 0.8 },
+        { tag: 'french horn swell', weight: 0.7 },
+        { tag: 'choir hit', weight: 0.6 },
+        { tag: 'tension riser', weight: 0.5 }
+      ],
+      bpm: null,
+      instruments: ['sweeping string section', 'booming trailer percussion', 'french horn swell', 'epic choir', 'tension riser fx'],
+      moods: ['epic', 'dramatic', 'tense', 'majestic'],
+      eras: []
+    },
+    {
+      id: 'reggaeton',
+      label: 'Reggaeton',
+      phrases: ['reggaeton', 'dembow', 'reggaeton beat', 'perreo'],
+      tokens: [
+        { tag: 'reggaeton', weight: 1 },
+        { tag: 'dembow rhythm', weight: 0.9 },
+        { tag: 'booming 808 kick', weight: 0.8 },
+        { tag: 'latin percussion loop', weight: 0.7 },
+        { tag: 'synth brass stab', weight: 0.6 }
+      ],
+      bpm: [90, 100],
+      instruments: ['dembow drum pattern', 'booming 808 kick', 'latin percussion loop', 'synth brass stab', 'auto-tuned vocal hook'],
+      moods: ['party', 'sensual', 'energetic', 'danceable'],
+      eras: []
+    },
+    {
+      id: 'afrobeats',
+      label: 'Afrobeats',
+      phrases: ['afrobeats', 'afrobeat', 'naija beat', 'afroswing'],
+      tokens: [
+        { tag: 'afrobeats', weight: 1 },
+        { tag: 'syncopated percussion groove', weight: 0.85 },
+        { tag: 'call and response vocals', weight: 0.75 },
+        { tag: 'warm bass groove', weight: 0.65 },
+        { tag: 'talking drum', weight: 0.55 }
+      ],
+      bpm: [100, 112],
+      instruments: ['talking drum', 'highlife guitar riff', 'syncopated percussion', 'warm bass groove', 'call and response vocals'],
+      moods: ['joyful', 'groovy', 'warm', 'celebratory'],
+      eras: []
+    },
+    {
+      id: 'bossa-nova',
+      label: 'Bossa nova',
+      phrases: ['bossa nova', 'brazilian jazz', 'samba jazz', 'brazilian bossa'],
+      tokens: [
+        { tag: 'bossa nova', weight: 1 },
+        { tag: 'nylon string guitar', weight: 0.9 },
+        { tag: 'soft brushed drums', weight: 0.75 },
+        { tag: 'gentle samba rhythm', weight: 0.65 },
+        { tag: 'warm double bass', weight: 0.55 }
+      ],
+      bpm: [120, 140],
+      instruments: ['nylon-string guitar', 'soft brushed drums', 'warm double bass', 'light samba percussion', 'airy flute'],
+      moods: ['relaxed', 'romantic', 'breezy', 'intimate'],
+      eras: []
+    },
+    {
+      id: 'uk-garage',
+      label: 'UK garage',
+      phrases: ['uk garage', 'garage', '2 step', 'speed garage'],
+      tokens: [
+        { tag: 'uk garage', weight: 1 },
+        { tag: 'shuffled 2 step rhythm', weight: 0.9 },
+        { tag: 'pitched up vocal chops', weight: 0.8 },
+        { tag: 'skippy hi hats', weight: 0.7 },
+        { tag: 'swung garage groove', weight: 0.55 }
+      ],
+      bpm: [130, 138],
+      instruments: ['shuffled 2-step drum pattern', 'pitched-up vocal chops', 'skippy hi-hats', 'sub bass', 'swung garage groove'],
+      moods: ['bouncy', 'nocturnal', 'stylish', 'groovy'],
+      eras: ['1990s UK garage scene']
+    },
+    {
+      id: 'psytrance',
+      label: 'Psytrance',
+      phrases: ['psytrance', 'psychedelic trance', 'goa trance', 'full on psytrance'],
+      tokens: [
+        { tag: 'psytrance', weight: 1 },
+        { tag: 'rolling psy bassline', weight: 0.9 },
+        { tag: 'hypnotic acid squelch', weight: 0.85 },
+        { tag: 'fast triplet hats', weight: 0.7 },
+        { tag: 'psychedelic fx sweep', weight: 0.6 }
+      ],
+      bpm: [140, 148],
+      instruments: ['rolling psy bassline', 'acid squelch lead', 'fast triplet hi-hats', 'psychedelic fx sweeps', 'driving 16th-note bass'],
+      moods: ['psychedelic', 'hypnotic', 'intense', 'trippy'],
+      eras: []
+    },
+    {
+      id: 'industrial',
+      label: 'Industrial',
+      phrases: ['industrial', 'industrial metal', 'ebm', 'industrial noise'],
+      tokens: [
+        { tag: 'industrial', weight: 1 },
+        { tag: 'distorted machine percussion', weight: 0.9 },
+        { tag: 'harsh noise texture', weight: 0.8 },
+        { tag: 'pounding kick', weight: 0.7 },
+        { tag: 'metallic clang', weight: 0.6 },
+        { tag: 'robotic vocal fx', weight: 0.5 }
+      ],
+      bpm: [120, 140],
+      instruments: ['distorted machine percussion', 'harsh noise texture', 'pounding kick drum', 'metallic clang samples', 'robotic vocal processing'],
+      moods: ['harsh', 'dark', 'mechanical', 'aggressive'],
+      eras: []
+    },
+    {
+      id: 'trap',
+      label: 'Trap',
+      phrases: ['trap', 'trap beat', 'trap 808', 'dark trap'],
+      tokens: [
+        { tag: 'trap', weight: 1 },
+        { tag: '808 sub bass slides', weight: 0.9 },
+        { tag: 'rapid hi hat rolls', weight: 0.85 },
+        { tag: 'half time drums', weight: 0.75 },
+        { tag: 'dark synth stabs', weight: 0.65 },
+        { tag: 'ominous choir pad', weight: 0.5 }
+      ],
+      bpm: [130, 150],
+      instruments: ['808 sub bass with slides', 'rapid hi-hat rolls', 'half-time snare', 'dark synth stabs', 'ominous choir pad'],
+      moods: ['dark', 'menacing', 'confident', 'moody'],
+      eras: []
+    }
+  ],
+  scenes: [
+    {
+      id: 'neon-rain',
+      label: 'Neon rain',
+      phrases: ['neon rain', 'rainy neon streets', 'neon rain city'],
+      tokens: [
+        { tag: 'neon rain', weight: 1 },
+        { tag: 'rain ambience texture', weight: 0.85 },
+        { tag: 'wet synth arpeggio', weight: 0.75 },
+        { tag: 'neon glow pad', weight: 0.65 }
+      ],
+      bpm: null,
+      instruments: ['rain ambience', 'wet reverb synth arpeggio', 'neon glow pad', 'analog delay throws'],
+      moods: ['moody', 'nocturnal', 'electric', 'melancholic'],
+      eras: ['1980s neo-noir synth aesthetic']
+    },
+    {
+      id: 'desert-highway',
+      label: 'Desert highway',
+      phrases: ['desert highway', 'desert road', 'highway drive'],
+      tokens: [
+        { tag: 'desert highway', weight: 1 },
+        { tag: 'dusty slide guitar', weight: 0.85 },
+        { tag: 'wide open reverb', weight: 0.7 },
+        { tag: 'driving motorik beat', weight: 0.6 }
+      ],
+      bpm: null,
+      instruments: ['dusty slide guitar', 'wide open spring reverb', 'motorik drum groove', 'heat shimmer drone'],
+      moods: ['open', 'dusty', 'freeing', 'restless'],
+      eras: []
+    },
+    {
+      id: 'underwater-cathedral',
+      label: 'Underwater cathedral',
+      phrases: ['underwater cathedral', 'underwater temple', 'submerged cathedral'],
+      tokens: [
+        { tag: 'underwater cathedral', weight: 1 },
+        { tag: 'submerged reverb wash', weight: 0.9 },
+        { tag: 'muffled low pass texture', weight: 0.75 },
+        { tag: 'choral drone', weight: 0.6 }
+      ],
+      bpm: null,
+      instruments: ['submerged reverb wash', 'muffled low-pass pad', 'choral drone', 'slow resonant bells'],
+      moods: ['mysterious', 'vast', 'sacred', 'muffled'],
+      eras: []
+    },
+    {
+      id: 'foggy-forest',
+      label: 'Foggy forest',
+      phrases: ['foggy forest', 'misty forest', 'forest fog'],
+      tokens: [
+        { tag: 'foggy forest', weight: 1 },
+        { tag: 'damp woodwind texture', weight: 0.85 },
+        { tag: 'soft mallet percussion', weight: 0.7 },
+        { tag: 'muted string drone', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['damp woodwind texture', 'soft mallet percussion', 'distant bird field recording', 'muted string drone'],
+      moods: ['mysterious', 'quiet', 'damp', 'introspective'],
+      eras: []
+    },
+    {
+      id: 'sunrise-beach',
+      label: 'Sunrise beach',
+      phrases: ['sunrise beach', 'beach sunrise', 'morning beach'],
+      tokens: [
+        { tag: 'sunrise beach', weight: 1 },
+        { tag: 'warm acoustic guitar', weight: 0.85 },
+        { tag: 'soft shaker groove', weight: 0.7 },
+        { tag: 'airy pad swell', weight: 0.6 }
+      ],
+      bpm: [90, 110],
+      instruments: ['warm acoustic guitar', 'soft shaker groove', 'airy pad swell', 'ocean wave field recording'],
+      moods: ['peaceful', 'hopeful', 'warm', 'fresh'],
+      eras: []
+    },
+    {
+      id: 'abandoned-warehouse',
+      label: 'Abandoned warehouse',
+      phrases: ['abandoned warehouse', 'derelict warehouse', 'empty warehouse'],
+      tokens: [
+        { tag: 'abandoned warehouse', weight: 1 },
+        { tag: 'cavernous concrete reverb', weight: 0.9 },
+        { tag: 'rumbling kick', weight: 0.75 },
+        { tag: 'distant industrial clang', weight: 0.6 }
+      ],
+      bpm: [128, 140],
+      instruments: ['cavernous concrete reverb', 'rumbling sub kick', 'metallic drip texture', 'distant industrial clang'],
+      moods: ['desolate', 'tense', 'cold', 'industrial'],
+      eras: []
+    },
+    {
+      id: 'space-station',
+      label: 'Space station',
+      phrases: ['space station', 'orbiting station', 'zero gravity'],
+      tokens: [
+        { tag: 'space station', weight: 1 },
+        { tag: 'sterile pad drone', weight: 0.85 },
+        { tag: 'slow arpeggiated sequence', weight: 0.7 },
+        { tag: 'distant metallic ping', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['sterile pad drone', 'slow arpeggiated sequence', 'radio static texture', 'distant metallic ping'],
+      moods: ['vast', 'isolated', 'sterile', 'wondrous'],
+      eras: []
+    },
+    {
+      id: 'winter-cabin',
+      label: 'Winter cabin',
+      phrases: ['winter cabin', 'snowy cabin', 'log cabin'],
+      tokens: [
+        { tag: 'winter cabin', weight: 1 },
+        { tag: 'crackling fireplace texture', weight: 0.85 },
+        { tag: 'soft finger picked guitar', weight: 0.7 },
+        { tag: 'warm felt piano', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['crackling fireplace texture', 'finger-picked acoustic guitar', 'muffled snow ambience', 'warm felt piano'],
+      moods: ['cozy', 'quiet', 'intimate', 'nostalgic'],
+      eras: []
+    },
+    {
+      id: 'midnight-city',
+      label: 'Midnight city',
+      phrases: ['midnight city', 'city at night', 'city lights night'],
+      tokens: [
+        { tag: 'midnight city', weight: 1 },
+        { tag: 'late night synth bassline', weight: 0.85 },
+        { tag: 'muted trumpet loop', weight: 0.7 },
+        { tag: 'distant traffic hum', weight: 0.55 }
+      ],
+      bpm: [90, 110],
+      instruments: ['late-night synth bassline', 'muted trumpet loop', 'distant traffic hum', 'sparse electric piano'],
+      moods: ['nocturnal', 'lonely', 'sleek', 'moody'],
+      eras: []
+    },
+    {
+      id: 'thunderstorm',
+      label: 'Thunderstorm',
+      phrases: ['thunderstorm', 'thunder storm', 'stormy weather'],
+      tokens: [
+        { tag: 'thunderstorm', weight: 1 },
+        { tag: 'rolling thunder rumble', weight: 0.9 },
+        { tag: 'rain field recording', weight: 0.75 },
+        { tag: 'tense string tremolo', weight: 0.6 }
+      ],
+      bpm: null,
+      instruments: ['rolling thunder rumble', 'heavy rain field recording', 'tense string tremolo', 'sudden brass hit'],
+      moods: ['tense', 'dramatic', 'powerful', 'ominous'],
+      eras: []
+    },
+    {
+      id: 'candlelit-room',
+      label: 'Candlelit room',
+      phrases: ['candlelit room', 'candlelight', 'intimate candlelit'],
+      tokens: [
+        { tag: 'candlelit room', weight: 1 },
+        { tag: 'soft nylon guitar', weight: 0.85 },
+        { tag: 'close mic vocal breath', weight: 0.7 },
+        { tag: 'slow string pad', weight: 0.55 }
+      ],
+      bpm: [60, 80],
+      instruments: ['soft nylon-string guitar', 'close-mic vocal breath', 'warm felt piano', 'slow string pad'],
+      moods: ['intimate', 'warm', 'tender', 'quiet'],
+      eras: []
+    },
+    {
+      id: 'carnival-parade',
+      label: 'Carnival parade',
+      phrases: ['carnival parade', 'street carnival', 'carnival procession'],
+      tokens: [
+        { tag: 'carnival parade', weight: 1 },
+        { tag: 'brass marching band', weight: 0.9 },
+        { tag: 'samba percussion battery', weight: 0.8 },
+        { tag: 'whistle accents', weight: 0.6 }
+      ],
+      bpm: [100, 120],
+      instruments: ['brass marching band', 'samba percussion battery', 'whistle accents', 'crowd cheer texture'],
+      moods: ['festive', 'energetic', 'joyful', 'chaotic'],
+      eras: []
+    },
+    {
+      id: 'haunted-house',
+      label: 'Haunted house',
+      phrases: ['haunted house', 'haunted mansion', 'ghost house'],
+      tokens: [
+        { tag: 'haunted house', weight: 1 },
+        { tag: 'dissonant string cluster', weight: 0.9 },
+        { tag: 'creaking wood texture', weight: 0.75 },
+        { tag: 'detuned music box', weight: 0.6 }
+      ],
+      bpm: null,
+      instruments: ['dissonant string cluster', 'creaking wood texture', 'distant whisper fx', 'detuned music box'],
+      moods: ['eerie', 'unsettling', 'suspenseful', 'dark'],
+      eras: []
+    },
+    {
+      id: 'mountain-summit',
+      label: 'Mountain summit',
+      phrases: ['mountain summit', 'mountain peak', 'high altitude'],
+      tokens: [
+        { tag: 'mountain summit', weight: 1 },
+        { tag: 'soaring french horn', weight: 0.85 },
+        { tag: 'wide open wind texture', weight: 0.7 },
+        { tag: 'triumphant string swell', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['soaring french horn', 'wide open wind texture', 'triumphant string swell', 'distant echo'],
+      moods: ['triumphant', 'vast', 'awe inspiring', 'majestic'],
+      eras: []
+    }
+  ],
+  eras: [
+    {
+      id: 'era-1960s',
+      label: '1960s',
+      phrases: ['1960s', '60s', 'sixties'],
+      tokens: [
+        { tag: '1960s production', weight: 1 },
+        { tag: 'analog tape warmth', weight: 0.85 },
+        { tag: 'live band recording', weight: 0.7 },
+        { tag: 'vintage reverb chamber', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['upright piano', 'vintage brass section', 'analog tape hiss', 'live drum kit'],
+      moods: ['warm', 'vintage', 'organic', 'nostalgic'],
+      eras: ['1960s analog studio recording']
+    },
+    {
+      id: 'era-1970s',
+      label: '1970s',
+      phrases: ['1970s', '70s', 'seventies'],
+      tokens: [
+        { tag: '1970s production', weight: 1 },
+        { tag: 'analog tape saturation', weight: 0.9 },
+        { tag: 'warm vinyl warmth', weight: 0.75 },
+        { tag: 'live room drums', weight: 0.6 }
+      ],
+      bpm: null,
+      instruments: ['analog tape machine', 'warm vinyl texture', 'live room drum kit', 'vintage fuzz guitar'],
+      moods: ['warm', 'earthy', 'organic', 'nostalgic'],
+      eras: ['1970s analog tape saturation']
+    },
+    {
+      id: 'era-1980s',
+      label: '1980s',
+      phrases: ['1980s', '80s', 'eighties'],
+      tokens: [
+        { tag: '1980s production', weight: 1 },
+        { tag: 'gated reverb drums', weight: 0.9 },
+        { tag: 'dx7 electric piano', weight: 0.75 },
+        { tag: 'analog synth bass', weight: 0.6 }
+      ],
+      bpm: null,
+      instruments: ['gated reverb snare', 'DX7 electric piano', 'analog synth bass', 'chorus-drenched guitar'],
+      moods: ['bright', 'nostalgic', 'bold', 'synthetic'],
+      eras: ['1980s gated reverb production']
+    },
+    {
+      id: 'era-1990s',
+      label: '1990s',
+      phrases: ['1990s', '90s', 'nineties', 'rave era'],
+      tokens: [
+        { tag: '1990s production', weight: 1 },
+        { tag: 'rave stab sample', weight: 0.85 },
+        { tag: 'breakbeat loop', weight: 0.7 },
+        { tag: 'early digital reverb', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['rave piano stab', 'breakbeat drum loop', 'grungy distorted guitar', 'early digital reverb'],
+      moods: ['raw', 'energetic', 'nostalgic', 'gritty'],
+      eras: ['1990s rave production']
+    },
+    {
+      id: 'era-2000s',
+      label: '2000s',
+      phrases: ['2000s', 'noughties', 'early 2000s'],
+      tokens: [
+        { tag: '2000s production', weight: 1 },
+        { tag: 'bitcrushed vocal fx', weight: 0.8 },
+        { tag: 'digital synth pluck', weight: 0.7 },
+        { tag: 'sidechain compression', weight: 0.6 }
+      ],
+      bpm: null,
+      instruments: ['digital synth pluck', 'bitcrushed vocal fx', 'polished digital drum kit', 'auto-tune vocal effect'],
+      moods: ['polished', 'digital', 'crisp', 'nostalgic'],
+      eras: ['2000s digital production era']
+    },
+    {
+      id: 'era-2010s',
+      label: '2010s',
+      phrases: ['2010s', 'twenty tens'],
+      tokens: [
+        { tag: '2010s production', weight: 1 },
+        { tag: 'festival build drop', weight: 0.8 },
+        { tag: 'layered vocal chops', weight: 0.7 },
+        { tag: 'huge sidechain bass', weight: 0.6 }
+      ],
+      bpm: null,
+      instruments: ['layered vocal chops', 'huge sidechain bass', 'bright supersaw wall', 'festival drop percussion'],
+      moods: ['bright', 'massive', 'polished', 'energetic'],
+      eras: ['2010s festival EDM production']
+    },
+    {
+      id: 'era-2020s',
+      label: '2020s',
+      phrases: ['2020s', 'twenty twenties', 'modern era'],
+      tokens: [
+        { tag: '2020s production', weight: 1 },
+        { tag: 'hyperpop pitch fx', weight: 0.75 },
+        { tag: 'lo fi bedroom texture', weight: 0.65 },
+        { tag: 'spatial audio mix', weight: 0.55 }
+      ],
+      bpm: null,
+      instruments: ['hyperpop pitch-shifted vocal', 'lo-fi bedroom production texture', 'spatial audio mix', 'glossy digital mix'],
+      moods: ['eclectic', 'digital', 'intimate', 'polished'],
+      eras: ['2020s bedroom pop production']
+    }
+  ]
+};
+
+/* ==========================================================================
+ * TRI-MODE AI ACOUSTIC DISSECTOR — docs/FDD.md §3, FEATURE-MECHANICS.md §7,
+ * ASSUMPTIONS.md "Tri-Mode AI Dissector — resolved spec conflicts".
+ *
+ * Three interchangeable providers behind one interface:
+ *   local  — the deterministic, fully-embedded taxonomy engine below. NO model
+ *            download, NO WebGPU, NO network. Real logic: phrase matching over
+ *            MUSIC_KB, weighted merge, deterministic JSON. This is the offline
+ *            floor the whole app can always stand on.
+ *   cloud  — a generic JSON-over-fetch adapter. Every provider-specific detail
+ *            (URL shape, auth header, request body, where the text lives in the
+ *            reply) is isolated in CLOUD_API_PRESETS; the adapter itself is
+ *            provider-agnostic. The API key is passed in per call and is held
+ *            in memory only — never localStorage, never a URL parameter.
+ *   ollama — POST http://localhost:11434/api/generate, stream:false.
+ *
+ * PROVIDER SLOT (reserved): FEATURE-MECHANICS §7.1 asks for a WebGPU/WASM
+ * Transformers.js model as Mode 1. That needs multi-megabyte remote weights,
+ * which the single-file / zero-external-reference constraint forbids
+ * (ASSUMPTIONS.md). The seam is kept open: `createDissector({providers:{...}})`
+ * accepts a replacement `local` (or an extra `webgpu`) provider implementing
+ * the same contract —
+ *     provider(ctx, request) -> Promise<
+ *          {ok:true, result:<result schema>}
+ *        | {ok:false, error:string, retryable?:boolean,
+ *           configured?:boolean, unavailable?:boolean}>
+ * — so dropping a real in-browser LLM in later touches nothing else.
+ *
+ * RESULT SCHEMA (every mode returns exactly this shape):
+ *   { genre_tokens: [{tag:string, weight:0..1}], bpm_range:[lo,hi]|null,
+ *     instruments:[string], mood:[string], era:[string],
+ *     confidence:0..1, source:'local'|'cloud'|'ollama' }
+ *
+ * RESILIENCY (docs/ENGINEERING-STANDARD.md §2.3): dissect() ALWAYS resolves.
+ * Nothing in this section rejects, and no promise is left unhandled.
+ * ========================================================================== */
+
+/** Cloud/Ollama call budget. §7.3 chains to local past this. */
+var DISSECTOR_TIMEOUT_MS = 3000;
+/** Deterministic-JSON sampling contract (FEATURE-MECHANICS.md §7.1). */
+var DISSECTOR_TEMPERATURE = 0.1;
+var DISSECTOR_TOP_K = 10;
+/** Batch Dissection ceiling (FEATURE-MECHANICS.md §7.5, FDD.md #58). */
+var BATCH_TRACK_LIMIT = 5;
+/** Mode 3 default target. Localhost only — never a remote host. */
+var OLLAMA_ENDPOINT = 'http://localhost:11434/api/generate';
+var OLLAMA_DEFAULT_MODEL = 'llama3.2';
+/** Verbatim toast copy from FEATURE-MECHANICS.md §7.3 step 4. */
+var DISSECTOR_FALLBACK_TOAST = 'Cloud API busy. Falling back to local offline model.';
+/** Selectable modes, in UI order. 'auto' runs the §7.3 chain. */
+var DISSECTOR_MODES = ['auto', 'local', 'cloud', 'ollama'];
+/** Output caps — a prompt with 40 instruments is not a prompt (FDD.md #81). */
+var LOCAL_MAX_TOKENS = 18;
+var LOCAL_MAX_LIST = 12;
+
+/*
+ * Cloud endpoint registry — THE single place in this file that may hold an
+ * absolute remote URL (enforced by tests/verify-single-file.js). Adding a
+ * provider means adding an entry here, never touching the adapter.
+ *
+ * Contract per preset:
+ *   endpoint     default URL; the user may override it in the UI.
+ *   defaultModel pre-filled model id.
+ *   buildUrl     (endpoint, model) -> string   [optional: path-templated APIs]
+ *   buildHeaders (key) -> object               auth + content type
+ *   buildBody    (promptText, model) -> object request payload
+ *   extractText  (json) -> string|null         where the model's text lives
+ *
+ * NOTE: `temperature` / `top_k` are mandated by FEATURE-MECHANICS.md §7.1 for
+ * deterministic JSON, so every preset sends them in its own dialect. A strict
+ * OpenAI-compatible server that rejects unknown fields answers HTTP 400, which
+ * surfaces to the user as a non-retryable error rather than being swallowed.
+ */
+var CLOUD_API_PRESETS = {
+  custom: {
+    id: 'custom',
+    label: 'Custom (OpenAI-compatible)',
+    endpoint: '',
+    defaultModel: '',
+    buildHeaders: function (key) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (key) headers.Authorization = 'Bearer ' + key;
+      return headers;
+    },
+    buildBody: function (promptText, model) {
+      return {
+        model: model || '',
+        messages: [{ role: 'user', content: promptText }],
+        temperature: DISSECTOR_TEMPERATURE,
+        top_k: DISSECTOR_TOP_K,
+        stream: false,
+      };
+    },
+    extractText: function (json) {
+      return openAiChatText(json);
+    },
+  },
+  groq: {
+    id: 'groq',
+    label: 'Groq (free tier)',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    defaultModel: 'llama-3.1-8b-instant',
+    buildHeaders: function (key) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (key) headers.Authorization = 'Bearer ' + key;
+      return headers;
+    },
+    buildBody: function (promptText, model) {
+      return {
+        model: model || 'llama-3.1-8b-instant',
+        messages: [{ role: 'user', content: promptText }],
+        temperature: DISSECTOR_TEMPERATURE,
+        top_k: DISSECTOR_TOP_K,
+        stream: false,
+      };
+    },
+    extractText: function (json) {
+      return openAiChatText(json);
+    },
+  },
+  openrouter: {
+    id: 'openrouter',
+    label: 'OpenRouter (free models)',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    defaultModel: 'meta-llama/llama-3.2-3b-instruct:free',
+    buildHeaders: function (key) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (key) headers.Authorization = 'Bearer ' + key;
+      return headers;
+    },
+    buildBody: function (promptText, model) {
+      return {
+        model: model || 'meta-llama/llama-3.2-3b-instruct:free',
+        messages: [{ role: 'user', content: promptText }],
+        temperature: DISSECTOR_TEMPERATURE,
+        top_k: DISSECTOR_TOP_K,
+        stream: false,
+      };
+    },
+    extractText: function (json) {
+      return openAiChatText(json);
+    },
+  },
+  gemini: {
+    id: 'gemini',
+    label: 'Google Gemini (free tier)',
+    // {model} is substituted by buildUrl. The key travels in a HEADER, never
+    // as a ?key= query parameter: secrets do not belong in URLs.
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+    defaultModel: 'gemini-2.0-flash',
+    buildUrl: function (endpoint, model) {
+      return String(endpoint).replace('{model}', model || 'gemini-2.0-flash');
+    },
+    buildHeaders: function (key) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (key) headers['x-goog-api-key'] = key;
+      return headers;
+    },
+    buildBody: function (promptText, model) {
+      return {
+        model: model || 'gemini-2.0-flash',
+        contents: [{ role: 'user', parts: [{ text: promptText }] }],
+        generationConfig: {
+          temperature: DISSECTOR_TEMPERATURE,
+          topK: DISSECTOR_TOP_K,
+          responseMimeType: 'application/json',
+        },
+      };
+    },
+    extractText: function (json) {
+      if (!json || !isArrayLike(json.candidates) || !json.candidates.length) return null;
+      var content = json.candidates[0] && json.candidates[0].content;
+      if (!content || !isArrayLike(content.parts) || !content.parts.length) return null;
+      var text = content.parts[0] && content.parts[0].text;
+      return typeof text === 'string' ? text : null;
+    },
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/* Small shared helpers                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** Array-ish check that also accepts the array-likes a JSON parse can yield. */
+function isArrayLike(value) {
+  return !!value && typeof value === 'object' && typeof value.length === 'number';
+}
+
+/** Never let a thrown non-Error collapse into "[object Object]". */
+function errorMessage(err) {
+  if (err && typeof err.message === 'string' && err.message) return err.message;
+  if (typeof err === 'string' && err) return err;
+  return String(err === undefined ? 'unknown error' : err);
+}
+
+/** Clamp to the 0..1 band every weight/confidence in the schema lives in. */
+function clamp01(value) {
+  if (typeof value !== 'number' || !isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+/** Round to `places` decimals — keeps emitted JSON stable and diff-friendly. */
+function roundTo(value, places) {
+  var factor = Math.pow(10, places);
+  return Math.round(value * factor) / factor;
+}
+
+/** Text of an OpenAI-style chat completion, or null if the shape is foreign. */
+function openAiChatText(json) {
+  if (!json || !isArrayLike(json.choices) || !json.choices.length) return null;
+  var choice = json.choices[0];
+  if (!choice) return null;
+  if (choice.message && typeof choice.message.content === 'string') return choice.message.content;
+  if (typeof choice.text === 'string') return choice.text;
+  return null;
+}
+
+/** An empty, honest result: nothing matched, so nothing is claimed. */
+function emptyDissection(source) {
+  return {
+    genre_tokens: [],
+    bpm_range: null,
+    instruments: [],
+    mood: [],
+    era: [],
+    confidence: 0,
+    source: source,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* MODE 1 — embedded offline taxonomy engine                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Fold free text into the KB's matching alphabet: lowercase, every non
+ * [a-z0-9] run becomes one space, and the result is space-padded so a phrase
+ * can be located with whole-word `indexOf(' phrase ')` and no regex building.
+ * "Drum & Bass", "drum'n'bass" and "DRUM  BASS" all normalise to the same
+ * token stream, which is why MUSIC_KB phrases are stored pre-normalised.
+ *
+ * @param {string} text
+ * @returns {string} ' padded token stream ' or '' when there is nothing to match
+ */
+function normalizeDissectorText(text) {
+  if (typeof text !== 'string' || !text) return '';
+  var folded = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return folded ? ' ' + folded + ' ' : '';
+}
+
+/**
+ * How much a single phrase hit is worth. Longer phrases are far more specific
+ * ("progressive trance" says more than "trance"), so they score higher — and
+ * because the resolver below consumes their span, the shorter phrase inside
+ * them never double-counts.
+ * @param {number} words
+ * @returns {number} 0..1
+ */
+function phraseStrength(words) {
+  if (words >= 3) return 1;
+  if (words === 2) return 0.85;
+  return 0.6;
+}
+
+/**
+ * Every KB entry, flattened, with its group. All three groups share one entry
+ * shape so the matcher needs no special cases.
+ * @param {object} kb
+ * @returns {Array<{kind:string, entry:object}>}
+ */
+function kbEntryList(kb) {
+  var out = [];
+  var groups = ['genres', 'scenes', 'eras'];
+  for (var g = 0; g < groups.length; g += 1) {
+    var list = kb && kb[groups[g]];
+    if (!isArrayLike(list)) continue;
+    for (var i = 0; i < list.length; i += 1) {
+      if (list[i] && typeof list[i] === 'object') out.push({ kind: groups[g], entry: list[i] });
+    }
+  }
+  return out;
+}
+
+/**
+ * Locate every KB phrase in the normalised text, then resolve overlaps.
+ *
+ * Deterministic by construction: candidates are sorted by (word count desc,
+ * start asc, entry id asc, discovery order asc) and accepted greedily while
+ * their character spans do not overlap. Same input -> same matches, always.
+ *
+ * @param {string} normalized output of normalizeDissectorText
+ * @param {object} kb
+ * @returns {Array<{kind:string, entry:object, start:number, end:number,
+ *                  words:number, strength:number}>}
+ */
+function findKbMatches(normalized, kb) {
+  if (!normalized) return [];
+  var entries = kbEntryList(kb);
+  var candidates = [];
+  var order = 0;
+
+  for (var e = 0; e < entries.length; e += 1) {
+    var entry = entries[e].entry;
+    var phrases = entry.phrases;
+    if (!isArrayLike(phrases)) continue;
+    for (var p = 0; p < phrases.length; p += 1) {
+      var phrase = phrases[p];
+      if (typeof phrase !== 'string' || !phrase) continue;
+      var needle = ' ' + phrase + ' ';
+      var from = 0;
+      var idx = normalized.indexOf(needle, from);
+      while (idx !== -1) {
+        candidates.push({
+          kind: entries[e].kind,
+          entry: entry,
+          phrase: phrase,
+          start: idx,
+          // The trailing space is shared with the next phrase's leading space,
+          // so the span stops one short of it: adjacent phrases both survive.
+          end: idx + needle.length - 1,
+          words: phrase.split(' ').length,
+          order: order,
+        });
+        order += 1;
+        from = idx + 1;
+        idx = normalized.indexOf(needle, from);
+      }
+    }
+  }
+
+  candidates.sort(function (a, b) {
+    if (a.words !== b.words) return b.words - a.words;
+    if (a.start !== b.start) return a.start - b.start;
+    var idA = String(a.entry.id || '');
+    var idB = String(b.entry.id || '');
+    if (idA !== idB) return idA < idB ? -1 : 1;
+    return a.order - b.order;
+  });
+
+  var accepted = [];
+  for (var c = 0; c < candidates.length; c += 1) {
+    var cand = candidates[c];
+    var clash = false;
+    for (var a = 0; a < accepted.length; a += 1) {
+      if (cand.start < accepted[a].end && accepted[a].start < cand.end) {
+        clash = true;
+        break;
+      }
+    }
+    if (clash) continue;
+    cand.strength = phraseStrength(cand.words);
+    accepted.push(cand);
+  }
+
+  accepted.sort(function (a, b) {
+    if (a.start !== b.start) return a.start - b.start;
+    return a.order - b.order;
+  });
+  return accepted;
+}
+
+/**
+ * MODE 1. Deconstruct free text against the embedded knowledge base.
+ *
+ * Deterministic and offline: no clock, no randomness, no network. Text that
+ * matches nothing returns an EMPTY result with confidence 0 rather than a
+ * plausible-looking guess (docs/ENGINEERING-STANDARD.md §1.2).
+ *
+ * Merge rules:
+ *   - an entry hit more than once gains a small bonus, capped at 1;
+ *   - a tag claimed by two entries combines as 1-(1-a)(1-b) (probabilistic OR),
+ *     so agreement reinforces without ever exceeding 1 and without duplicating;
+ *   - bpm_range is the strength-weighted mean of the matched entries that
+ *     actually carry a tempo; entries with none simply do not vote;
+ *   - confidence = 1 - 0.55^(total strength), capped at 0.95: a local lexical
+ *     match is evidence, never certainty.
+ *
+ * @param {string} text
+ * @returns {{genre_tokens:Array<{tag:string,weight:number}>,
+ *            bpm_range:Array<number>|null, instruments:string[], mood:string[],
+ *            era:string[], confidence:number, source:'local'}}
+ */
+function dissectLocal(text) {
+  var result = emptyDissection('local');
+  var normalized = normalizeDissectorText(text);
+  if (!normalized) return result;
+
+  var matches = findKbMatches(normalized, MUSIC_KB);
+  if (!matches.length) return result;
+
+  // Collapse repeated hits of one entry into a single strength.
+  var strengths = [];
+  var byId = {};
+  for (var m = 0; m < matches.length; m += 1) {
+    var id = String(matches[m].entry.id || 'entry-' + m);
+    if (Object.prototype.hasOwnProperty.call(byId, id)) {
+      var slot = strengths[byId[id]];
+      slot.hits += 1;
+      if (matches[m].strength > slot.best) slot.best = matches[m].strength;
+    } else {
+      byId[id] = strengths.length;
+      strengths.push({ id: id, entry: matches[m].entry, best: matches[m].strength, hits: 1 });
+    }
+  }
+
+  var tokenWeights = {};
+  var tokenOrder = {};
+  var tokenSeq = 0;
+  var lists = { instruments: {}, mood: {}, era: {} };
+  var listOrder = { instruments: {}, mood: {}, era: {} };
+  var listSeq = 0;
+  var bpmLoSum = 0;
+  var bpmHiSum = 0;
+  var bpmWeight = 0;
+  var totalStrength = 0;
+
+  function noteList(name, values, strength) {
+    if (!isArrayLike(values)) return;
+    for (var i = 0; i < values.length; i += 1) {
+      var value = values[i];
+      if (typeof value !== 'string') continue;
+      var label = value.trim();
+      if (!label) continue;
+      var bucket = lists[name];
+      if (!Object.prototype.hasOwnProperty.call(bucket, label)) {
+        bucket[label] = strength;
+        listOrder[name][label] = listSeq;
+        listSeq += 1;
+      } else if (strength > bucket[label]) {
+        bucket[label] = strength;
+      }
+    }
+  }
+
+  for (var s = 0; s < strengths.length; s += 1) {
+    var record = strengths[s];
+    var entry = record.entry;
+    var strength = record.best + 0.08 * (record.hits - 1);
+    if (strength > 1) strength = 1;
+    totalStrength += strength;
+
+    if (isArrayLike(entry.tokens)) {
+      for (var t = 0; t < entry.tokens.length; t += 1) {
+        var token = entry.tokens[t];
+        if (!token || typeof token.tag !== 'string') continue;
+        var tag = token.tag.trim();
+        if (!tag) continue;
+        var contribution = clamp01(token.weight) * strength;
+        if (Object.prototype.hasOwnProperty.call(tokenWeights, tag)) {
+          var prior = tokenWeights[tag];
+          tokenWeights[tag] = 1 - (1 - prior) * (1 - contribution);
+        } else {
+          tokenWeights[tag] = contribution;
+          tokenOrder[tag] = tokenSeq;
+          tokenSeq += 1;
+        }
+      }
+    }
+
+    if (isArrayLike(entry.bpm) && entry.bpm.length >= 2) {
+      var lo = entry.bpm[0];
+      var hi = entry.bpm[1];
+      if (typeof lo === 'number' && isFinite(lo) && typeof hi === 'number' && isFinite(hi)) {
+        bpmLoSum += lo * strength;
+        bpmHiSum += hi * strength;
+        bpmWeight += strength;
+      }
+    }
+
+    noteList('instruments', entry.instruments, strength);
+    noteList('mood', entry.moods, strength);
+    noteList('era', entry.eras, strength);
+  }
+
+  var tags = Object.keys(tokenWeights);
+  tags.sort(function (a, b) {
+    var wa = tokenWeights[a];
+    var wb = tokenWeights[b];
+    if (wa !== wb) return wb - wa;
+    if (a !== b) return a < b ? -1 : 1;
+    return tokenOrder[a] - tokenOrder[b];
+  });
+  for (var i = 0; i < tags.length && result.genre_tokens.length < LOCAL_MAX_TOKENS; i += 1) {
+    var weight = roundTo(clamp01(tokenWeights[tags[i]]), 3);
+    if (weight <= 0) continue;
+    result.genre_tokens.push({ tag: tags[i], weight: weight });
+  }
+
+  if (bpmWeight > 0) {
+    var meanLo = Math.round(bpmLoSum / bpmWeight);
+    var meanHi = Math.round(bpmHiSum / bpmWeight);
+    result.bpm_range = meanLo <= meanHi ? [meanLo, meanHi] : [meanHi, meanLo];
+  }
+
+  var listNames = ['instruments', 'mood', 'era'];
+  for (var n = 0; n < listNames.length; n += 1) {
+    var name = listNames[n];
+    var labels = Object.keys(lists[name]);
+    labels.sort(function (a, b) {
+      var sa = lists[name][a];
+      var sb = lists[name][b];
+      if (sa !== sb) return sb - sa;
+      if (a !== b) return a < b ? -1 : 1;
+      return listOrder[name][a] - listOrder[name][b];
+    });
+    result[name] = labels.slice(0, LOCAL_MAX_LIST);
+  }
+
+  result.confidence = roundTo(Math.min(0.95, 1 - Math.pow(0.55, totalStrength)), 3);
+  return result;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Prompt builders (pure) — used by the cloud and Ollama providers            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The JSON contract handed to every remote model. Identical wording for cloud
+ * and Ollama so their replies are interchangeable.
+ * @returns {string}
+ */
+function dissectorSchemaBlock() {
+  return [
+    'Answer with ONE JSON object and nothing else. No prose, no code fences.',
+    '{',
+    '  "genre_tokens": [{"tag": "lowercase genre or production token", "weight": 0.0-1.0}],',
+    '  "bpm_range": [low, high] or null,',
+    '  "instruments": ["lowercase instrument or sound-source token"],',
+    '  "mood": ["lowercase mood token"],',
+    '  "era": ["production era or decade signature"],',
+    '  "confidence": 0.0-1.0',
+    '}',
+    'Weights rank the tokens: 1.0 is the defining trait, 0.3 is a faint colour.',
+    'Use null for bpm_range rather than inventing a tempo you cannot justify.',
+  ].join('\n');
+}
+
+/**
+ * Mode 2/3 prompt for a single description (FDD.md #24: the dissection must be
+ * copyright-safe — generic attributes, never a named artist).
+ * @param {string} text
+ * @returns {string|null} null when there is nothing to dissect
+ */
+function buildDissectorPrompt(text) {
+  var body = typeof text === 'string' ? text.trim() : '';
+  if (!body) return null;
+  return [
+    'You are the acoustic dissector inside SunoPrompt Studio, a prompt builder for Suno v5.5.',
+    'Deconstruct the description below into generic, copyright-safe musical attributes.',
+    'Never name a real artist, band, producer or song title in your answer; describe the sound instead.',
+    '',
+    'DESCRIPTION: ' + body,
+    '',
+    dissectorSchemaBlock(),
+  ].join('\n');
+}
+
+/**
+ * Batch Dissection (FDD.md #58, FEATURE-MECHANICS.md §7.5). The instruction
+ * sentence is reproduced VERBATIM from §7.5 with [TRACK_LIST] substituted; the
+ * track count is parameterised because the spec allows "up to 5".
+ *
+ * POLICY (documented choice): more than 5 tracks are CLAMPED to the first 5
+ * rather than rejected — a pasted 30-track playlist should still dissect, and
+ * silently truncating to the documented ceiling degrades better than an error.
+ * Blank entries are dropped; an empty list returns null.
+ *
+ * @param {string[]} tracks
+ * @returns {string|null}
+ */
+function buildBatchDissectionPrompt(tracks) {
+  if (!isArrayLike(tracks)) return null;
+  var kept = [];
+  for (var i = 0; i < tracks.length && kept.length < BATCH_TRACK_LIMIT; i += 1) {
+    if (typeof tracks[i] !== 'string') continue;
+    var track = tracks[i].trim();
+    if (track) kept.push(track);
+  }
+  if (!kept.length) return null;
+
+  var numbered = [];
+  for (var k = 0; k < kept.length; k += 1) numbered.push(k + 1 + '. ' + kept[k]);
+
+  return [
+    'Identify the overlapping acoustic traits, median BPM, and primary genre that unites the following ' +
+      kept.length +
+      ' tracks: ' +
+      numbered.join('; ') +
+      '. Return only the unifying traits in the JSON schema.',
+    'Never name a real artist, band, producer or song title in your answer; describe the sound instead.',
+    '',
+    dissectorSchemaBlock(),
+  ].join('\n');
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reply parsing (tolerant in, strict out)                                    */
+/* -------------------------------------------------------------------------- */
+
+/** Drop markdown code fences a chat model wraps its JSON in. */
+function stripCodeFences(text) {
+  return String(text).replace(/```[a-zA-Z0-9_+-]*[ \t]*\r?\n?/g, '').replace(/```/g, '');
+}
+
+/**
+ * First balanced {...} block in a string, skipping braces inside string
+ * literals so `{"tag":"drum { bass"}` cannot truncate the scan.
+ * @param {string} text
+ * @returns {string|null}
+ */
+function extractFirstJsonObject(text) {
+  var depth = 0;
+  var start = -1;
+  var inString = false;
+  var quote = '';
+  var escaped = false;
+
+  for (var i = 0; i < text.length; i += 1) {
+    var ch = text.charAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) inString = false;
+      continue;
+    }
+    if (start !== -1 && (ch === '"' || ch === "'")) {
+      inString = true;
+      quote = ch;
+      continue;
+    }
+    if (ch === '{') {
+      if (start === -1) start = i;
+      depth += 1;
+    } else if (ch === '}' && start !== -1) {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/** JSON.parse, retried once with trailing commas removed. Never throws. */
+function parseJsonLoosely(body) {
+  try {
+    return JSON.parse(body);
+  } catch (err) {
+    try {
+      return JSON.parse(body.replace(/,\s*([}\]])/g, '$1'));
+    } catch (err2) {
+      return null;
+    }
+  }
+}
+
+/**
+ * Normalise a model's reply into the result schema.
+ *
+ * Tolerant about packaging (code fences, prose before/after, trailing commas,
+ * `moods`/`eras` plurals, bare-string genre tokens) and strict about content:
+ * weights are clamped to 0..1, a bpm_range must be two real numbers, and a
+ * reply that carries none of the schema's fields returns null instead of an
+ * invented skeleton. `source` is left null for the caller to stamp.
+ *
+ * @param {string} raw
+ * @returns {object|null}
+ */
+function parseDissectorReply(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  var body = extractFirstJsonObject(stripCodeFences(raw));
+  if (!body) return null;
+  var data = parseJsonLoosely(body);
+  if (!data || typeof data !== 'object' || isArrayLike(data)) return null;
+
+  var out = emptyDissection(null);
+
+  var seenTags = {};
+  if (isArrayLike(data.genre_tokens)) {
+    for (var i = 0; i < data.genre_tokens.length; i += 1) {
+      var raw_token = data.genre_tokens[i];
+      var tag = null;
+      var weight = 1;
+      if (typeof raw_token === 'string') {
+        tag = raw_token.trim();
+      } else if (raw_token && typeof raw_token === 'object') {
+        if (typeof raw_token.tag === 'string') tag = raw_token.tag.trim();
+        else if (typeof raw_token.token === 'string') tag = raw_token.token.trim();
+        if (typeof raw_token.weight === 'number' && isFinite(raw_token.weight)) {
+          weight = clamp01(raw_token.weight);
+        }
+      }
+      if (!tag) continue;
+      if (Object.prototype.hasOwnProperty.call(seenTags, tag)) continue;
+      seenTags[tag] = true;
+      out.genre_tokens.push({ tag: tag, weight: roundTo(clamp01(weight), 3) });
+      if (out.genre_tokens.length >= LOCAL_MAX_TOKENS) break;
+    }
+  }
+
+  var range = data.bpm_range;
+  if (isArrayLike(range) && range.length >= 2) {
+    var lo = Number(range[0]);
+    var hi = Number(range[1]);
+    if (isFinite(lo) && isFinite(hi) && lo > 0 && hi > 0) {
+      lo = Math.round(lo);
+      hi = Math.round(hi);
+      out.bpm_range = lo <= hi ? [lo, hi] : [hi, lo];
+    }
+  }
+
+  var listSources = {
+    instruments: data.instruments,
+    mood: data.mood === undefined ? data.moods : data.mood,
+    era: data.era === undefined ? data.eras : data.era,
+  };
+  var names = ['instruments', 'mood', 'era'];
+  for (var n = 0; n < names.length; n += 1) {
+    var name = names[n];
+    var source = listSources[name];
+    if (typeof source === 'string') source = [source];
+    if (!isArrayLike(source)) continue;
+    var seen = {};
+    for (var v = 0; v < source.length && out[name].length < LOCAL_MAX_LIST; v += 1) {
+      if (typeof source[v] !== 'string') continue;
+      var label = source[v].trim();
+      if (!label || Object.prototype.hasOwnProperty.call(seen, label)) continue;
+      seen[label] = true;
+      out[name].push(label);
+    }
+  }
+
+  if (typeof data.confidence === 'number' && isFinite(data.confidence)) {
+    var confidence = data.confidence;
+    // Models routinely answer 0-100 instead of 0-1; fold that back honestly.
+    if (confidence > 1 && confidence <= 100) confidence = confidence / 100;
+    out.confidence = roundTo(clamp01(confidence), 3);
+  }
+
+  var empty =
+    !out.genre_tokens.length &&
+    !out.bpm_range &&
+    !out.instruments.length &&
+    !out.mood.length &&
+    !out.era.length;
+  return empty ? null : out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Network plumbing shared by the cloud and Ollama providers                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Classify a fetch Response without ever throwing.
+ * 429 is the one status §7.3 calls fallback-eligible; every other 4xx/5xx is a
+ * real, user-actionable failure and is reported as-is.
+ * @returns {Promise<object>} always resolves
+ */
+function readProviderResponse(res) {
+  return new Promise(function (resolve) {
+    if (!res || typeof res !== 'object') {
+      resolve({ ok: false, error: 'the provider returned no response', retryable: true });
+      return;
+    }
+    var status = typeof res.status === 'number' ? res.status : 0;
+    if (status === 429) {
+      resolve({ ok: false, error: 'rate limited (HTTP 429)', retryable: true, status: status });
+      return;
+    }
+    if (status >= 400) {
+      resolve({ ok: false, error: 'HTTP ' + status, retryable: false, status: status });
+      return;
+    }
+    var pending;
+    try {
+      if (typeof res.json === 'function') {
+        pending = Promise.resolve(res.json());
+      } else if (typeof res.text === 'function') {
+        pending = Promise.resolve(res.text()).then(function (body) {
+          return JSON.parse(body);
+        });
+      } else {
+        pending = Promise.reject(new Error('response exposes neither json() nor text()'));
+      }
+    } catch (err) {
+      pending = Promise.reject(err);
+    }
+    pending.then(
+      function (json) {
+        resolve({ ok: true, status: status, json: json });
+      },
+      function (err) {
+        resolve({
+          ok: false,
+          error: 'unreadable response body: ' + errorMessage(err),
+          retryable: false,
+          status: status,
+        });
+      }
+    );
+  });
+}
+
+/**
+ * POST JSON with a hard deadline. Aborts the request via AbortController when
+ * one exists, and resolves — never rejects — with a classified outcome:
+ *   {ok:true, json}
+ *   {ok:false, error, retryable}   retryable => the §7.3 chain may continue
+ *
+ * A timeout and a network/DNS/CORS failure are both retryable. See the
+ * NETWORK-FAILURE POLICY note on runDissectorChain for why.
+ */
+function postJsonWithTimeout(ctx, url, headers, body) {
+  var timing = ctx.timing;
+  return new Promise(function (resolve) {
+    var settled = false;
+    var timer = null;
+    var controller = null;
+
+    function finish(outcome) {
+      if (settled) return;
+      settled = true;
+      if (timer !== null && typeof timing.clearTimeoutFn === 'function') {
+        try {
+          timing.clearTimeoutFn(timer);
+        } catch (err) {
+          /* a fake/expired timer handle must not break the result */
+        }
+      }
+      timer = null;
+      resolve(outcome);
+    }
+
+    if (typeof ctx.fetchFn !== 'function') {
+      finish({
+        ok: false,
+        error: 'fetch() is not available in this environment',
+        retryable: true,
+        unavailable: true,
+      });
+      return;
+    }
+
+    try {
+      if (typeof AbortController === 'function') controller = new AbortController();
+    } catch (err) {
+      controller = null;
+    }
+
+    var options = {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body),
+    };
+    if (controller) options.signal = controller.signal;
+
+    if (typeof timing.setTimeoutFn === 'function') {
+      try {
+        timer = timing.setTimeoutFn(function () {
+          if (controller) {
+            try {
+              controller.abort();
+            } catch (err) {
+              /* aborting a finished request is harmless */
+            }
+          }
+          finish({
+            ok: false,
+            error: 'timed out after ' + timing.timeoutMs + 'ms',
+            retryable: true,
+            timedOut: true,
+          });
+        }, timing.timeoutMs);
+      } catch (err) {
+        timer = null;
+      }
+    }
+
+    var pending;
+    try {
+      pending = ctx.fetchFn(url, options);
+    } catch (err) {
+      finish({ ok: false, error: 'network error: ' + errorMessage(err), retryable: true });
+      return;
+    }
+    if (!pending || typeof pending.then !== 'function') {
+      finish({ ok: false, error: 'fetch() did not return a promise', retryable: true });
+      return;
+    }
+
+    pending.then(
+      function (res) {
+        readProviderResponse(res).then(finish, function (err) {
+          finish({ ok: false, error: errorMessage(err), retryable: false });
+        });
+      },
+      function (err) {
+        finish({ ok: false, error: 'network error: ' + errorMessage(err), retryable: true });
+      }
+    );
+  });
+}
+
+/** Turn a provider's raw text reply into a stamped result, or a failure. */
+function finishRemoteReply(text, source) {
+  if (typeof text !== 'string' || !text.trim()) {
+    return { ok: false, error: 'the ' + source + ' reply carried no text', retryable: false };
+  }
+  var parsed = parseDissectorReply(text);
+  if (!parsed) {
+    return { ok: false, error: 'the ' + source + ' reply was not usable JSON', retryable: false };
+  }
+  parsed.source = source;
+  return { ok: true, result: parsed };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Providers                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Resolve a UI cloud config against the preset registry.
+ * The key is returned but never stored anywhere: it lives in this object for
+ * the duration of one request and is then garbage.
+ */
+function resolveCloudConfig(config) {
+  var cfg = config || {};
+  var presetId =
+    typeof cfg.preset === 'string' && Object.prototype.hasOwnProperty.call(CLOUD_API_PRESETS, cfg.preset)
+      ? cfg.preset
+      : 'custom';
+  var preset = CLOUD_API_PRESETS[presetId];
+  var endpoint = typeof cfg.endpoint === 'string' ? cfg.endpoint.trim() : '';
+  if (!endpoint) endpoint = preset.endpoint || '';
+  var model = typeof cfg.model === 'string' ? cfg.model.trim() : '';
+  if (!model) model = preset.defaultModel || '';
+  return {
+    presetId: presetId,
+    preset: preset,
+    endpoint: endpoint,
+    model: model,
+    key: typeof cfg.key === 'string' ? cfg.key : '',
+  };
+}
+
+/** MODE 1 provider wrapper. Cannot fail on input; only a broken KB could. */
+function localDissectorProvider(ctx, request) {
+  try {
+    return Promise.resolve({ ok: true, result: dissectLocal(request.text) });
+  } catch (err) {
+    return Promise.resolve({
+      ok: false,
+      error: 'local engine failed: ' + errorMessage(err),
+      retryable: false,
+    });
+  }
+}
+
+/** MODE 2 provider. All provider-specific shaping comes from the preset. */
+function cloudDissectorProvider(ctx, request) {
+  var cfg = resolveCloudConfig(request.cloud);
+  if (!cfg.endpoint) {
+    return Promise.resolve({
+      ok: false,
+      error: 'no cloud endpoint configured',
+      retryable: false,
+      configured: false,
+    });
+  }
+  var url = cfg.endpoint;
+  var headers;
+  var body;
+  try {
+    if (typeof cfg.preset.buildUrl === 'function') url = cfg.preset.buildUrl(cfg.endpoint, cfg.model);
+    headers = cfg.preset.buildHeaders(cfg.key);
+    body = cfg.preset.buildBody(request.promptText, cfg.model);
+  } catch (err) {
+    return Promise.resolve({
+      ok: false,
+      error: 'cloud preset "' + cfg.presetId + '" failed to build the request: ' + errorMessage(err),
+      retryable: false,
+    });
+  }
+  return postJsonWithTimeout(ctx, url, headers, body).then(function (outcome) {
+    if (!outcome.ok) return outcome;
+    var text = null;
+    try {
+      text = cfg.preset.extractText(outcome.json);
+    } catch (err) {
+      text = null;
+    }
+    return finishRemoteReply(text, 'cloud');
+  });
+}
+
+/** MODE 3 provider. localhost only; the model name comes from the UI. */
+function ollamaDissectorProvider(ctx, request) {
+  var cfg = request.ollama || {};
+  var model = typeof cfg.model === 'string' && cfg.model.trim() ? cfg.model.trim() : OLLAMA_DEFAULT_MODEL;
+  var endpoint =
+    typeof cfg.endpoint === 'string' && cfg.endpoint.trim() ? cfg.endpoint.trim() : OLLAMA_ENDPOINT;
+  var body = {
+    model: model,
+    prompt: request.promptText,
+    stream: false,
+    options: { temperature: DISSECTOR_TEMPERATURE, top_k: DISSECTOR_TOP_K },
+  };
+  return postJsonWithTimeout(ctx, endpoint, { 'Content-Type': 'application/json' }, body).then(
+    function (outcome) {
+      if (!outcome.ok) return outcome;
+      var json = outcome.json;
+      var text = json && typeof json.response === 'string' ? json.response : null;
+      return finishRemoteReply(text, 'ollama');
+    }
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The engine                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Run one provider and normalise everything it could possibly do wrong
+ * (throw synchronously, return a non-promise, reject) into a resolved outcome.
+ */
+function runProviderStep(provider, name, ctx, request) {
+  var pending;
+  try {
+    pending = provider(ctx, request);
+  } catch (err) {
+    return Promise.resolve({
+      ok: false,
+      error: 'provider "' + name + '" threw: ' + errorMessage(err),
+      retryable: false,
+    });
+  }
+  if (!pending || typeof pending.then !== 'function') {
+    return Promise.resolve({
+      ok: false,
+      error: 'provider "' + name + '" did not return a promise',
+      retryable: false,
+    });
+  }
+  return pending.then(
+    function (outcome) {
+      if (outcome && typeof outcome === 'object') return outcome;
+      return { ok: false, error: 'provider "' + name + '" returned no outcome', retryable: false };
+    },
+    function (err) {
+      return {
+        ok: false,
+        error: 'provider "' + name + '" rejected: ' + errorMessage(err),
+        retryable: false,
+      };
+    }
+  );
+}
+
+/**
+ * The §7.3 waterfall.
+ *
+ * FALLBACK POLICY
+ *   - `auto` runs cloud -> local. Manual mode pins run exactly one provider:
+ *     pinning a mode means you want to know whether THAT mode worked.
+ *   - Only a fallback-ELIGIBLE cloud failure chains: HTTP 429, a timeout past
+ *     deps.timeoutMs, or a network-layer failure. Everything else (HTTP 401,
+ *     500, an unparseable reply) is reported to the user, because silently
+ *     answering from a different engine would hide a fixable misconfiguration.
+ *   - NETWORK-FAILURE POLICY (documented choice beyond §7.3, which names only
+ *     rate-limit and timeout): a rejected fetch — offline, DNS failure, CORS,
+ *     a blocked file:// origin — ALSO chains to local. Auto mode exists so the
+ *     user always gets an answer; an offline laptop is the single most likely
+ *     reason a request fails, and dead-ending there would break the app's
+ *     offline-first promise (FDD.md #85) for no benefit. Pinned cloud mode
+ *     still surfaces the network error instead of hiding it.
+ *   - A cloud attempt that never happened (no endpoint configured, or no
+ *     fetch() in this environment) is NOT a fallback: local runs, `fellBack`
+ *     stays false and no toast fires. Nothing was busy.
+ */
+function runDissectorChain(order, ctx, request, providers, toast) {
+  function step(index, fellBack, lastFailure) {
+    if (index >= order.length) {
+      var failure = lastFailure || { error: 'no provider was available', mode: order[order.length - 1] };
+      return Promise.resolve({
+        ok: false,
+        mode: failure.mode || order[order.length - 1] || 'local',
+        error: failure.error,
+        fellBack: fellBack,
+      });
+    }
+    var name = order[index];
+    return runProviderStep(providers[name], name, ctx, request).then(function (outcome) {
+      if (outcome.ok) {
+        return { ok: true, mode: name, result: outcome.result, fellBack: fellBack };
+      }
+      var isLast = index === order.length - 1;
+      if (isLast) {
+        return { ok: false, mode: name, error: outcome.error, fellBack: fellBack };
+      }
+      var skipped = outcome.configured === false || outcome.unavailable === true;
+      if (skipped) {
+        // Never attempted -> silent, and not a fallback.
+        return step(index + 1, fellBack, { mode: name, error: outcome.error });
+      }
+      if (outcome.retryable === true) {
+        try {
+          toast(DISSECTOR_FALLBACK_TOAST, 'warn');
+        } catch (err) {
+          /* a broken toast host must never break the chain */
+        }
+        return step(index + 1, true, { mode: name, error: outcome.error });
+      }
+      // Fallback-ineligible: report it instead of masking it.
+      return { ok: false, mode: name, error: outcome.error, fellBack: fellBack };
+    });
+  }
+  return step(0, false, null);
+}
+
+/**
+ * Build the Tri-Mode dissector.
+ *
+ * @param {{
+ *   fetchFn?: (url:string, options:object) => Promise<any>,
+ *   now?: () => number,
+ *   timeoutMs?: number,
+ *   toast?: (message:string, kind?:string) => void,
+ *   setTimeoutFn?: Function, clearTimeoutFn?: Function,
+ *   providers?: {local?:Function, cloud?:Function, ollama?:Function}
+ * }} deps
+ * @returns {{dissect: Function, listModes: Function}}
+ */
+function createDissector(deps) {
+  var d = deps || {};
+  var fetchFn =
+    typeof d.fetchFn === 'function' ? d.fetchFn : typeof fetch === 'function' ? fetch : null;
+  var now =
+    typeof d.now === 'function'
+      ? d.now
+      : function () {
+          return Date.now();
+        };
+  var timeoutMs =
+    typeof d.timeoutMs === 'number' && isFinite(d.timeoutMs) && d.timeoutMs > 0
+      ? d.timeoutMs
+      : DISSECTOR_TIMEOUT_MS;
+  var toast = typeof d.toast === 'function' ? d.toast : function () {};
+  var setTimeoutFn =
+    typeof d.setTimeoutFn === 'function'
+      ? d.setTimeoutFn
+      : typeof setTimeout === 'function'
+        ? setTimeout
+        : null;
+  var clearTimeoutFn =
+    typeof d.clearTimeoutFn === 'function'
+      ? d.clearTimeoutFn
+      : typeof clearTimeout === 'function'
+        ? clearTimeout
+        : null;
+
+  var providers = {
+    local: localDissectorProvider,
+    cloud: cloudDissectorProvider,
+    ollama: ollamaDissectorProvider,
+  };
+  if (d.providers && typeof d.providers === 'object') {
+    var names = ['local', 'cloud', 'ollama'];
+    for (var i = 0; i < names.length; i += 1) {
+      if (typeof d.providers[names[i]] === 'function') providers[names[i]] = d.providers[names[i]];
+    }
+  }
+
+  // The provider context. Everything a provider is allowed to touch arrives
+  // here, injected — no provider reaches for a global. `now` is part of that
+  // contract rather than something the three shipped providers need today: a
+  // provider that must schedule, budget or cache across calls (the reserved
+  // WebGPU one, or a rate-limit-aware cloud provider) reads its clock from
+  // ctx.now so tests can drive it deterministically.
+  var ctx = {
+    fetchFn: fetchFn,
+    now: now,
+    timing: { timeoutMs: timeoutMs, setTimeoutFn: setTimeoutFn, clearTimeoutFn: clearTimeoutFn },
+  };
+
+  /**
+   * Dissect one description. ALWAYS resolves — never rejects, never leaves an
+   * unhandled rejection behind (docs/ENGINEERING-STANDARD.md §2.3).
+   *
+   * @param {{text:string, mode?:string, tracks?:string[],
+   *          cloud?:{preset?:string, endpoint?:string, key?:string, model?:string},
+   *          ollama?:{model?:string, endpoint?:string}}} request
+   * @returns {Promise<{ok:boolean, mode:string, result?:object, error?:string,
+   *                    fellBack:boolean}>}
+   */
+  function dissect(request) {
+    try {
+      var req = request || {};
+      var mode = typeof req.mode === 'string' && req.mode ? req.mode.toLowerCase() : 'auto';
+      if (DISSECTOR_MODES.indexOf(mode) === -1) {
+        return Promise.resolve({
+          ok: false,
+          mode: mode,
+          error: 'unknown mode "' + mode + '"',
+          fellBack: false,
+        });
+      }
+
+      var text = typeof req.text === 'string' ? req.text.trim() : '';
+      var tracks = isArrayLike(req.tracks) ? req.tracks : null;
+      if (!text && tracks) {
+        var joined = [];
+        for (var t = 0; t < tracks.length; t += 1) {
+          if (typeof tracks[t] === 'string' && tracks[t].trim()) joined.push(tracks[t].trim());
+        }
+        text = joined.join('\n');
+      }
+      if (!text) {
+        return Promise.resolve({
+          ok: false,
+          mode: mode,
+          error: 'Enter a description to dissect.',
+          fellBack: false,
+        });
+      }
+
+      var promptText =
+        tracks && tracks.length > 1 ? buildBatchDissectionPrompt(tracks) : buildDissectorPrompt(text);
+      if (!promptText) promptText = buildDissectorPrompt(text);
+
+      var resolved = {
+        text: text,
+        tracks: tracks,
+        promptText: promptText,
+        cloud: req.cloud || null,
+        ollama: req.ollama || null,
+      };
+
+      var order = mode === 'auto' ? ['cloud', 'local'] : [mode];
+      return runDissectorChain(order, ctx, resolved, providers, toast).then(
+        function (outcome) {
+          return outcome;
+        },
+        function (err) {
+          // Defence in depth: the chain is written not to reject, and if a
+          // future provider breaks that, the caller still gets an answer.
+          return { ok: false, mode: mode, error: errorMessage(err), fellBack: false };
+        }
+      );
+    } catch (err) {
+      return Promise.resolve({
+        ok: false,
+        mode: 'auto',
+        error: errorMessage(err),
+        fellBack: false,
+      });
+    }
+  }
+
+  /** The selectable modes, in UI order, with what each one actually does. */
+  function listModes() {
+    return [
+      {
+        id: 'auto',
+        label: 'Auto (cloud, then local)',
+        detail: 'Tries the cloud API and falls back to the offline engine.',
+      },
+      {
+        id: 'local',
+        label: 'Local offline engine',
+        detail: 'Embedded taxonomy knowledge base. No network, fully deterministic.',
+      },
+      { id: 'cloud', label: 'Cloud API', detail: 'Your endpoint and key, held in memory only.' },
+      { id: 'ollama', label: 'Local Ollama', detail: 'POSTs to a local Ollama server on port 11434.' },
+    ];
+  }
+
+  return { dissect: dissect, listModes: listModes };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Toasts                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A stacking, self-dismissing toast host (FEATURE-MECHANICS.md §7.3 step 4).
+ *
+ * The host is one polite aria-live region so a screen reader announces each
+ * message once, without the container itself being re-announced. Returns a
+ * no-op host when there is no DOM, so callers never need to branch.
+ *
+ * @param {Document} doc
+ * @param {{ttlMs?:number, setTimeoutFn?:Function}} [options]
+ * @returns {{show:Function, count:Function, clear:Function}}
+ */
+function createToastHost(doc, options) {
+  var opts = options || {};
+  var ttlMs = typeof opts.ttlMs === 'number' && isFinite(opts.ttlMs) && opts.ttlMs > 0 ? opts.ttlMs : 4000;
+  var schedule =
+    typeof opts.setTimeoutFn === 'function'
+      ? opts.setTimeoutFn
+      : typeof setTimeout === 'function'
+        ? setTimeout
+        : null;
+
+  var mount = doc && (doc.body || doc.documentElement);
+  if (!doc || typeof doc.createElement !== 'function' || !mount) {
+    return {
+      show: function () {
+        return null;
+      },
+      count: function () {
+        return 0;
+      },
+      clear: function () {},
+    };
+  }
+
+  var host = doc.createElement('div');
+  host.className = 'toast-host';
+  host.setAttribute('role', 'status');
+  host.setAttribute('aria-live', 'polite');
+  mount.appendChild(host);
+
+  function remove(el) {
+    if (el && el.parentNode === host) host.removeChild(el);
+  }
+
+  return {
+    /**
+     * @param {string} message
+     * @param {'info'|'warn'|'error'} [kind]
+     */
+    show: function (message, kind) {
+      var text = String(message === undefined || message === null ? '' : message);
+      if (!text) return null;
+      var tone = kind === 'warn' || kind === 'error' ? kind : 'info';
+      var el = doc.createElement('div');
+      el.className = 'toast toast-' + tone;
+      el.textContent = text;
+      host.appendChild(el);
+      if (schedule) {
+        schedule(function () {
+          remove(el);
+        }, ttlMs);
+      }
+      return el;
+    },
+    count: function () {
+      return host.childNodes ? host.childNodes.length : 0;
+    },
+    clear: function () {
+      while (host.firstChild) host.removeChild(host.firstChild);
+    },
+  };
+}
+
 (function () {
   if (typeof document === 'undefined') return;
 
@@ -1604,6 +4262,228 @@ function createAudioCapture(deps) {
       if (state !== 'idle' && state !== 'stopped') capture = makeCapture();
       capture.start();
     });
+
+    /* ---------------- AI acoustic dissector wiring ---------------- */
+
+    const toastHost = createToastHost(document);
+
+    const dissectInput = $('dissect-input');
+    const dissectHint = $('dissect-hint');
+    const dissectMode = $('dissect-mode');
+    const dissectModeDetail = $('dissect-mode-detail');
+    const dissectBtn = $('btn-dissect');
+    const dissectBtnLabel = $('btn-dissect-label');
+    const cloudConfig = $('dissect-cloud-config');
+    const ollamaConfig = $('dissect-ollama-config');
+    const presetSelect = $('dissect-preset');
+    const endpointInput = $('dissect-endpoint');
+    const keyInput = $('dissect-key');
+    const modelInput = $('dissect-model');
+    const ollamaModelInput = $('dissect-ollama-model');
+    const dissectStatus = $('dissect-status');
+    const dissectResults = $('dissect-results');
+    const badgeHost = $('dissect-badges');
+    const factBpm = $('dissect-bpm');
+    const factInstruments = $('dissect-instruments');
+    const factMood = $('dissect-mood');
+    const factEra = $('dissect-era');
+    const confidenceValue = $('dissect-confidence-value');
+    const confidenceMeter = $('dissect-confidence-meter');
+    const confidenceFill = $('dissect-confidence-fill');
+    const sourceLine = $('dissect-source');
+    const fellBackFlag = $('dissect-fellback');
+    const rawJson = $('dissect-json');
+
+    const dissector = createDissector({
+      // The real fetch is injected here and ONLY here; the engine itself never
+      // reaches for a global, which is what makes it testable without network.
+      fetchFn:
+        typeof fetch === 'function'
+          ? function (url, options) {
+              return fetch(url, options);
+            }
+          : undefined,
+      toast: function (message, kind) {
+        toastHost.show(message, kind);
+      },
+    });
+
+    const MODE_DETAIL = {};
+    const modeList = dissector.listModes();
+    for (let i = 0; i < modeList.length; i += 1) MODE_DETAIL[modeList[i].id] = modeList[i].detail;
+
+    // The provider dropdown is generated from the registry, so adding a cloud
+    // provider is a single entry in CLOUD_API_PRESETS and nothing else.
+    const presetIds = Object.keys(CLOUD_API_PRESETS);
+    for (let p = 0; p < presetIds.length; p += 1) {
+      const preset = CLOUD_API_PRESETS[presetIds[p]];
+      const option = document.createElement('option');
+      option.value = preset.id;
+      option.textContent = preset.label;
+      presetSelect.appendChild(option);
+    }
+    // Defaults to the blank custom preset: with no endpoint, Auto mode stays
+    // completely offline until the user deliberately configures a provider.
+    presetSelect.value = 'custom';
+
+    function applyPreset() {
+      const preset = CLOUD_API_PRESETS[presetSelect.value] || CLOUD_API_PRESETS.custom;
+      endpointInput.value = preset.endpoint || '';
+      modelInput.value = preset.defaultModel || '';
+    }
+    presetSelect.addEventListener('change', applyPreset);
+
+    function syncModeUi() {
+      const mode = dissectMode.value;
+      cloudConfig.hidden = !(mode === 'cloud' || mode === 'auto');
+      ollamaConfig.hidden = mode !== 'ollama';
+      dissectModeDetail.textContent = MODE_DETAIL[mode] || '';
+    }
+    dissectMode.addEventListener('change', syncModeUi);
+
+    /** Non-empty lines of the textarea — 2+ of them means batch dissection. */
+    function trackLines() {
+      const lines = dissectInput.value.split(/\r\n|\r|\n/);
+      const out = [];
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i].trim();
+        if (line) out.push(line);
+      }
+      return out;
+    }
+
+    function syncHint() {
+      const lines = trackLines();
+      if (lines.length > 1) {
+        const used = Math.min(lines.length, BATCH_TRACK_LIMIT);
+        dissectHint.textContent =
+          'Batch dissection: blending ' + used + ' of ' + lines.length + ' lines (max ' + BATCH_TRACK_LIMIT + ').';
+      } else {
+        dissectHint.textContent =
+          'Paste up to ' + BATCH_TRACK_LIMIT + ' tracks on separate lines for a blended batch dissection.';
+      }
+    }
+    dissectInput.addEventListener('input', syncHint);
+
+    function renderList(el, values) {
+      el.textContent = values && values.length ? values.join(', ') : '—';
+    }
+
+    function renderDissection(outcome) {
+      const result = outcome.result;
+
+      badgeHost.textContent = '';
+      if (!result.genre_tokens.length) {
+        const none = document.createElement('span');
+        none.className = 'capture-readout';
+        none.textContent = 'no genre tokens matched';
+        badgeHost.appendChild(none);
+      }
+      for (let i = 0; i < result.genre_tokens.length; i += 1) {
+        const token = result.genre_tokens[i];
+        const badge = document.createElement('span');
+        badge.className = 'genre-badge';
+        // FEATURE-MECHANICS.md §7.2: token weight 0..1 -> opacity 0.4..1.0.
+        badge.style.opacity = String(Math.round((0.4 + 0.6 * token.weight) * 100) / 100);
+        badge.title = token.tag + ' — weight ' + token.weight.toFixed(2);
+        const label = document.createElement('span');
+        label.textContent = token.tag;
+        const weight = document.createElement('span');
+        weight.className = 'badge-weight';
+        weight.textContent = token.weight.toFixed(2);
+        badge.appendChild(label);
+        badge.appendChild(weight);
+        badgeHost.appendChild(badge);
+      }
+
+      factBpm.textContent = result.bpm_range
+        ? result.bpm_range[0] + '–' + result.bpm_range[1] + ' BPM'
+        : '—';
+      renderList(factInstruments, result.instruments);
+      renderList(factMood, result.mood);
+      renderList(factEra, result.era);
+
+      const percent = Math.round(result.confidence * 100);
+      confidenceValue.textContent = percent + '%';
+      confidenceFill.style.width = percent + '%';
+      confidenceMeter.setAttribute('aria-label', 'Dissection confidence: ' + percent + ' percent');
+
+      sourceLine.textContent = 'source: ' + result.source + ' · requested: ' + dissectMode.value;
+      fellBackFlag.hidden = outcome.fellBack !== true;
+      rawJson.textContent = JSON.stringify(result, null, 2);
+      dissectResults.hidden = false;
+    }
+
+    let dissectBusy = false;
+
+    function settleDissectButton() {
+      dissectBusy = false;
+      dissectBtn.disabled = false;
+      dissectBtn.removeAttribute('aria-busy');
+      dissectBtnLabel.textContent = 'Dissect';
+    }
+
+    function runDissection() {
+      if (dissectBusy) return;
+      const lines = trackLines();
+      const request = {
+        text: dissectInput.value,
+        mode: dissectMode.value,
+        // The key is read out of the DOM at call time and lives only for the
+        // duration of this request object. Nothing writes it anywhere.
+        cloud: {
+          preset: presetSelect.value,
+          endpoint: endpointInput.value,
+          key: keyInput.value,
+          model: modelInput.value,
+        },
+        ollama: { model: ollamaModelInput.value },
+      };
+      if (lines.length > 1) request.tracks = lines;
+
+      dissectBusy = true;
+      dissectBtn.disabled = true;
+      dissectBtn.setAttribute('aria-busy', 'true');
+      dissectBtnLabel.textContent = 'Dissecting…';
+      dissectStatus.className = 'dissect-status';
+      dissectStatus.textContent = 'dissecting…';
+
+      dissector.dissect(request).then(
+        function (outcome) {
+          settleDissectButton();
+          if (!outcome.ok) {
+            dissectResults.hidden = true;
+            dissectStatus.className = 'dissect-status err';
+            dissectStatus.textContent = outcome.error;
+            toastHost.show(outcome.error, 'error');
+            return;
+          }
+          renderDissection(outcome);
+          if (outcome.result.confidence === 0) {
+            dissectStatus.className = 'dissect-status warn';
+            dissectStatus.textContent =
+              'nothing in that text matched the embedded taxonomy — name a genre, a scene or a decade.';
+          } else {
+            dissectStatus.className = 'dissect-status';
+            dissectStatus.textContent = '';
+          }
+        },
+        function (err) {
+          // dissect() is contracted never to reject; this handler exists so a
+          // future regression surfaces as a message instead of an unhandled
+          // rejection (docs/ENGINEERING-STANDARD.md §2.3).
+          settleDissectButton();
+          dissectStatus.className = 'dissect-status err';
+          dissectStatus.textContent = 'dissector failed: ' + ((err && err.message) || String(err));
+        }
+      );
+    }
+
+    dissectBtn.addEventListener('click', runDissection);
+
+    applyPreset();
+    syncModeUi();
+    syncHint();
 
     renderReadout();
     clearAnalysis();

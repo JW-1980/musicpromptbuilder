@@ -51,6 +51,7 @@ const SUITES = [
   { id: 'verify-single-file', script: path.join(TESTS_DIR, 'verify-single-file.js') },
   { id: 'dsp-worker', script: path.join(TESTS_DIR, 'dsp-worker.test.js') },
   { id: 'audio-capture', script: path.join(TESTS_DIR, 'audio-capture.test.js') },
+  { id: 'ai-dissector', script: path.join(TESTS_DIR, 'ai-dissector.test.js') },
   { id: 'limiter-eval', script: path.join(TESTS_DIR, 'limiter-eval.js') },
 ];
 
@@ -243,7 +244,8 @@ function validateProfiles(profilesPath) {
 const PENDING_NOTES = [
   'Profile seeding into live app state (localStorage["suno_profiles"]) activates when Workspace Profiling ships (FDD.md #77, FEATURE-MECHANICS.md 6.2). Today nightly.js validates the seed file only.',
   'Headless DOM interaction (slider drags, tag toggles, View Transitions) requires a browser driver; deliberately NOT stubbed — it stays out of scope until a zero-dependency driver is agreed.',
-  'Tri-Mode AI fallback-chain E2E coverage activates when the AI Dissector ships.',
+  'Tri-Mode AI fallback-chain coverage now runs in the ai-dissector suite against injected fetch fakes. A LIVE end-to-end call to a real cloud provider or a real Ollama server stays out of scope: it needs a secret and a network, which the offline-first, zero-dependency test policy forbids.',
+  'Mode 1 ships as the embedded MUSIC_KB taxonomy engine, not a downloaded WebGPU LLM (ASSUMPTIONS.md). The provider slot for a real in-browser model is open; token-probability logit extraction (FDD.md #59) activates with it.',
 ];
 
 function main() {
