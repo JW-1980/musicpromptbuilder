@@ -1,0 +1,13 @@
+{
+  "name": "sunoprompt-studio",
+  "version": "0.1.0",
+  "description": "Offline-capable, single-file Suno v5.5 prompt builder with a Web Worker DSP engine. Zero runtime dependencies.",
+  "private": true,
+  "scripts": {
+    "test": "node tests/run-all.js",
+    "test:e2e:nightly": "node tests/e2e/nightly.js",
+    "test:single-file": "node tests/verify-single-file.js",
+    "test:limiter": "node tests/limiter-eval.js",
+    "test:dsp": "node tests/dsp-worker.test.js"
+  }
+}

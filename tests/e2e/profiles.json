@@ -1,0 +1,40 @@
+{
+  "$schema-note": "SunoPrompt Studio Workspace Profiling seed file (FDD.md #77). Shape: {schemaVersion:int>=1, profiles:[Profile]}. Profile = {name:string (unique, non-empty), description:string, sliders:{energy,warmth,density} each integer 0-100, genreTags:[{tag:string, weight:number>0}] with 4-6 entries, metatags:[string] non-empty}. Weights are relative token weights, not probabilities, and need not sum to 1 — the compiler normalises them at emit time. Profiles 'Neon' and 'Aetheris' are REQUIRED defaults; tests/e2e/nightly.js validates this file against the schema on every overnight run. When Workspace Profiling ships, these objects are the seed written to localStorage['suno_profiles'] (FEATURE-MECHANICS.md 6.2).",
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "name": "Neon",
+      "description": "Late-night club energy: driving techno, distorted French electro bass and glossy Scandi house melodics. High energy, cool-leaning, dense arrangement.",
+      "sliders": {
+        "energy": 86,
+        "warmth": 32,
+        "density": 74
+      },
+      "genreTags": [
+        { "tag": "techno", "weight": 1.0 },
+        { "tag": "french electro", "weight": 0.85 },
+        { "tag": "scandi house", "weight": 0.75 },
+        { "tag": "bloghaus", "weight": 0.5 },
+        { "tag": "acid bassline", "weight": 0.4 }
+      ],
+      "metatags": ["[Intro]", "[Build]", "[Drop]", "[Break]", "[Outro]"]
+    },
+    {
+      "name": "Aetheris",
+      "description": "Wide, euphoric and organic: progressive trance pads and rolling arpeggios over Afro house log drums and shakers. Moderate energy, warm, spacious.",
+      "sliders": {
+        "energy": 62,
+        "warmth": 78,
+        "density": 55
+      },
+      "genreTags": [
+        { "tag": "progressive trance", "weight": 1.0 },
+        { "tag": "afro house", "weight": 0.9 },
+        { "tag": "ethereal vocal chops", "weight": 0.6 },
+        { "tag": "log drums", "weight": 0.55 },
+        { "tag": "ambient pads", "weight": 0.45 }
+      ],
+      "metatags": ["[Intro]", "[Verse]", "[Build]", "[Drop]", "[Bridge]", "[Outro]"]
+    }
+  ]
+}

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>SunoPrompt Studio</title>
+<!--
+  SunoPrompt Studio — single-file, zero-dependency prompt builder for Suno v5.5.
+  Constraints (docs/ENGINEERING-STANDARD.md): no external CDNs, runs via file://,
+  all heavy DSP in a background Web Worker instantiated from the inline block below.
+
+  Inline script conventions (parsed by tests/lib/extract.js — keep IDs stable):
+    #dsp-worker-src  type="text/js-worker"  — Web Worker source (DSP engine)
+    #app-main        (regular script)       — main-thread application code
+-->
+<style>
+  :root {
+    /* Studio Obsidian design tokens — docs/FDD.md §6 (single source of truth) */
+    --bg: #0A0A0C;
+    --surface: rgba(255, 255, 255, 0.04);
+    --surface-border: rgba(255, 255, 255, 0.08);
+    --accent-cyan: #00F0FF;
+    --accent-violet: #8A2BE2;
+    --warning-amber: #FFB800;
+    --danger-crimson: #FF3366;
+    --text: rgba(255, 255, 255, 0.92);
+    --text-dim: rgba(255, 255, 255, 0.55);
+    --font-ui: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+  }
+
+  .app-shell {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 20px;
+    container-type: inline-size;
+    container-name: app-shell;
+  }
+
+  .app-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    backdrop-filter: blur(14px);
+  }
+
+  .app-header h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    letter-spacing: 0.02em;
+  }
+
+  .app-header h1 .accent { color: var(--accent-cyan); }
+
+  .app-version {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+
+  .status-line {
+    margin-top: 14px;
+    display: flex;
+    gap: 16px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+
+  .status-line .ok { color: var(--accent-cyan); }
+  .status-line .err { color: var(--danger-crimson); }
+
+  main#workspace {
+    margin-top: 18px;
+    min-height: 320px;
+    padding: 20px;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <header class="app-header">
+    <h1>Suno<span class="accent">Prompt</span> Studio</h1>
+    <span class="app-version" id="app-version"></span>
+  </header>
+  <div class="status-line">
+    <span id="status-worker">DSP worker: starting…</span>
+    <span id="status-storage">storage: —</span>
+  </div>
+  <main id="workspace" aria-label="SunoPrompt Studio workspace"></main>
+</div>
+
+<script id="dsp-worker-src" type="text/js-worker">
+'use strict';
+/*
+ * SunoPrompt Studio — DSP Web Worker.
+ * All heavy math (YIN pitch detection, RMS gating, onset/BPM analysis) lands
+ * here so the UI thread stays at 60 FPS. Pure functions are declared at top
+ * level so the Node test harness can execute them in a vm sandbox.
+ *
+ * Message protocol (main -> worker):  { type: 'ping' }
+ * Message protocol (worker -> main):  { type: 'pong', engine: 'dsp', version }
+ * DSP analysis messages are added alongside their implementations.
+ */
+
+const DSP_ENGINE_VERSION = '0.1.0';
+
+function handleMessage(msg) {
+  if (!msg || typeof msg.type !== 'string') {
+    return { type: 'error', error: 'malformed message' };
+  }
+  switch (msg.type) {
+    case 'ping':
+      return { type: 'pong', engine: 'dsp', version: DSP_ENGINE_VERSION };
+    default:
+      return { type: 'error', error: 'unknown message type: ' + msg.type };
+  }
+}
+
+if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
+  self.onmessage = function (e) {
+    self.postMessage(handleMessage(e.data));
+  };
+}
+</script>
+
+<script id="app-main">
+'use strict';
+/*
+ * SunoPrompt Studio — main-thread application code.
+ * The DSP worker is instantiated from the inline #dsp-worker-src block via a
+ * Blob URL so the whole app remains a single self-contained file.
+ */
+(function () {
+  const APP_VERSION = '0.1.0';
+
+  function $(id) { return document.getElementById(id); }
+
+  function spawnDspWorker() {
+    const src = $('dsp-worker-src').textContent;
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const worker = new Worker(url);
+    URL.revokeObjectURL(url);
+    return worker;
+  }
+
+  function boot() {
+    $('app-version').textContent = 'v' + APP_VERSION;
+
+    const workerStatus = $('status-worker');
+    try {
+      const worker = spawnDspWorker();
+      const timeout = setTimeout(function () {
+        workerStatus.textContent = 'DSP worker: no response';
+        workerStatus.className = 'err';
+      }, 3000);
+      worker.onmessage = function (e) {
+        if (e.data && e.data.type === 'pong') {
+          clearTimeout(timeout);
+          workerStatus.textContent = 'DSP worker: online (v' + e.data.version + ')';
+          workerStatus.className = 'ok';
+        }
+      };
+      worker.postMessage({ type: 'ping' });
+    } catch (err) {
+      workerStatus.textContent = 'DSP worker: failed — ' + err.message;
+      workerStatus.className = 'err';
+    }
+
+    const storageStatus = $('status-storage');
+    try {
+      localStorage.setItem('suno_storage_probe', '1');
+      localStorage.removeItem('suno_storage_probe');
+      storageStatus.textContent = 'storage: localStorage ok';
+      storageStatus.className = 'ok';
+    } catch (err) {
+      storageStatus.textContent = 'storage: unavailable';
+      storageStatus.className = 'err';
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

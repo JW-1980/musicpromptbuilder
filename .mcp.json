@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "stitch": {
+      "type": "http",
+      "url": "https://stitch.googleapis.com/mcp",
+      "headers": {
+        "X-Goog-Api-Key": "${STITCH_API_KEY}"
+      }
+    },
+    "nano-banana": {
+      "command": "npx.cmd",
+      "args": ["-y", "@rafarafarafa/nano-banana-pro-mcp"],
+      "env": {
+        "GEMINI_API_KEY": "${GEMINI_API_KEY}"
+      }
+    }
+  }
+}

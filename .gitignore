@@ -1,0 +1,13 @@
+# Dependencies (repo is zero-dependency; node_modules must never be committed)
+node_modules/
+
+# Runtime artifacts
+*.log
+tests/e2e/reports/
+backend/data/*.sqlite
+backend/data/*.sqlite-*
+
+# OS / editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
