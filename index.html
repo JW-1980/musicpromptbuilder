@@ -1683,10 +1683,197 @@
   .toast-warn { border-left-color: var(--warning-amber); }
   .toast-error { border-left-color: var(--danger-crimson); }
 
+  /* The session-restore toast carries a real dismiss control: it reports
+     something the user did not ask for, so waiting out the auto-dismiss must
+     not be the only way to get rid of it. */
+  .toast-dismiss { margin: 10px 0 0; display: block; }
+
   @keyframes toast-in {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: none; }
   }
+
+  /* --- Persistence: profiles, history, presets & backup -------------------- */
+  /*     docs/FDD.md #21 / #74 / #77 / #85 / #86 / #93.                        */
+
+  /* The profile row is a strip, not a card: it configures the view rather than
+     contributing to the prompt, so it reads as part of the view header. */
+  .profile-row {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+    container-type: inline-size;
+    container-name: dissector;
+  }
+
+  .profile-heading {
+    margin: 0;
+    flex: 0 0 100%;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .profile-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .profile-row #profile-status { flex: 1 1 100%; }
+
+  .persist-grid { margin-top: 24px; }
+
+  .history-panel,
+  .presets-panel { container-name: dissector; }
+
+  /* Honest when it matters: this line only appears when writes are NOT durable
+     (no IndexedDB), and it says so in the warning accent rather than staying
+     silent and losing the user's history on the next reload. */
+  .storage-note {
+    margin: 12px 0 0;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--warning-amber);
+    background: var(--tint-amber);
+    border: 1px solid var(--tint-amber-border);
+    border-radius: 8px;
+  }
+
+  .storage-note[hidden] { display: none; }
+
+  .history-controls,
+  .preset-row,
+  .backup-row {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .backup-row { align-items: center; }
+
+  /* THE VIRTUAL SCROLLER (ENGINEERING-STANDARD.md §2.2).
+
+     The fixed max-height is not cosmetic — it is what gives the windowing its
+     viewport. Rows are absolute-height by contract (createVirtualList is told
+     the row height and the spacer divs are sized from it), so `.vrow` pins its
+     own height rather than letting content decide it: a row that grew taller
+     than the spacer arithmetic expects would drift the scrollbar. Overflowing
+     text is clipped with an ellipsis for the same reason. */
+  .vlist {
+    margin-top: 12px;
+    max-height: 340px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+  }
+
+  .vlist:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  /* Before the first paint the scroller holds nothing at all, and an empty
+     list is hidden outright by the render path — either way the bordered box
+     never sits there empty next to the "nothing here yet" line. */
+  .vlist:empty { display: none; }
+  .vlist[hidden] { display: none; }
+
+  .vrow {
+    box-sizing: border-box;
+    height: 84px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    overflow: hidden;
+    border-bottom: 1px solid var(--surface-border);
+  }
+
+  .vrow:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: -2px;
+  }
+
+  .vrow-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .vrow-title {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: var(--text);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .vrow-name {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .vrow-meta {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .vrow-actions {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  /* The star is a pressed-state toggle, so aria-pressed carries the state and
+     the styling reads it — the same contract the exclusion chips use. */
+  .btn-star[aria-pressed="true"] {
+    color: var(--warning-amber);
+    background: var(--tint-amber);
+    border-color: var(--tint-amber-border);
+  }
+
+  .preset-paste {
+    margin-top: 16px;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+  }
+
+  .preset-paste summary { cursor: pointer; }
+
+  .preset-paste summary:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  .preset-paste .field { margin-top: 12px; width: 100%; }
+  .preset-paste .btn-mini { margin-top: 12px; }
 
   /* ==========================================================================
      CONTAINER QUERIES — docs/ENGINEERING-STANDARD.md §2.2.
@@ -1711,6 +1898,9 @@
        them, because a prompt draft that has to wrap in a half-width column
        stops being readable at exactly the length it starts to matter. */
     .vibe-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    /* History and the preset library are peers — both are lists of saved
+       things — so they sit side by side at the same breakpoint. */
+    .persist-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   }
 
   /* Nothing has been dissected yet, so there is no second column to make room
@@ -1745,6 +1935,20 @@
     .structure-block-head { align-items: stretch; flex-direction: column; }
     .structure-tag { flex: 1 1 auto; }
     .structure-palette-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+    /* A narrow persistence card stacks its control strips, and a row's
+       actions drop under the text they act on rather than squeezing it. */
+    .history-controls,
+    .preset-row,
+    .backup-row { flex-direction: column; align-items: stretch; }
+    .history-controls .field,
+    .preset-row .field { width: 100%; }
+    .profile-row { flex-direction: column; align-items: stretch; }
+    .profile-row .field { width: 100%; }
+    /* The row HEIGHT deliberately does not change here. It is the one number
+       createVirtualList() and the spacer arithmetic both depend on, so a
+       breakpoint that changed it would drift the scrollbar against the
+       content. The actions shrink instead. */
+    .vrow-actions .btn-mini { padding: 4px 8px; font-size: 0.7rem; }
   }
 
   /* ==========================================================================
@@ -1903,6 +2107,31 @@
   .high-contrast kbd {
     background: var(--bg);
     border: 1px solid var(--surface-border);
+  }
+
+  /* The persistence surfaces follow the same rule: Code Mode flattens every
+     ground to black, so the scroller, its rows and the profile strip are told
+     apart by borders alone. A virtual row's bottom rule is what separates two
+     entries, so it keeps its own border rather than inheriting the box's. */
+  .high-contrast .vlist,
+  .high-contrast .profile-row {
+    background: var(--bg);
+    border: 1px solid var(--surface-border);
+  }
+
+  .high-contrast .vrow { border-bottom: 1px solid var(--surface-border); }
+
+  /* The starred state is signalled by colour AND by the border here, so the
+     mode that flattens every chip background keeps the toggle readable. */
+  .high-contrast .btn-star[aria-pressed="true"] {
+    border: 1px solid var(--warning-amber);
+  }
+
+  /* A warning panel must survive the mode that removes washes: the accent
+     border is the signal once the tint is gone. */
+  .high-contrast .storage-note {
+    background: var(--bg);
+    border: 1px solid var(--warning-amber);
   }
 
   /* A block's tag line is primary text, not a badge. Violet is 3.52:1 on black
@@ -2126,6 +2355,33 @@
       Turn plain language into copyright-safe Suno v5.5 tokens, then read back exactly which
       traits were matched and how confident the engine is.
     </p>
+
+    <!-- Workspace Profiling (docs/FDD.md #77) over FEATURE-MECHANICS.md §6.2.
+         A profile is the LIGHT subset — three slider positions, the genre
+         tags and the structure metatags — stored in localStorage under
+         'suno_profiles', which is the key §6.2 names verbatim. Loading one
+         applies synchronously: the sliders move, the draft rebuilds and the
+         1,000-character gauge further down recomputes in the same task.
+         A whole-workspace snapshot is a PRESET, and those live in IndexedDB. -->
+    <section class="profile-row" aria-labelledby="profile-heading">
+      <h3 id="profile-heading" class="profile-heading">Workspace profiles</h3>
+      <span class="field">
+        <label class="field-label" for="profile-select">Profile</label>
+        <select id="profile-select" class="field-select"></select>
+      </span>
+      <span class="field field-grow">
+        <label class="field-label" for="profile-name">Save current as</label>
+        <input type="text" id="profile-name" class="field-input" autocomplete="off"
+               spellcheck="false" maxlength="60" placeholder="e.g. Neon">
+      </span>
+      <div class="profile-actions" role="group" aria-label="Workspace profile actions">
+        <button type="button" id="btn-profile-save" class="btn-mini">Save profile</button>
+        <button type="button" id="btn-profile-load" class="btn-mini">Load</button>
+        <button type="button" id="btn-profile-delete" class="btn-mini">Delete</button>
+      </div>
+      <p id="profile-status" class="dissect-status" role="status" aria-live="polite"></p>
+    </section>
+
     <div class="view-grid editor-grid">
     <section class="view-col dissector-panel" aria-labelledby="dissect-heading">
       <h3 id="dissect-heading" class="panel-heading">AI acoustic dissector</h3>
@@ -2475,6 +2731,101 @@
         <button type="button" id="btn-style-copy" class="btn-mini">Copy style prompt</button>
       </div>
     </section>
+
+    <!-- PERSISTENCE (docs/FDD.md #21, #74, #85, #86, #93).
+         Both lists below are VIRTUALIZED (ENGINEERING-STANDARD.md §2.2): only
+         the rows in view plus a small overscan are ever in the DOM, and two
+         spacer divs hold the scrollbar geometry. Both tables live in
+         IndexedDB, not localStorage — see FEATURE-MECHANICS.md §6.4 and the
+         long comment above createIdbStore(). -->
+    <div class="view-grid persist-grid">
+    <section class="view-col vibe-card history-panel" aria-labelledby="history-heading">
+      <h3 id="history-heading" class="panel-heading">Prompt history</h3>
+      <p class="panel-note">
+        Every successful <em>Copy style prompt</em> is banked here with the whole
+        workspace behind it, so <strong>Restore</strong> puts the sliders, tags,
+        exclusions and song flow back — it does not just paste the text. Starred
+        entries float to the top. The bank keeps the newest 100 and drops the
+        oldest beyond that.
+      </p>
+      <p id="history-persistence" class="storage-note" role="status" hidden></p>
+
+      <div class="history-controls">
+        <span class="field field-grow">
+          <label class="field-label" for="history-search">Search history</label>
+          <input type="search" id="history-search" class="field-input" autocomplete="off"
+                 spellcheck="false" placeholder="any word in the prompt">
+        </span>
+        <button type="button" id="btn-history-clear" class="btn-mini">Clear history</button>
+      </div>
+
+      <p id="history-empty" class="draft-empty">
+        Nothing banked yet — copy a style prompt and it lands here.
+      </p>
+      <div id="history-list" class="vlist" tabindex="0"
+           aria-label="Copied prompt history"></div>
+      <div class="draft-foot">
+        <span id="history-counts" class="draft-counts" role="status" aria-live="polite">
+          0 entries
+        </span>
+        <span id="history-status" class="dissect-status" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section class="view-col vibe-card presets-panel" aria-labelledby="presets-heading">
+      <h3 id="presets-heading" class="panel-heading">Presets &amp; backup</h3>
+      <p class="panel-note">
+        A preset is the <em>whole</em> workspace under a name you choose. Export the
+        library as a JSON file or straight to the clipboard (which is the path that
+        works on mobile, where file downloads often do not), and import it back on
+        another machine. An imported preset whose name is already taken is renamed
+        rather than overwriting what you have.
+      </p>
+
+      <div class="preset-row">
+        <span class="field field-grow">
+          <label class="field-label" for="preset-name">Preset name</label>
+          <input type="text" id="preset-name" class="field-input" autocomplete="off"
+                 spellcheck="false" maxlength="60" placeholder="e.g. Warehouse techno bed">
+        </span>
+        <button type="button" id="btn-preset-save" class="btn-mini">Save as preset</button>
+      </div>
+
+      <p id="presets-empty" class="draft-empty">
+        No presets yet — name the current workspace above and save it.
+      </p>
+      <div id="presets-list" class="vlist" tabindex="0" aria-label="Saved presets"></div>
+
+      <div class="backup-row" role="group" aria-label="Preset backup and restore">
+        <button type="button" id="btn-presets-export" class="btn-mini">Export JSON file</button>
+        <button type="button" id="btn-presets-copy" class="btn-mini">Copy JSON</button>
+      </div>
+      <div class="preset-row">
+        <span class="field field-grow">
+          <label class="field-label" for="preset-import-file">Import a backup file</label>
+          <input type="file" id="preset-import-file" class="field-input"
+                 accept=".json,application/json">
+        </span>
+      </div>
+      <details class="preset-paste">
+        <summary>Paste a backup instead</summary>
+        <span class="field field-grow">
+          <label class="field-label" for="preset-import-text">Backup JSON</label>
+          <textarea id="preset-import-text" class="dissect-input" rows="3"
+                    spellcheck="false"
+                    placeholder="paste the exported JSON here"></textarea>
+        </span>
+        <button type="button" id="btn-preset-import-text" class="btn-mini">
+          Import pasted JSON
+        </button>
+      </details>
+
+      <p id="presets-status" class="dissect-status" role="status" aria-live="polite"></p>
+      <div class="draft-foot">
+        <span id="presets-counts" class="draft-counts">0 presets</span>
+      </div>
+    </section>
+    </div>
   </section>
 
   </main>
@@ -3536,7 +3887,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -9453,6 +9804,1846 @@ function buildFinalPrompt(promptState, exclusions, options) {
   };
 }
 
+/* ==========================================================================
+ * PERSISTENCE — docs/FDD.md #21 (DOM virtualization), #74 (local history &
+ * favouriting), #77 (workspace profiling), #85 (offline-first storage),
+ * #86 (JSON preset backup & restore), #93 (clipboard JSON export), over
+ * docs/FEATURE-MECHANICS.md §6.2 and §6.4.
+ *
+ * WHERE EACH THING LIVES — AND THE ONE DOC CONFLICT, RESOLVED IN WRITING
+ *
+ * FDD #74 says the history bank lives "in localStorage". FEATURE-MECHANICS
+ * §6.4 says the opposite in more detail: localStorage is synchronous and
+ * capped at ~5MB, so it is "strictly reserved for lightweight UI state", and
+ * the `presets` and `prompt_history` tables MUST go through an asynchronous
+ * vanilla-Promise IndexedDB wrapper. §6.4 wins — it is the mechanics blueprint
+ * and it is the more specific rule — so:
+ *
+ *   IndexedDB 'sunoprompt' v1
+ *     presets        — named workspace snapshots (FDD #86/#93)
+ *     prompt_history — one record per successful style-prompt copy (FDD #74),
+ *                      each carrying a FULL workspace snapshot so Restore is
+ *                      real and not a text paste. FIFO-capped at 100
+ *                      (ASSUMPTIONS.md, "Local Storage Quotas").
+ *     session        — the debounced autosave, exactly one record. A third
+ *                      store rather than a reserved id inside `presets`:
+ *                      an autosave is not a preset, and putting it there would
+ *                      leak it into the preset list, the preset count and
+ *                      every JSON export the user takes.
+ *
+ *   localStorage
+ *     suno_ui_prefs  — theme / Code Mode / colour overrides (already shipped)
+ *     suno_profiles  — Workspace Profiling (FDD #77). This one is NOT a §6.4
+ *                      violation: FEATURE-MECHANICS §6.2 names the key
+ *                      'suno_profiles' explicitly, and a profile is exactly
+ *                      the "lightweight UI state" §6.4 reserves the API for —
+ *                      three slider positions, a handful of genre tags and a
+ *                      handful of metatags, a few hundred bytes each. The
+ *                      heavy, unbounded, snapshot-carrying tables are the ones
+ *                      that went to IndexedDB.
+ *
+ * ID SCHEME. Every IndexedDB record carries its own `id` (keyPath 'id', no
+ * autoIncrement): a ULID-ish string of a fixed-width base-36 millisecond
+ * timestamp + a per-session counter + random tail. Two reasons over
+ * autoIncrement: the ids sort lexicographically into creation order, so a
+ * store read back with no index still has a defined order; and they are
+ * globally unique, so a preset exported from one browser and imported into
+ * another cannot collide with a local record that happens to share a number.
+ * ========================================================================== */
+
+/* --- keys, schema versions and caps --------------------------------------- */
+
+/* FEATURE-MECHANICS §6.2 names this key verbatim. Do not rename it. */
+var PROFILES_KEY = 'suno_profiles';
+
+var IDB_NAME = 'sunoprompt';
+var IDB_VERSION = 1;
+var IDB_PRESETS = 'presets';
+var IDB_HISTORY = 'prompt_history';
+var IDB_SESSION = 'session';
+var IDB_STORES = [IDB_PRESETS, IDB_HISTORY, IDB_SESSION];
+/** Every store carries a `ts` index so a read has a declared order. */
+var IDB_TS_INDEX = 'ts';
+
+/** The single record id in the `session` store. */
+var AUTOSAVE_ID = '__autosave';
+/** ASSUMPTIONS.md: the history is a FIFO ring buffer capped at 100 entries. */
+var HISTORY_CAP = 100;
+/** Bumped only if the serializeWorkspace() shape changes incompatibly. */
+var WORKSPACE_VERSION = 1;
+var PRESET_NAME_MAX = 60;
+var PROFILE_NAME_MAX = 60;
+/** Autosave debounce: long enough to swallow a slider drag, short enough to
+ *  survive a tab closed straight after a change. */
+var AUTOSAVE_DEBOUNCE_MS = 800;
+
+var PRESET_EXPORT_SCHEMA = 'sunoprompt-presets';
+var PRESET_EXPORT_VERSION = 1;
+/** Appended to an imported preset whose name already exists locally. */
+var IMPORT_SUFFIX = ' (imported)';
+
+/* -------------------------------------------------------------------------- */
+/* A. RECORD IDS                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** Per-session counter, so two records made in the same millisecond differ. */
+var recordIdSeq = 0;
+
+/**
+ * A ULID-ish, lexicographically sortable record id.
+ * `<9 chars base36 ms><4 chars base36 counter><5 chars base36 random>`.
+ * Nine base-36 digits hold milliseconds well past the year 5000, so the width
+ * is fixed for every id this app will ever mint and string order IS time order.
+ *
+ * @param {string} [prefix] a short store tag ('h', 'p', 's'); ids are only
+ *   ever compared within one store, so the prefix never breaks the ordering.
+ * @returns {string}
+ */
+function makeRecordId(prefix) {
+  recordIdSeq += 1;
+  var stamp = Date.now().toString(36);
+  while (stamp.length < 9) stamp = '0' + stamp;
+  var seq = '0000' + (recordIdSeq % 1679616).toString(36);
+  seq = seq.slice(seq.length - 4);
+  var rand = '00000' + Math.floor(Math.random() * 60466176).toString(36);
+  rand = rand.slice(rand.length - 5);
+  return (typeof prefix === 'string' && prefix ? prefix + '-' : '') + stamp + seq + rand;
+}
+
+/**
+ * Newest first, with a TOTAL order: `ts` descending, then id descending.
+ * The `ts` index hands records back oldest-first, and two records written in
+ * the same millisecond would otherwise have no defined order at all — which is
+ * exactly the case a 105-entry FIFO test hits.
+ *
+ * @param {Array<object>} records
+ * @returns {Array<object>} a new array; the input is not mutated
+ */
+function sortNewestFirst(records) {
+  var out = isArrayLike(records) ? Array.prototype.slice.call(records) : [];
+  out.sort(function (a, b) {
+    var ta = a && typeof a.ts === 'number' && isFinite(a.ts) ? a.ts : 0;
+    var tb = b && typeof b.ts === 'number' && isFinite(b.ts) ? b.ts : 0;
+    if (ta !== tb) return tb - ta;
+    var ia = a && a.id !== undefined && a.id !== null ? String(a.id) : '';
+    var ib = b && b.id !== undefined && b.id !== null ? String(b.id) : '';
+    if (ia === ib) return 0;
+    return ia < ib ? 1 : -1;
+  });
+  return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* B. THE INDEXEDDB WRAPPER — FEATURE-MECHANICS §6.4                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A vanilla-Promise wrapper over IndexedDB with an honest in-memory fallback.
+ *
+ * WHY A FALLBACK AND NOT A THROW. `indexedDB` is missing or unusable in more
+ * places than it looks: some file:// origins, private-browsing modes that
+ * expose the API and then fail every open(), sandboxed iframes without
+ * allow-same-origin. The app still has to work there — so the same API is
+ * served out of memory, and `persistent` goes to false so the UI can say
+ * plainly that history will not survive a reload. It never pretends.
+ *
+ * Degradation happens at most once, on the FIRST open: a transaction that
+ * fails after a successful open is a real error and is rejected, not papered
+ * over with a silent in-memory write the user would never see again.
+ *
+ * @param {{
+ *   indexedDB?: IDBFactory|null,
+ *   name?: string, version?: number, stores?: string[],
+ *   onDegrade?: (reason: string) => void
+ * }} [deps]
+ * @returns {object} {put, get, getAll, delete, count, clear, ready, persistent, isPersistent, close}
+ */
+function createIdbStore(deps) {
+  var d = deps || {};
+
+  var factory = null;
+  try {
+    if (Object.prototype.hasOwnProperty.call(d, 'indexedDB')) factory = d.indexedDB || null;
+    else factory = typeof indexedDB !== 'undefined' ? indexedDB : null;
+  } catch (err) {
+    // Reading the global can throw outright in a locked-down embedding.
+    factory = null;
+  }
+
+  var dbName = typeof d.name === 'string' && d.name ? d.name : IDB_NAME;
+  var dbVersion =
+    typeof d.version === 'number' && isFinite(d.version) && d.version >= 1
+      ? Math.floor(d.version)
+      : IDB_VERSION;
+  var storeNames = isArrayLike(d.stores) ? Array.prototype.slice.call(d.stores) : IDB_STORES.slice();
+
+  /** name -> {id -> record}. Only used once `usingMemory` is true. */
+  var memory = {};
+  var usingMemory = false;
+  var degradeReason = null;
+  var database = null;
+  var readyPromise = null;
+  var api;
+
+  function memoryTable(name) {
+    if (!Object.prototype.hasOwnProperty.call(memory, name)) memory[name] = {};
+    return memory[name];
+  }
+
+  function degrade(reason) {
+    usingMemory = true;
+    degradeReason = reason || 'IndexedDB is unavailable';
+    if (api) api.persistent = false;
+    if (typeof d.onDegrade === 'function') {
+      try {
+        d.onDegrade(degradeReason);
+      } catch (err) {
+        // A broken listener is the listener's problem, not the store's.
+      }
+    }
+  }
+
+  function knownStore(name) {
+    return typeof name === 'string' && storeNames.indexOf(name) !== -1;
+  }
+
+  /** Open the database and create every declared store on the upgrade path. */
+  function open() {
+    return new Promise(function (resolve, reject) {
+      var request;
+      try {
+        request = factory.open(dbName, dbVersion);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      if (!request || typeof request !== 'object') {
+        reject(new Error('indexedDB.open returned no request'));
+        return;
+      }
+      request.onupgradeneeded = function (event) {
+        var db =
+          request.result || (event && event.target && event.target.result) || null;
+        if (!db || typeof db.createObjectStore !== 'function') return;
+        for (var i = 0; i < storeNames.length; i += 1) {
+          var name = storeNames[i];
+          var have =
+            db.objectStoreNames &&
+            typeof db.objectStoreNames.contains === 'function' &&
+            db.objectStoreNames.contains(name);
+          if (have) continue;
+          var created = db.createObjectStore(name, { keyPath: 'id' });
+          // Declared here so a read has an ordering to lean on; sortNewestFirst
+          // still imposes the total order (see its comment).
+          if (created && typeof created.createIndex === 'function') {
+            created.createIndex(IDB_TS_INDEX, 'ts', { unique: false });
+          }
+        }
+      };
+      request.onsuccess = function () {
+        resolve(request.result);
+      };
+      request.onerror = function () {
+        reject(request.error || new Error('IndexedDB open failed'));
+      };
+      request.onblocked = function () {
+        reject(new Error('IndexedDB open blocked by another tab'));
+      };
+    });
+  }
+
+  /**
+   * Resolve once to "is the real database live?". A rejected open degrades the
+   * whole store to memory here, and only here.
+   * @returns {Promise<boolean>}
+   */
+  function ensure() {
+    if (usingMemory) return Promise.resolve(false);
+    if (!factory || typeof factory.open !== 'function') {
+      degrade('this browser context has no usable IndexedDB');
+      return Promise.resolve(false);
+    }
+    if (!readyPromise) {
+      readyPromise = open().then(
+        function (db) {
+          database = db;
+          return true;
+        },
+        function (err) {
+          degrade(errorMessage(err));
+          return false;
+        }
+      );
+    }
+    return readyPromise;
+  }
+
+  /**
+   * Run one transaction. `run(objectStore, box)` issues its requests and writes
+   * the answer into `box.value`; the promise settles on the TRANSACTION, not on
+   * the request, so a write is only reported as done once it is durable.
+   */
+  function tx(name, mode, run) {
+    return new Promise(function (resolve, reject) {
+      var transaction;
+      try {
+        transaction = database.transaction(name, mode);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      var box = { value: undefined };
+      transaction.oncomplete = function () {
+        resolve(box.value);
+      };
+      transaction.onerror = function () {
+        reject(transaction.error || new Error('IndexedDB transaction failed'));
+      };
+      transaction.onabort = function () {
+        reject(transaction.error || new Error('IndexedDB transaction aborted'));
+      };
+      try {
+        run(transaction.objectStore(name), box);
+      } catch (err) {
+        try {
+          transaction.abort();
+        } catch (abortErr) {
+          // Already aborting; the reject below is what matters.
+        }
+        reject(err);
+      }
+    });
+  }
+
+  /** The one dispatch point: live database, or the memory table. */
+  function op(name, mode, live, mem) {
+    if (!knownStore(name)) {
+      return Promise.reject(new Error('unknown object store "' + String(name) + '"'));
+    }
+    return ensure().then(function (isLive) {
+      if (!isLive) {
+        return new Promise(function (resolve) {
+          resolve(mem(memoryTable(name)));
+        });
+      }
+      return tx(name, mode, live);
+    });
+  }
+
+  /** A record is stored as a deep copy, so a later edit cannot reach into it. */
+  function copy(record) {
+    if (record === undefined || record === null) return record;
+    return JSON.parse(JSON.stringify(record));
+  }
+
+  api = {
+    /**
+     * True while writes are durable. Flips to false the moment the store
+     * degrades, which is what the status line and the history card read.
+     */
+    persistent: true,
+
+    isPersistent: function () {
+      return api.persistent === true;
+    },
+
+    /** @returns {Promise<{persistent:boolean, reason:string|null}>} */
+    ready: function () {
+      return ensure().then(function (isLive) {
+        return { persistent: isLive, reason: isLive ? null : degradeReason };
+      });
+    },
+
+    /**
+     * @param {string} store
+     * @param {object} record an object; an absent `id` is minted here
+     * @returns {Promise<string>} the id the record is stored under
+     */
+    put: function (store, record) {
+      if (!record || typeof record !== 'object' || isArrayLike(record)) {
+        return Promise.reject(new Error('put() needs a record object'));
+      }
+      var value = copy(record);
+      if (value.id === undefined || value.id === null || value.id === '') {
+        value.id = makeRecordId(store === IDB_HISTORY ? 'h' : store === IDB_PRESETS ? 'p' : 's');
+      } else {
+        value.id = String(value.id);
+      }
+      if (typeof value.ts !== 'number' || !isFinite(value.ts)) value.ts = Date.now();
+      return op(
+        store,
+        'readwrite',
+        function (objectStore, box) {
+          box.value = value.id;
+          objectStore.put(value);
+        },
+        function (table) {
+          table[value.id] = value;
+          return value.id;
+        }
+      );
+    },
+
+    /** @returns {Promise<object|null>} null — never undefined — when absent */
+    get: function (store, id) {
+      var key = String(id);
+      return op(
+        store,
+        'readonly',
+        function (objectStore, box) {
+          var request = objectStore.get(key);
+          request.onsuccess = function () {
+            box.value = request.result === undefined ? null : request.result;
+          };
+        },
+        function (table) {
+          return Object.prototype.hasOwnProperty.call(table, key) ? copy(table[key]) : null;
+        }
+      );
+    },
+
+    /** @returns {Promise<Array<object>>} newest first (see sortNewestFirst) */
+    getAll: function (store) {
+      return op(
+        store,
+        'readonly',
+        function (objectStore, box) {
+          var source = objectStore;
+          if (
+            objectStore.indexNames &&
+            typeof objectStore.indexNames.contains === 'function' &&
+            objectStore.indexNames.contains(IDB_TS_INDEX) &&
+            typeof objectStore.index === 'function'
+          ) {
+            source = objectStore.index(IDB_TS_INDEX);
+          }
+          var request = source.getAll();
+          request.onsuccess = function () {
+            box.value = sortNewestFirst(request.result || []);
+          };
+        },
+        function (table) {
+          var out = [];
+          var keys = Object.keys(table);
+          for (var i = 0; i < keys.length; i += 1) out.push(copy(table[keys[i]]));
+          return sortNewestFirst(out);
+        }
+      );
+    },
+
+    /**
+     * @returns {Promise<boolean>} whether a record was actually there to go.
+     * The read and the delete share ONE transaction, so the answer cannot be
+     * invalidated between them.
+     */
+    delete: function (store, id) {
+      var key = String(id);
+      return op(
+        store,
+        'readwrite',
+        function (objectStore, box) {
+          var request = objectStore.get(key);
+          request.onsuccess = function () {
+            var existed = request.result !== undefined && request.result !== null;
+            box.value = existed;
+            if (existed) objectStore.delete(key);
+          };
+        },
+        function (table) {
+          if (!Object.prototype.hasOwnProperty.call(table, key)) return false;
+          delete table[key];
+          return true;
+        }
+      );
+    },
+
+    /** @returns {Promise<number>} */
+    count: function (store) {
+      return op(
+        store,
+        'readonly',
+        function (objectStore, box) {
+          var request = objectStore.count();
+          request.onsuccess = function () {
+            box.value = typeof request.result === 'number' ? request.result : 0;
+          };
+        },
+        function (table) {
+          return Object.keys(table).length;
+        }
+      );
+    },
+
+    /** @returns {Promise<number>} how many records were dropped */
+    clear: function (store) {
+      return op(
+        store,
+        'readwrite',
+        function (objectStore, box) {
+          var request = objectStore.count();
+          request.onsuccess = function () {
+            box.value = typeof request.result === 'number' ? request.result : 0;
+            objectStore.clear();
+          };
+        },
+        function (table) {
+          var had = Object.keys(table).length;
+          memory[store] = {};
+          return had;
+        }
+      );
+    },
+
+    close: function () {
+      if (database && typeof database.close === 'function') {
+        try {
+          database.close();
+        } catch (err) {
+          // Closing a database that is already gone is not an error worth having.
+        }
+      }
+      database = null;
+      readyPromise = null;
+    },
+  };
+
+  if (!factory || typeof factory.open !== 'function') {
+    degrade('this browser context has no usable IndexedDB');
+  }
+
+  return api;
+}
+
+/* -------------------------------------------------------------------------- */
+/* C. DOM VIRTUALIZATION — FDD #21 over ENGINEERING-STANDARD §2.2             */
+/* -------------------------------------------------------------------------- */
+
+/** ENGINEERING-STANDARD §2.2: past this many items a list MUST be windowed. */
+var VIRTUAL_LIST_THRESHOLD = 50;
+var VIRTUAL_OVERSCAN_DEFAULT = 5;
+/*
+ * The one row height, in px, shared by the CSS and the windowing arithmetic.
+ * It MUST equal the `height` on the `.vrow` rule in the stylesheet: the spacer
+ * divs are sized from this number, so a row that is taller or shorter than it
+ * would drift the scrollbar away from the content. No breakpoint changes it —
+ * see the note in the narrow-container query.
+ */
+var VIRTUAL_ROW_HEIGHT = 84;
+
+/**
+ * The window arithmetic, kept pure so the maths is testable without a DOM.
+ *
+ * Half-open range: rows [start, end). Both ends are clamped to `total`, which
+ * is what makes a list that SHRINKS while scrolled deep behave — the old
+ * scrollTop still points past the new content, and the window collapses onto
+ * the end of the list instead of asking for rows that no longer exist.
+ *
+ * @param {number} scrollTop
+ * @param {number} viewportHeight px of visible scroller; 0 is legal (a hidden
+ *   card has not been laid out yet) and yields an overscan-sized window
+ * @param {number} rowHeight px per row; must be > 0
+ * @param {number} total
+ * @param {number} [overscan]
+ * @returns {{start:number, end:number, count:number, total:number}}
+ */
+function virtualWindow(scrollTop, viewportHeight, rowHeight, total, overscan) {
+  var rows = typeof total === 'number' && isFinite(total) && total > 0 ? Math.floor(total) : 0;
+  var height = typeof rowHeight === 'number' && isFinite(rowHeight) && rowHeight > 0 ? rowHeight : 1;
+  var view =
+    typeof viewportHeight === 'number' && isFinite(viewportHeight) && viewportHeight > 0
+      ? viewportHeight
+      : 0;
+  var pad =
+    typeof overscan === 'number' && isFinite(overscan) && overscan >= 0
+      ? Math.floor(overscan)
+      : VIRTUAL_OVERSCAN_DEFAULT;
+  var top = typeof scrollTop === 'number' && isFinite(scrollTop) && scrollTop > 0 ? scrollTop : 0;
+
+  if (rows === 0) return { start: 0, end: 0, count: 0, total: 0 };
+
+  var first = Math.floor(top / height) - pad;
+  var last = Math.ceil((top + view) / height) + pad;
+
+  var start = first < 0 ? 0 : first;
+  if (start > rows) start = rows;
+  var end = last > rows ? rows : last;
+  if (end < start) end = start;
+
+  return { start: start, end: end, count: end - start, total: rows };
+}
+
+/**
+ * A windowed list: only the rows in view (plus `overscan` on each side) are in
+ * the DOM, and two spacer divs hold the scrollbar geometry so the scroll
+ * position, thumb size and keyboard paging all behave as if every row existed.
+ *
+ * ACCESSIBILITY, AND THE TRADE-OFF THAT COMES WITH VIRTUALIZATION
+ * The container is a labelled `role="list"` and every row is a `role="listitem"`
+ * with `tabindex="-1"`, so a row can hold focus and be reached programmatically;
+ * the buttons inside a row are ordinary tabbable controls. What virtualization
+ * costs is real and is not hidden here: a row that scrolls out of the window is
+ * UNMOUNTED, so its DOM node — and any focus on it — is destroyed. Two things
+ * make that survivable:
+ *   - the stable-focus-key pattern already used by the draft card: rows carry
+ *     `data-row-key` and their controls carry `data-focus-key`, and after a
+ *     rebuild focus goes back to the same key if it is still rendered;
+ *   - `aria-setsize` / `aria-posinset` on every row, so a screen reader is told
+ *     "3 of 120" even though only 14 items exist in the tree.
+ * A row scrolled entirely out of the window cannot be refocused, because it is
+ * genuinely not there any more. That is the documented cost of §2.2.
+ *
+ * @param {{
+ *   container: Element,
+ *   rowHeight: number,
+ *   renderRow: (item:any, index:number) => Element,
+ *   overscan?: number,
+ *   keyOf?: (item:any, index:number) => string,
+ *   label?: string,
+ *   document?: Document
+ * }} deps
+ * @returns {{setItems:Function, refresh:Function, destroy:Function,
+ *            renderedRange:Function, items:Function, itemCount:Function}}
+ */
+function createVirtualList(deps) {
+  var d = deps || {};
+  var container = d.container || null;
+  var rowHeight =
+    typeof d.rowHeight === 'number' && isFinite(d.rowHeight) && d.rowHeight > 0 ? d.rowHeight : 56;
+  var renderRow = typeof d.renderRow === 'function' ? d.renderRow : null;
+  var overscan =
+    typeof d.overscan === 'number' && isFinite(d.overscan) && d.overscan >= 0
+      ? Math.floor(d.overscan)
+      : VIRTUAL_OVERSCAN_DEFAULT;
+  var keyOf = typeof d.keyOf === 'function' ? d.keyOf : null;
+  var doc =
+    d.document ||
+    (container && container.ownerDocument) ||
+    (typeof document !== 'undefined' ? document : null);
+
+  /** @type {Array<any>} */
+  var items = [];
+  var range = { start: 0, end: 0, count: 0, total: 0 };
+  var destroyed = false;
+  /** Set while we adjust scrollTop ourselves, so the scroll event is ignored. */
+  var adjusting = false;
+
+  function usable() {
+    return !destroyed && container && renderRow && doc && typeof doc.createElement === 'function';
+  }
+
+  function makeSpacer(height) {
+    var el = doc.createElement('div');
+    el.className = 'vlist-spacer';
+    el.setAttribute('aria-hidden', 'true');
+    if (el.style) el.style.height = height + 'px';
+    return el;
+  }
+
+  /** What is focused inside the list right now, as (row key, control key). */
+  function captureFocus() {
+    if (!doc || !container || typeof container.contains !== 'function') return null;
+    var active = doc.activeElement;
+    if (!active || !container.contains(active)) return null;
+    var focusKey =
+      typeof active.getAttribute === 'function' ? active.getAttribute('data-focus-key') : null;
+    var node = active;
+    var rowKey = null;
+    while (node && node !== container) {
+      if (typeof node.getAttribute === 'function') {
+        var candidate = node.getAttribute('data-row-key');
+        if (candidate) {
+          rowKey = candidate;
+          break;
+        }
+      }
+      node = node.parentNode;
+    }
+    if (rowKey === null && focusKey === null) return null;
+    return { rowKey: rowKey, focusKey: focusKey };
+  }
+
+  function restoreFocus(previous) {
+    if (!previous || !container || typeof container.querySelector !== 'function') return;
+    var selector = null;
+    if (previous.rowKey !== null) {
+      selector = '[data-row-key="' + previous.rowKey + '"]';
+      if (previous.focusKey) selector += ' [data-focus-key="' + previous.focusKey + '"]';
+    } else if (previous.focusKey) {
+      selector = '[data-focus-key="' + previous.focusKey + '"]';
+    }
+    if (!selector) return;
+    var target = null;
+    try {
+      target = container.querySelector(selector);
+    } catch (err) {
+      target = null;
+    }
+    if (target && typeof target.focus === 'function') target.focus();
+  }
+
+  /** Rebuild the window from the current scrollTop. */
+  function paint() {
+    if (!usable()) return;
+
+    var total = items.length;
+    var viewport =
+      typeof container.clientHeight === 'number' && isFinite(container.clientHeight)
+        ? container.clientHeight
+        : 0;
+    var scrollTop =
+      typeof container.scrollTop === 'number' && isFinite(container.scrollTop)
+        ? container.scrollTop
+        : 0;
+
+    // A list that shrank under a deep scroll position: pull the viewport back
+    // onto the content before measuring, or the window would be computed from
+    // a scrollTop the content can no longer justify.
+    var maxScroll = Math.max(0, total * rowHeight - viewport);
+    if (scrollTop > maxScroll) {
+      scrollTop = maxScroll;
+      adjusting = true;
+      try {
+        container.scrollTop = maxScroll;
+      } catch (err) {
+        // A container that refuses a scrollTop write still renders correctly
+        // from the clamped value above.
+      }
+      adjusting = false;
+    }
+
+    var next = virtualWindow(scrollTop, viewport, rowHeight, total, overscan);
+    var focused = captureFocus();
+
+    container.textContent = '';
+    container.appendChild(makeSpacer(next.start * rowHeight));
+
+    for (var i = next.start; i < next.end; i += 1) {
+      var row = null;
+      try {
+        row = renderRow(items[i], i);
+      } catch (err) {
+        row = null;
+      }
+      if (!row) continue;
+      if (typeof row.setAttribute === 'function') {
+        row.setAttribute('role', 'listitem');
+        if (!row.getAttribute || !row.getAttribute('tabindex')) row.setAttribute('tabindex', '-1');
+        row.setAttribute('aria-setsize', String(total));
+        row.setAttribute('aria-posinset', String(i + 1));
+        var key = keyOf ? String(keyOf(items[i], i)) : String(i);
+        row.setAttribute('data-row-key', key);
+      }
+      container.appendChild(row);
+    }
+
+    container.appendChild(makeSpacer(Math.max(0, (total - next.end) * rowHeight)));
+    range = next;
+    restoreFocus(focused);
+  }
+
+  function onScroll() {
+    if (adjusting) return;
+    paint();
+  }
+
+  if (container && typeof container.addEventListener === 'function') {
+    container.addEventListener('scroll', onScroll);
+  }
+  if (container && typeof container.setAttribute === 'function') {
+    container.setAttribute('role', 'list');
+    if (typeof d.label === 'string' && d.label) container.setAttribute('aria-label', d.label);
+  }
+
+  return {
+    /** @param {Array<any>} next replaces the whole backing array */
+    setItems: function (next) {
+      items = isArrayLike(next) ? Array.prototype.slice.call(next) : [];
+      paint();
+      return items.length;
+    },
+
+    /** Repaint from the current scroll position without changing the items. */
+    refresh: paint,
+
+    /** @returns {{start:number,end:number,count:number,total:number}} */
+    renderedRange: function () {
+      return { start: range.start, end: range.end, count: range.count, total: range.total };
+    },
+
+    items: function () {
+      return items.slice();
+    },
+
+    itemCount: function () {
+      return items.length;
+    },
+
+    /** Detach every listener and empty the container. Idempotent. */
+    destroy: function () {
+      if (destroyed) return;
+      destroyed = true;
+      if (container && typeof container.removeEventListener === 'function') {
+        container.removeEventListener('scroll', onScroll);
+      }
+      if (container) container.textContent = '';
+      items = [];
+      range = { start: 0, end: 0, count: 0, total: 0 };
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* D. WORKSPACE SERIALIZATION — FDD #85/#86                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The registry a serializer/restorer works against. Passed in rather than
+ * reached for, so both directions are testable against real store instances
+ * with no DOM at all.
+ *
+ * {
+ *   promptState: createPromptState(),
+ *   exclusions:  createExclusionState(),
+ *   structure:   createStructureState(),
+ *   sliders:     { get(axis) -> number, set(axis, value) -> void }
+ * }
+ *
+ * NOTHING SECRET IS IN HERE, BY CONSTRUCTION. The cloud API key lives in an
+ * <input type="password"> and in the dissector request object, and neither is
+ * part of the registry — a snapshot cannot carry a key because it is never
+ * handed one. tests/persistence.test.js proves it by planting a key in a
+ * registry-shaped object and asserting it is absent from the output.
+ */
+
+/** @returns {number} a slider position, clamped and rounded, or the default */
+function readSliderValue(sliders, axis) {
+  var raw = null;
+  if (sliders && typeof sliders.get === 'function') {
+    try {
+      raw = sliders.get(axis);
+    } catch (err) {
+      raw = null;
+    }
+  } else if (sliders && typeof sliders === 'object') {
+    raw = sliders[axis];
+  }
+  var value = sliderValueOrNull(raw);
+  return value === null ? SLIDER_DEFAULT : Math.round(value);
+}
+
+/**
+ * A complete, plain-data snapshot of the working set.
+ *
+ * @param {object} registry see above
+ * @param {{savedAt?: number}} [options]
+ * @returns {object} always a fresh object; safe to JSON.stringify
+ */
+function serializeWorkspace(registry, options) {
+  var r = registry || {};
+  var opts = options || {};
+  var out = {
+    workspaceVersion: WORKSPACE_VERSION,
+    savedAt:
+      typeof opts.savedAt === 'number' && isFinite(opts.savedAt) ? opts.savedAt : Date.now(),
+    sliders: {},
+    prompt: [],
+    exclusions: [],
+    structure: { version: STRUCTURE_STATE_VERSION, blocks: [] },
+  };
+
+  for (var a = 0; a < SLIDER_AXES.length; a += 1) {
+    out.sliders[SLIDER_AXES[a]] = readSliderValue(r.sliders, SLIDER_AXES[a]);
+  }
+
+  var entries = r.promptState && typeof r.promptState.list === 'function' ? r.promptState.list() : [];
+  for (var i = 0; i < entries.length; i += 1) {
+    // The store's own ids are deliberately NOT carried: they are internal
+    // identity for the life of one store instance, and a restore mints fresh
+    // ones. Order is what round-trips, and order is preserved here.
+    var entry = { section: entries[i].section, tag: entries[i].tag, source: entries[i].source };
+    if (typeof entries[i].weight === 'number') entry.weight = entries[i].weight;
+    out.prompt.push(entry);
+  }
+
+  if (r.exclusions && typeof r.exclusions.list === 'function') {
+    out.exclusions = r.exclusions.list();
+  }
+
+  if (r.structure && typeof r.structure.toJSON === 'function') {
+    var sheet = r.structure.toJSON();
+    out.structure = {
+      version: sheet && sheet.version ? sheet.version : STRUCTURE_STATE_VERSION,
+      blocks: [],
+    };
+    var blocks = sheet && isArrayLike(sheet.blocks) ? sheet.blocks : [];
+    for (var b = 0; b < blocks.length; b += 1) {
+      out.structure.blocks.push({
+        section: blocks[b].section,
+        modifiers: isArrayLike(blocks[b].modifiers)
+          ? Array.prototype.slice.call(blocks[b].modifiers)
+          : [],
+        lyrics: typeof blocks[b].lyrics === 'string' ? blocks[b].lyrics : '',
+      });
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Validate a snapshot COMPLETELY before a single store is touched.
+ *
+ * This is the whole point of the split: a half-applied restore leaves the user
+ * with a workspace that is neither what they had nor what they asked for, and
+ * no undo for either. Anything malformed comes back {ok:false, reason} with
+ * every store untouched. Unknown fields are ignored rather than rejected, so a
+ * snapshot written by a LATER build that only added fields still loads.
+ *
+ * @param {*} data
+ * @returns {{ok:true, plan:object}|{ok:false, reason:string}}
+ */
+function validateWorkspaceSnapshot(data) {
+  if (!data || typeof data !== 'object' || isArrayLike(data)) {
+    return { ok: false, reason: 'not a workspace object' };
+  }
+  if (data.workspaceVersion !== WORKSPACE_VERSION) {
+    return {
+      ok: false,
+      reason:
+        'workspaceVersion ' +
+        JSON.stringify(data.workspaceVersion) +
+        ' — this build reads version ' +
+        WORKSPACE_VERSION,
+    };
+  }
+
+  var plan = { sliders: {}, prompt: [], exclusions: [], structure: null };
+  var i;
+
+  /* --- sliders: absent is fine (neutral), malformed is not --- */
+  if (data.sliders !== undefined && data.sliders !== null) {
+    if (typeof data.sliders !== 'object' || isArrayLike(data.sliders)) {
+      return { ok: false, reason: 'sliders must be an object' };
+    }
+  }
+  var sliders = data.sliders && typeof data.sliders === 'object' ? data.sliders : {};
+  for (i = 0; i < SLIDER_AXES.length; i += 1) {
+    var axis = SLIDER_AXES[i];
+    if (!Object.prototype.hasOwnProperty.call(sliders, axis)) {
+      plan.sliders[axis] = SLIDER_DEFAULT;
+      continue;
+    }
+    var raw = sliders[axis];
+    if (typeof raw !== 'number' || !isFinite(raw) || raw < 0 || raw > 100) {
+      return { ok: false, reason: 'sliders.' + axis + ' must be a number 0-100' };
+    }
+    plan.sliders[axis] = Math.round(raw);
+  }
+
+  /* --- prompt entries --- */
+  if (data.prompt !== undefined && data.prompt !== null && !isArrayLike(data.prompt)) {
+    return { ok: false, reason: 'prompt must be an array' };
+  }
+  var entries = isArrayLike(data.prompt) ? data.prompt : [];
+  for (i = 0; i < entries.length; i += 1) {
+    var entry = entries[i];
+    if (!entry || typeof entry !== 'object' || isArrayLike(entry)) {
+      return { ok: false, reason: 'prompt[' + i + '] must be an object' };
+    }
+    if (typeof entry.tag !== 'string' || !entry.tag.replace(/\s+/g, ' ').trim()) {
+      return { ok: false, reason: 'prompt[' + i + '].tag must be a non-empty string' };
+    }
+    var source = entry.source === undefined || entry.source === null ? 'manual' : entry.source;
+    if (typeof source !== 'string' || PROMPT_SOURCES.indexOf(source) === -1) {
+      return { ok: false, reason: 'prompt[' + i + '].source ' + JSON.stringify(entry.source) + ' is not a known source' };
+    }
+    var section =
+      entry.section === undefined || entry.section === null
+        ? PROMPT_SOURCE_SECTION[source] || 'custom'
+        : entry.section;
+    if (typeof section !== 'string' || PROMPT_SECTIONS.indexOf(section) === -1) {
+      return { ok: false, reason: 'prompt[' + i + '].section ' + JSON.stringify(entry.section) + ' is not a known section' };
+    }
+    var planned = { section: section, tag: entry.tag, source: source };
+    if (entry.weight !== undefined && entry.weight !== null) {
+      if (typeof entry.weight !== 'number' || !isFinite(entry.weight)) {
+        return { ok: false, reason: 'prompt[' + i + '].weight must be a number' };
+      }
+      planned.weight = clamp01(entry.weight);
+    }
+    plan.prompt.push(planned);
+  }
+
+  /* --- exclusions --- */
+  if (data.exclusions !== undefined && data.exclusions !== null && !isArrayLike(data.exclusions)) {
+    return { ok: false, reason: 'exclusions must be an array' };
+  }
+  var terms = isArrayLike(data.exclusions) ? data.exclusions : [];
+  for (i = 0; i < terms.length; i += 1) {
+    if (typeof terms[i] !== 'string' || !normalizeExclusion(terms[i])) {
+      return { ok: false, reason: 'exclusions[' + i + '] is not a usable term' };
+    }
+    plan.exclusions.push(terms[i]);
+  }
+
+  /* --- structure --- */
+  if (data.structure !== undefined && data.structure !== null) {
+    if (typeof data.structure !== 'object' || isArrayLike(data.structure)) {
+      return { ok: false, reason: 'structure must be an object' };
+    }
+    if (!isArrayLike(data.structure.blocks)) {
+      return { ok: false, reason: 'structure.blocks must be an array' };
+    }
+    var blocks = [];
+    for (i = 0; i < data.structure.blocks.length; i += 1) {
+      var block = data.structure.blocks[i];
+      if (!block || typeof block !== 'object' || isArrayLike(block)) {
+        return { ok: false, reason: 'structure.blocks[' + i + '] must be an object' };
+      }
+      if (typeof block.section !== 'string' || !block.section.trim()) {
+        return { ok: false, reason: 'structure.blocks[' + i + '].section must be a non-empty string' };
+      }
+      if (block.modifiers !== undefined && block.modifiers !== null && !isArrayLike(block.modifiers)) {
+        return { ok: false, reason: 'structure.blocks[' + i + '].modifiers must be an array' };
+      }
+      if (block.lyrics !== undefined && block.lyrics !== null && typeof block.lyrics !== 'string') {
+        return { ok: false, reason: 'structure.blocks[' + i + '].lyrics must be a string' };
+      }
+      blocks.push({
+        section: block.section,
+        modifiers: isArrayLike(block.modifiers) ? Array.prototype.slice.call(block.modifiers) : [],
+        lyrics: typeof block.lyrics === 'string' ? block.lyrics : '',
+      });
+    }
+    plan.structure = { version: STRUCTURE_STATE_VERSION, blocks: blocks };
+  } else {
+    plan.structure = { version: STRUCTURE_STATE_VERSION, blocks: [] };
+  }
+
+  return { ok: true, plan: plan };
+}
+
+/**
+ * Apply a validated snapshot. Nothing is mutated until validation has passed
+ * in full, and the prompt store's mutations are batched so subscribers see one
+ * settled state rather than a tag-by-tag rebuild.
+ *
+ * @param {*} data
+ * @param {object} registry
+ * @returns {{ok:true, applied:object}|{ok:false, reason:string}}
+ */
+function restoreWorkspace(data, registry) {
+  var verdict = validateWorkspaceSnapshot(data);
+  if (!verdict.ok) return { ok: false, reason: verdict.reason };
+
+  var r = registry || {};
+  var plan = verdict.plan;
+  var applied = { tags: 0, exclusions: 0, blocks: 0, sliders: 0 };
+  var i;
+
+  if (r.promptState && typeof r.promptState.batch === 'function') {
+    r.promptState.batch(function () {
+      for (var s = 0; s < PROMPT_SECTIONS.length; s += 1) {
+        r.promptState.clearSection(PROMPT_SECTIONS[s]);
+      }
+      for (var p = 0; p < plan.prompt.length; p += 1) {
+        if (r.promptState.add(plan.prompt[p]) !== null) applied.tags += 1;
+      }
+    });
+  }
+
+  if (r.exclusions && typeof r.exclusions.clear === 'function') {
+    r.exclusions.clear();
+    for (i = 0; i < plan.exclusions.length; i += 1) {
+      if (r.exclusions.add(plan.exclusions[i]) !== null) applied.exclusions += 1;
+    }
+  }
+
+  if (r.structure && typeof r.structure.fromJSON === 'function') {
+    r.structure.fromJSON(plan.structure);
+    applied.blocks = plan.structure.blocks.length;
+  }
+
+  // Sliders LAST: setting one republishes that axis's tags through the normal
+  // slider path, and doing it after the prompt store is settled means the axis
+  // contribution restored above is replaced by an identical one rather than
+  // fighting with it.
+  if (r.sliders && typeof r.sliders.set === 'function') {
+    for (i = 0; i < SLIDER_AXES.length; i += 1) {
+      r.sliders.set(SLIDER_AXES[i], plan.sliders[SLIDER_AXES[i]]);
+      applied.sliders += 1;
+    }
+  }
+
+  return { ok: true, applied: applied };
+}
+
+/* -------------------------------------------------------------------------- */
+/* E. PROMPT HISTORY — FDD #74                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One history entry. `snapshot` is a FULL workspace serialization, which is
+ * what makes Restore put the workspace back rather than paste a string.
+ *
+ * @param {string} text the compiled style prompt that was copied
+ * @param {object} snapshot serializeWorkspace() output
+ * @param {{ts?:number, tagCount?:number, favorite?:boolean}} [meta]
+ * @returns {object}
+ */
+function createHistoryRecord(text, snapshot, meta) {
+  var m = meta || {};
+  var value = typeof text === 'string' ? text : '';
+  var tagCount =
+    typeof m.tagCount === 'number' && isFinite(m.tagCount) && m.tagCount >= 0
+      ? Math.floor(m.tagCount)
+      : 0;
+  return {
+    id: makeRecordId('h'),
+    ts: typeof m.ts === 'number' && isFinite(m.ts) ? m.ts : Date.now(),
+    text: value,
+    tagCount: tagCount,
+    favorite: m.favorite === true,
+    snapshot: snapshot && typeof snapshot === 'object' ? snapshot : null,
+  };
+}
+
+/**
+ * The display order: favourites float above the rest, and inside each group the
+ * newest is first. Two groups, one comparator, no interleaving — a starred
+ * prompt from last week still sits above an unstarred one from a minute ago,
+ * which is the whole point of starring it.
+ *
+ * @param {Array<object>} records
+ * @returns {Array<object>} a new array
+ */
+function sortHistoryRecords(records) {
+  var all = sortNewestFirst(records);
+  var favorites = [];
+  var rest = [];
+  for (var i = 0; i < all.length; i += 1) {
+    if (all[i] && all[i].favorite === true) favorites.push(all[i]);
+    else rest.push(all[i]);
+  }
+  return favorites.concat(rest);
+}
+
+/**
+ * Case-insensitive substring search over the copied text. An empty or
+ * whitespace-only query matches everything — a search box that has been
+ * cleared is not a filter.
+ *
+ * @param {Array<object>} records
+ * @param {string} query
+ * @returns {Array<object>}
+ */
+function filterHistoryRecords(records, query) {
+  var all = isArrayLike(records) ? Array.prototype.slice.call(records) : [];
+  var needle = typeof query === 'string' ? query.replace(/\s+/g, ' ').trim().toLowerCase() : '';
+  if (!needle) return all;
+  var out = [];
+  for (var i = 0; i < all.length; i += 1) {
+    var text = all[i] && typeof all[i].text === 'string' ? all[i].text.toLowerCase() : '';
+    if (text.indexOf(needle) !== -1) out.push(all[i]);
+  }
+  return out;
+}
+
+/**
+ * The FIFO rule (ASSUMPTIONS.md): the bank holds at most `cap` entries and the
+ * OLDEST go first. Deliberately blind to `favorite` — a cap that favourites
+ * could dodge is not a cap, and a bank that silently grew past its quota
+ * budget would fail at write time instead of at trim time.
+ *
+ * @param {Array<object>} records any order
+ * @param {number} [cap]
+ * @returns {{keep:Array<object>, drop:Array<object>}} both newest-first
+ */
+function capHistoryRecords(records, cap) {
+  var limit =
+    typeof cap === 'number' && isFinite(cap) && cap >= 0 ? Math.floor(cap) : HISTORY_CAP;
+  var all = sortNewestFirst(records);
+  return { keep: all.slice(0, limit), drop: all.slice(limit) };
+}
+
+/** "just now" / "4 min ago" / "3 h ago" / "2 d ago" — no library, no drift. */
+function relativeTimeText(ts, now) {
+  var then = typeof ts === 'number' && isFinite(ts) ? ts : 0;
+  var reference = typeof now === 'number' && isFinite(now) ? now : Date.now();
+  var delta = Math.max(0, reference - then);
+  var seconds = Math.floor(delta / 1000);
+  if (seconds < 45) return 'just now';
+  var minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return (minutes < 1 ? 1 : minutes) + ' min ago';
+  var hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + ' h ago';
+  var days = Math.floor(hours / 24);
+  if (days < 365) return days + ' d ago';
+  return Math.floor(days / 365) + ' y ago';
+}
+
+/* -------------------------------------------------------------------------- */
+/* F. PRESETS AND JSON BACKUP / RESTORE — FDD #86, #93                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @param {*} name
+ * @returns {{ok:true, value:string}|{ok:false, reason:string}}
+ */
+function validatePresetName(name) {
+  var value = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim() : '';
+  if (!value) return { ok: false, reason: 'a preset needs a name' };
+  if (value.length > PRESET_NAME_MAX) {
+    return {
+      ok: false,
+      reason: 'a preset name is at most ' + PRESET_NAME_MAX + ' characters (' + value.length + ' given)',
+    };
+  }
+  return { ok: true, value: value };
+}
+
+/**
+ * A name nothing else is using. First collision takes " (imported)", later ones
+ * count up, and the base is trimmed — not the suffix — when the result would
+ * exceed the 60-character limit, because the suffix is the part that explains
+ * where the preset came from.
+ *
+ * @param {string} name
+ * @param {Array<string>} taken
+ * @returns {string}
+ */
+function uniquePresetName(name, taken) {
+  var used = {};
+  var list = isArrayLike(taken) ? taken : [];
+  for (var i = 0; i < list.length; i += 1) {
+    if (typeof list[i] === 'string') used[list[i].toLowerCase()] = true;
+  }
+  var base = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim() : '';
+  if (!base) base = 'preset';
+  if (!used[base.toLowerCase()]) return base.slice(0, PRESET_NAME_MAX);
+
+  var attempt = 1;
+  for (;;) {
+    var suffix = attempt === 1 ? IMPORT_SUFFIX : IMPORT_SUFFIX.slice(0, -1) + ' ' + attempt + ')';
+    var room = PRESET_NAME_MAX - suffix.length;
+    var head = room > 0 ? base.slice(0, room).replace(/\s+$/, '') : '';
+    var candidate = head + suffix;
+    if (!used[candidate.toLowerCase()]) return candidate;
+    attempt += 1;
+    if (attempt > 999) return (head + suffix).slice(0, PRESET_NAME_MAX);
+  }
+}
+
+/**
+ * @param {string} name validated already
+ * @param {object} workspace serializeWorkspace() output
+ * @param {{favorite?:boolean, savedAt?:number}} [meta]
+ */
+function createPresetRecord(name, workspace, meta) {
+  var m = meta || {};
+  return {
+    id: makeRecordId('p'),
+    ts: typeof m.savedAt === 'number' && isFinite(m.savedAt) ? m.savedAt : Date.now(),
+    name: String(name),
+    favorite: m.favorite === true,
+    workspace: workspace && typeof workspace === 'object' ? workspace : null,
+  };
+}
+
+/**
+ * The backup document (FDD #86). Ids are deliberately NOT exported: they are
+ * local identity, and re-minting them on import is what lets the same file be
+ * imported twice without one copy overwriting the other.
+ *
+ * @param {Array<object>} records
+ * @returns {object}
+ */
+function buildPresetExport(records) {
+  var list = isArrayLike(records) ? records : [];
+  var out = {
+    schema: PRESET_EXPORT_SCHEMA,
+    version: PRESET_EXPORT_VERSION,
+    exportedAt: new Date().toISOString(),
+    presets: [],
+  };
+  for (var i = 0; i < list.length; i += 1) {
+    var record = list[i];
+    if (!record || typeof record !== 'object') continue;
+    out.presets.push({
+      name: typeof record.name === 'string' ? record.name : '',
+      savedAt: typeof record.ts === 'number' && isFinite(record.ts) ? record.ts : 0,
+      favorite: record.favorite === true,
+      workspace: record.workspace && typeof record.workspace === 'object' ? record.workspace : null,
+    });
+  }
+  return out;
+}
+
+/** Pretty JSON — a backup a human may well open in a text editor. */
+function serializePresetExport(records) {
+  return JSON.stringify(buildPresetExport(records), null, 2);
+}
+
+/** `sunoprompt-presets-2026-08-25.json` — dated, so two backups never collide. */
+function presetBackupFilename(when) {
+  var date = when instanceof Date ? when : new Date();
+  var iso = '';
+  try {
+    iso = date.toISOString().slice(0, 10);
+  } catch (err) {
+    iso = 'undated';
+  }
+  return 'sunoprompt-presets-' + iso + '.json';
+}
+
+/**
+ * Read an import payload and decide, preset by preset, what is accepted and
+ * what is refused and why. Nothing is written here — this is the plan, and the
+ * caller commits it. A single bad preset costs that preset, not the file.
+ *
+ * @param {string|object} raw JSON text, or an already-parsed document
+ * @param {Array<string>} existingNames names already in the library
+ * @returns {{ok:boolean, reason?:string, accepted:Array<object>,
+ *            rejected:Array<{name:string, reason:string}>, counts:object}}
+ */
+function planPresetImport(raw, existingNames) {
+  var doc = null;
+  if (typeof raw === 'string') {
+    var text = raw.replace(/^\uFEFF/, '').trim();
+    if (!text) {
+      return { ok: false, reason: 'nothing to import — the payload is empty', accepted: [], rejected: [], counts: { total: 0, accepted: 0, rejected: 0 } };
+    }
+    try {
+      doc = JSON.parse(text);
+    } catch (err) {
+      return { ok: false, reason: 'not valid JSON: ' + errorMessage(err), accepted: [], rejected: [], counts: { total: 0, accepted: 0, rejected: 0 } };
+    }
+  } else {
+    doc = raw;
+  }
+
+  if (!doc || typeof doc !== 'object' || isArrayLike(doc)) {
+    return { ok: false, reason: 'the payload is not a preset backup object', accepted: [], rejected: [], counts: { total: 0, accepted: 0, rejected: 0 } };
+  }
+  if (doc.schema !== PRESET_EXPORT_SCHEMA) {
+    return {
+      ok: false,
+      reason: 'not a SunoPrompt preset backup (schema ' + JSON.stringify(doc.schema) + ')',
+      accepted: [],
+      rejected: [],
+      counts: { total: 0, accepted: 0, rejected: 0 },
+    };
+  }
+  if (doc.version !== PRESET_EXPORT_VERSION) {
+    return {
+      ok: false,
+      reason: 'backup version ' + JSON.stringify(doc.version) + ' — this build reads version ' + PRESET_EXPORT_VERSION,
+      accepted: [],
+      rejected: [],
+      counts: { total: 0, accepted: 0, rejected: 0 },
+    };
+  }
+  if (!isArrayLike(doc.presets)) {
+    return { ok: false, reason: '"presets" must be an array', accepted: [], rejected: [], counts: { total: 0, accepted: 0, rejected: 0 } };
+  }
+
+  var taken = [];
+  var i;
+  var existing = isArrayLike(existingNames) ? existingNames : [];
+  for (i = 0; i < existing.length; i += 1) {
+    if (typeof existing[i] === 'string') taken.push(existing[i]);
+  }
+
+  var accepted = [];
+  var rejected = [];
+  for (i = 0; i < doc.presets.length; i += 1) {
+    var entry = doc.presets[i];
+    var label = entry && typeof entry.name === 'string' && entry.name ? entry.name : 'preset ' + (i + 1);
+    if (!entry || typeof entry !== 'object' || isArrayLike(entry)) {
+      rejected.push({ name: label, reason: 'not an object' });
+      continue;
+    }
+    var named = validatePresetName(entry.name);
+    if (!named.ok) {
+      rejected.push({ name: label, reason: named.reason });
+      continue;
+    }
+    var verdict = validateWorkspaceSnapshot(entry.workspace);
+    if (!verdict.ok) {
+      rejected.push({ name: named.value, reason: verdict.reason });
+      continue;
+    }
+    var finalName = uniquePresetName(named.value, taken);
+    taken.push(finalName);
+    accepted.push({
+      name: finalName,
+      renamedFrom: finalName === named.value ? null : named.value,
+      favorite: entry.favorite === true,
+      savedAt: typeof entry.savedAt === 'number' && isFinite(entry.savedAt) ? entry.savedAt : Date.now(),
+      workspace: entry.workspace,
+    });
+  }
+
+  return {
+    ok: true,
+    accepted: accepted,
+    rejected: rejected,
+    counts: { total: doc.presets.length, accepted: accepted.length, rejected: rejected.length },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* G. WORKSPACE PROFILING — FDD #77 over FEATURE-MECHANICS §6.2               */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * THE TWO DEFAULT PROFILES, SEEDED ON FIRST BOOT.
+ *
+ * This is the SAME musical content as tests/e2e/profiles.json — the seed file
+ * the overnight E2E has been validating since the harness was scaffolded.
+ * tests/e2e/nightly.js now extracts this array out of #app-main and checks it
+ * against that file (same names, slider ranges, weighted tag families), so the
+ * two cannot drift apart without the nightly going red.
+ *
+ * Shape per FEATURE-MECHANICS §6.2: "a serialized JSON object containing the
+ * state of all sliders, selected genres, and active metatags".
+ */
+var DEFAULT_PROFILES = [
+  {
+    name: 'Neon',
+    description:
+      'Late-night club energy: driving techno, distorted French electro bass and glossy Scandi house melodics. High energy, cool-leaning, dense arrangement.',
+    sliders: { energy: 86, warmth: 32, density: 74 },
+    genres: [
+      { tag: 'techno', weight: 1 },
+      { tag: 'french electro', weight: 0.85 },
+      { tag: 'scandi house', weight: 0.75 },
+      { tag: 'bloghaus', weight: 0.5 },
+      { tag: 'acid bassline', weight: 0.4 },
+    ],
+    metatags: ['[Intro]', '[Build]', '[Drop]', '[Break]', '[Outro]'],
+  },
+  {
+    name: 'Aetheris',
+    description:
+      'Wide, euphoric and organic: progressive trance pads and rolling arpeggios over Afro house log drums and shakers. Moderate energy, warm, spacious.',
+    sliders: { energy: 62, warmth: 78, density: 55 },
+    genres: [
+      { tag: 'progressive trance', weight: 1 },
+      { tag: 'afro house', weight: 0.9 },
+      { tag: 'ethereal vocal chops', weight: 0.6 },
+      { tag: 'log drums', weight: 0.55 },
+      { tag: 'ambient pads', weight: 0.45 },
+    ],
+    metatags: ['[Intro]', '[Verse]', '[Build]', '[Drop]', '[Bridge]', '[Outro]'],
+  },
+];
+
+/**
+ * @param {*} name
+ * @returns {{ok:true, value:string}|{ok:false, reason:string}}
+ */
+function validateProfileName(name) {
+  var value = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim() : '';
+  if (!value) return { ok: false, reason: 'a profile needs a name' };
+  if (value.length > PROFILE_NAME_MAX) {
+    return {
+      ok: false,
+      reason: 'a profile name is at most ' + PROFILE_NAME_MAX + ' characters (' + value.length + ' given)',
+    };
+  }
+  return { ok: true, value: value };
+}
+
+/**
+ * Canonicalise a profile record. Nothing read back from localStorage is
+ * trusted: a payload hand-edited, truncated mid-write or left by another app
+ * degrades to null instead of reaching the DOM.
+ *
+ * @param {*} raw
+ * @returns {object|null}
+ */
+function normalizeProfile(raw) {
+  if (!raw || typeof raw !== 'object' || isArrayLike(raw)) return null;
+  var named = validateProfileName(raw.name);
+  if (!named.ok) return null;
+
+  var sliders = {};
+  var source = raw.sliders && typeof raw.sliders === 'object' && !isArrayLike(raw.sliders) ? raw.sliders : {};
+  for (var a = 0; a < SLIDER_AXES.length; a += 1) {
+    var value = sliderValueOrNull(source[SLIDER_AXES[a]]);
+    sliders[SLIDER_AXES[a]] = value === null ? SLIDER_DEFAULT : Math.round(value);
+  }
+
+  var genres = [];
+  var rawGenres = isArrayLike(raw.genres) ? raw.genres : [];
+  var seen = {};
+  for (var g = 0; g < rawGenres.length; g += 1) {
+    var item = rawGenres[g];
+    var tag = '';
+    var weight = null;
+    if (typeof item === 'string') tag = item;
+    else if (item && typeof item === 'object') {
+      tag = typeof item.tag === 'string' ? item.tag : '';
+      if (typeof item.weight === 'number' && isFinite(item.weight)) weight = clamp01(item.weight);
+    }
+    tag = tag.replace(/\s+/g, ' ').trim();
+    if (!tag) continue;
+    var key = normalizePromptTag(tag);
+    if (seen[key]) continue;
+    seen[key] = true;
+    var entry = { tag: tag };
+    if (weight !== null) entry.weight = weight;
+    genres.push(entry);
+  }
+
+  var metatags = [];
+  var rawTags = isArrayLike(raw.metatags) ? raw.metatags : [];
+  for (var m = 0; m < rawTags.length; m += 1) {
+    if (typeof rawTags[m] !== 'string' || !rawTags[m].trim()) continue;
+    metatags.push(rawTags[m]);
+  }
+
+  var out = {
+    name: named.value,
+    sliders: sliders,
+    genres: genres,
+    metatags: metatags,
+    savedAt: typeof raw.savedAt === 'number' && isFinite(raw.savedAt) ? raw.savedAt : Date.now(),
+  };
+  if (typeof raw.description === 'string' && raw.description.trim()) {
+    out.description = raw.description.replace(/\s+/g, ' ').trim();
+  }
+  return out;
+}
+
+/**
+ * The Workspace Profiling store (FDD #77, FEATURE-MECHANICS §6.2).
+ *
+ * ONE localStorage key, `suno_profiles`, holding ONE object keyed by profile
+ * name — the shape §6.2 asks for. Reads never throw and never write; writes
+ * that fail a quota simply return false, because a profile that will not
+ * persist is still a profile the user can use for the rest of the session.
+ *
+ * @param {{storage?:{getItem:Function,setItem:Function},
+ *          defaults?:Array<object>, now?:() => number}} [deps]
+ */
+function createProfileStore(deps) {
+  var d = deps || {};
+  var storage =
+    d.storage && typeof d.storage.getItem === 'function' && typeof d.storage.setItem === 'function'
+      ? d.storage
+      : null;
+  var defaults = isArrayLike(d.defaults) ? Array.prototype.slice.call(d.defaults) : DEFAULT_PROFILES;
+  var now = typeof d.now === 'function' ? d.now : function () { return Date.now(); };
+
+  /** @type {Record<string, object>} name -> profile */
+  var records = {};
+  var loaded = false;
+
+  function readRaw() {
+    if (!storage) return null;
+    try {
+      return storage.getItem(PROFILES_KEY);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function writeRaw() {
+    if (!storage) return false;
+    try {
+      storage.setItem(PROFILES_KEY, JSON.stringify(records));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function load() {
+    records = {};
+    var raw = readRaw();
+    var parsed = null;
+    if (typeof raw === 'string' && raw) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        parsed = null;
+      }
+    }
+    if (parsed && typeof parsed === 'object' && !isArrayLike(parsed)) {
+      var names = Object.keys(parsed);
+      for (var i = 0; i < names.length; i += 1) {
+        var profile = normalizeProfile(parsed[names[i]]);
+        if (profile) records[profile.name] = profile;
+      }
+    }
+    loaded = true;
+    return Object.keys(records).length;
+  }
+
+  function ensureLoaded() {
+    if (!loaded) load();
+  }
+
+  return {
+    load: load,
+
+    /**
+     * FIRST-BOOT SEEDING. Only when the key is absent, unreadable or holds no
+     * usable profile — a user who deleted every profile on purpose does NOT
+     * get them back on the next reload, which is why the emptiness test is
+     * "the stored record parsed to nothing", not "the store is empty now".
+     *
+     * @returns {{seeded:boolean, names:string[], persisted:boolean}}
+     */
+    seedDefaults: function () {
+      ensureLoaded();
+      if (Object.keys(records).length > 0) {
+        return { seeded: false, names: Object.keys(records), persisted: true };
+      }
+      var stamp = now();
+      var names = [];
+      for (var i = 0; i < defaults.length; i += 1) {
+        var profile = normalizeProfile(defaults[i]);
+        if (!profile) continue;
+        profile.savedAt = stamp;
+        records[profile.name] = profile;
+        names.push(profile.name);
+      }
+      var persisted = names.length > 0 ? writeRaw() : false;
+      return { seeded: names.length > 0, names: names, persisted: persisted };
+    },
+
+    /** @returns {Array<object>} copies, alphabetical — a stable dropdown order */
+    list: function () {
+      ensureLoaded();
+      var names = Object.keys(records).sort(function (a, b) {
+        return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0;
+      });
+      var out = [];
+      for (var i = 0; i < names.length; i += 1) out.push(normalizeProfile(records[names[i]]));
+      return out;
+    },
+
+    /** @returns {object|null} a copy */
+    get: function (name) {
+      ensureLoaded();
+      var key = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim() : '';
+      if (!key || !Object.prototype.hasOwnProperty.call(records, key)) return null;
+      return normalizeProfile(records[key]);
+    },
+
+    /**
+     * @param {object} profile
+     * @returns {{ok:true, profile:object, persisted:boolean}|{ok:false, reason:string}}
+     */
+    save: function (profile) {
+      ensureLoaded();
+      var named = validateProfileName(profile && profile.name);
+      if (!named.ok) return { ok: false, reason: named.reason };
+      var normalized = normalizeProfile(profile);
+      if (!normalized) return { ok: false, reason: 'that is not a usable profile' };
+      normalized.savedAt = now();
+      records[normalized.name] = normalized;
+      return { ok: true, profile: normalized, persisted: writeRaw() };
+    },
+
+    /** @returns {boolean} whether there was one to remove */
+    remove: function (name) {
+      ensureLoaded();
+      var key = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim() : '';
+      if (!key || !Object.prototype.hasOwnProperty.call(records, key)) return false;
+      delete records[key];
+      writeRaw();
+      return true;
+    },
+
+    count: function () {
+      ensureLoaded();
+      return Object.keys(records).length;
+    },
+  };
+}
+
+/**
+ * Snapshot the profile subset of the workspace: slider positions, the GENRE
+ * section's tags and the structure card's section metatags. Deliberately not
+ * the whole workspace — that is what a preset is for (FDD #86).
+ *
+ * @param {string} name
+ * @param {object} registry
+ * @returns {object|null}
+ */
+function profileFromWorkspace(name, registry) {
+  var r = registry || {};
+  var named = validateProfileName(name);
+  if (!named.ok) return null;
+
+  var genres = [];
+  if (r.promptState && typeof r.promptState.list === 'function') {
+    var entries = r.promptState.list('genre');
+    for (var i = 0; i < entries.length; i += 1) {
+      var entry = { tag: entries[i].tag };
+      if (typeof entries[i].weight === 'number') entry.weight = entries[i].weight;
+      genres.push(entry);
+    }
+  }
+
+  var metatags = [];
+  if (r.structure && typeof r.structure.blocks === 'function') {
+    var blocks = r.structure.blocks();
+    for (var b = 0; b < blocks.length; b += 1) {
+      metatags.push(formatStructureTag(blocks[b].section, null, []));
+    }
+  }
+
+  var sliders = {};
+  for (var a = 0; a < SLIDER_AXES.length; a += 1) {
+    sliders[SLIDER_AXES[a]] = readSliderValue(r.sliders, SLIDER_AXES[a]);
+  }
+
+  return normalizeProfile({
+    name: named.value,
+    sliders: sliders,
+    genres: genres,
+    metatags: metatags,
+    savedAt: Date.now(),
+  });
+}
+
+/**
+ * Load a profile into the live workspace.
+ *
+ * FEATURE-MECHANICS §6.2: "Loading a profile must synchronously update the DOM
+ * and recalculate the character limit." Everything below runs in the SAME task:
+ * the slider setter writes the input and repaints it, the prompt store
+ * publishes once at the close of the batch, and the style-prompt subscriber —
+ * which owns the 1,000-character gauge — recomputes from that notification
+ * before this function returns. Nothing is deferred to a timer, a microtask or
+ * an animation frame, and tests/persistence.test.js asserts exactly that by
+ * counting notifications observed synchronously across the call.
+ *
+ * @param {object} profile
+ * @param {object} registry
+ * @returns {{ok:true, applied:object}|{ok:false, reason:string}}
+ */
+function applyProfileToWorkspace(profile, registry) {
+  var normalized = normalizeProfile(profile);
+  if (!normalized) return { ok: false, reason: 'that is not a usable profile' };
+  var r = registry || {};
+  var applied = { genres: 0, metatags: 0, sliders: 0 };
+  var i;
+
+  if (r.promptState && typeof r.promptState.batch === 'function') {
+    r.promptState.batch(function () {
+      // The genre section is REPLACED, not merged: loading "Neon" over
+      // "Aetheris" must not leave a trance pad in a techno prompt.
+      r.promptState.clearSection('genre');
+      for (var g = 0; g < normalized.genres.length; g += 1) {
+        var seed = {
+          section: 'genre',
+          tag: normalized.genres[g].tag,
+          source: 'manual',
+        };
+        if (typeof normalized.genres[g].weight === 'number') seed.weight = normalized.genres[g].weight;
+        if (r.promptState.add(seed) !== null) applied.genres += 1;
+      }
+    });
+  }
+
+  if (r.structure && typeof r.structure.fromJSON === 'function') {
+    var blocks = [];
+    for (i = 0; i < normalized.metatags.length; i += 1) {
+      blocks.push({ section: normalized.metatags[i], modifiers: [], lyrics: '' });
+    }
+    r.structure.fromJSON({ version: STRUCTURE_STATE_VERSION, blocks: blocks });
+    applied.metatags = blocks.length;
+  }
+
+  if (r.sliders && typeof r.sliders.set === 'function') {
+    for (i = 0; i < SLIDER_AXES.length; i += 1) {
+      r.sliders.set(SLIDER_AXES[i], normalized.sliders[SLIDER_AXES[i]]);
+      applied.sliders += 1;
+    }
+  }
+
+  return { ok: true, applied: applied };
+}
+
+/* -------------------------------------------------------------------------- */
+/* H. DEBOUNCE — the session autosave's clock                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Trailing-edge debounce with an explicit flush.
+ *
+ * `flush()` exists because a debounced autosave that only ever fires on a timer
+ * loses the last change when the tab is hidden or closed — the pagehide path
+ * calls it, and the last edit lands.
+ *
+ * @param {Function} fn
+ * @param {number} waitMs
+ * @param {{setTimeoutFn?:Function, clearTimeoutFn?:Function}} [deps]
+ * @returns {{trigger:Function, flush:Function, cancel:Function, isPending:Function}}
+ */
+function createDebouncer(fn, waitMs, deps) {
+  var d = deps || {};
+  var schedule =
+    typeof d.setTimeoutFn === 'function'
+      ? d.setTimeoutFn
+      : typeof setTimeout === 'function'
+        ? setTimeout
+        : null;
+  var cancelTimer =
+    typeof d.clearTimeoutFn === 'function'
+      ? d.clearTimeoutFn
+      : typeof clearTimeout === 'function'
+        ? clearTimeout
+        : null;
+  var wait = typeof waitMs === 'number' && isFinite(waitMs) && waitMs >= 0 ? waitMs : 0;
+  var handle = null;
+  var pending = false;
+
+  function run() {
+    handle = null;
+    pending = false;
+    if (typeof fn !== 'function') return;
+    try {
+      fn();
+    } catch (err) {
+      // A throwing autosave must not take the interaction that triggered it
+      // down with it; the call site reports its own failures.
+    }
+  }
+
+  return {
+    trigger: function () {
+      pending = true;
+      if (handle !== null && cancelTimer) cancelTimer(handle);
+      if (!schedule) {
+        run();
+        return;
+      }
+      handle = schedule(run, wait);
+    },
+    flush: function () {
+      if (!pending) return false;
+      if (handle !== null && cancelTimer) cancelTimer(handle);
+      run();
+      return true;
+    },
+    cancel: function () {
+      if (handle !== null && cancelTimer) cancelTimer(handle);
+      handle = null;
+      pending = false;
+    },
+    isPending: function () {
+      return pending;
+    },
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Studio shell — two-view switching + lightweight UI preferences             */
 /* -------------------------------------------------------------------------- */
@@ -9466,9 +11657,11 @@ var THEME_LIGHT_CLASS = 'theme-light';
  * way an untouched install starts, and an explicit choice always wins. */
 var DEFAULT_THEME = 'dark';
 
-/* The ONLY localStorage key this app writes (docs/FEATURE-MECHANICS.md §6.4:
- * localStorage is strictly reserved for lightweight UI state; presets and
- * history belong in IndexedDB). */
+/* One of the TWO localStorage keys this app writes (docs/FEATURE-MECHANICS.md
+ * §6.4: localStorage is strictly reserved for lightweight UI state; presets
+ * and prompt history belong in IndexedDB). The other is PROFILES_KEY —
+ * 'suno_profiles' — which §6.2 names verbatim and which holds the same kind of
+ * lightweight state: three slider positions and two short tag lists. */
 var UI_PREFS_KEY = 'suno_ui_prefs';
 
 /*
@@ -11051,15 +13244,21 @@ function createRibbonRenderer(deps) {
       workerStatus.className = 'err';
     }
 
+    /* Does localStorage actually take a write here? Reading the global is not
+       enough — a sandboxed iframe or a blocked file:// origin hands one back
+       that throws on setItem. The answer feeds the status line, which is
+       finished by renderStorageStatus() once the IndexedDB wrapper further
+       down has said whether IT persists too. */
+    let localStoragePersists = false;
     try {
       localStorage.setItem('suno_storage_probe', '1');
       localStorage.removeItem('suno_storage_probe');
-      storageStatus.textContent = 'storage: localStorage ok';
-      storageStatus.className = 'ok';
+      localStoragePersists = true;
     } catch (err) {
-      storageStatus.textContent = 'storage: unavailable';
-      storageStatus.className = 'err';
+      localStoragePersists = false;
     }
+    storageStatus.textContent = localStoragePersists ? 'storage: localStorage ok' : 'storage: unavailable';
+    storageStatus.className = localStoragePersists ? 'ok' : 'err';
 
     /* ---------------- studio shell: views + UI preferences ---------------- */
 
@@ -11366,6 +13565,12 @@ function createRibbonRenderer(deps) {
       onViewChange: function (id) {
         const tab = $('tab-' + id);
         document.title = tab ? baseTitle + ' — ' + tab.textContent.trim() : baseTitle;
+        // A [hidden] element has NO layout, so a virtualized list painted while
+        // the editor was hidden measured a clientHeight of 0 and rendered only
+        // its overscan. Repaint the moment the view is really on screen, or the
+        // user meets a short list over a tall gap until they scroll.
+        // refreshPersistenceLists() is a hoisted declaration further down.
+        if (id === 'editor') refreshPersistenceLists();
       },
     });
 
@@ -12654,6 +14859,12 @@ function createRibbonRenderer(deps) {
             final.limit +
             (final.trimmed ? ' (trimmed to fit).' : '.')
         );
+        // FDD #74: the history bank records SUCCESSFUL copies only. A copy that
+        // never reached the clipboard is not a prompt the user has, so banking
+        // it would put a row in the list for something that did not happen.
+        // appendHistoryEntry() is declared in the persistence section below —
+        // a hoisted function declaration in this same scope.
+        appendHistoryEntry(final.text, final.tags.length);
       };
       copyViaClipboard(final.text).then(done, function () {
         if (copyViaExecCommand(final.text)) done();
@@ -13338,6 +15549,980 @@ function createRibbonRenderer(deps) {
     lastCommitted = structureSnapshotText();
     history.push(structure.toJSON());
     renderStructure();
+
+    /* ---------------- persistence: profiles, history, presets ----------------
+     *
+     * docs/FDD.md #21 (virtualized lists), #74 (history + favouriting),
+     * #77 (workspace profiling), #85 (offline-first), #86 (JSON backup),
+     * #93 (clipboard JSON export), over FEATURE-MECHANICS.md §6.2 and §6.4.
+     *
+     * The stores themselves and every pure rule they follow are top-level
+     * functions (createIdbStore, createVirtualList, serializeWorkspace,
+     * restoreWorkspace, createProfileStore, planPresetImport …) so they are
+     * testable with no DOM at all. What lives HERE is only the wiring: which
+     * element each store paints into, and which gesture triggers which call.
+     * ------------------------------------------------------------------- */
+
+    /* One handle on the whole working set, passed to the serializer rather
+     * than reached for. The cloud API key is deliberately NOT in it — a
+     * snapshot cannot leak a secret it is never handed. */
+    const workspaceRegistry = {
+      promptState: promptState,
+      exclusions: exclusions,
+      structure: structure,
+      sliders: {
+        get: function (axis) {
+          const at = SLIDER_AXES.indexOf(axis);
+          if (at === -1) return null;
+          return sliderValueOrNull(sliderControls[at].input.value);
+        },
+        /* Writing a slider goes through the SAME paint() the drag handler
+         * uses, so restoring a value republishes that axis's tags, updates
+         * the aria-valuetext and repaints the chips — synchronously, which is
+         * what FEATURE-MECHANICS §6.2 requires of a profile load. */
+        set: function (axis, value) {
+          const at = SLIDER_AXES.indexOf(axis);
+          if (at === -1) return;
+          sliderControls[at].input.value = String(Math.round(value));
+          sliderControls[at].paint();
+        },
+      },
+    };
+
+    const idb = createIdbStore({
+      onDegrade: function () {
+        renderStorageStatus();
+      },
+    });
+
+    const historyNote = $('history-persistence');
+
+    /** The one place the two storage answers are turned into one sentence. */
+    function renderStorageStatus() {
+      const durable = idb.isPersistent();
+      storageStatus.textContent =
+        'storage: ' +
+        (localStoragePersists ? 'localStorage' : 'no localStorage') +
+        ' · ' +
+        (durable ? 'IndexedDB' : 'memory only');
+      storageStatus.className = localStoragePersists && durable ? 'ok' : 'err';
+      // The card says it too, in words, where the data actually lives.
+      historyNote.hidden = durable;
+      if (!durable) {
+        historyNote.textContent =
+          'IndexedDB is unavailable in this browser context, so history and presets are ' +
+          'held in memory for this session only — they will not survive a reload. ' +
+          'Export your presets to JSON if you want to keep them.';
+      }
+    }
+
+    /* -- A. Workspace profiles (FDD #77, FEATURE-MECHANICS §6.2) -- */
+
+    const profileStore = createProfileStore({
+      storage: prefsStorage,
+      defaults: DEFAULT_PROFILES,
+    });
+    const profileSelect = $('profile-select');
+    const profileNameInput = $('profile-name');
+    const profileStatus = $('profile-status');
+    const profileSaveBtn = $('btn-profile-save');
+    const profileLoadBtn = $('btn-profile-load');
+    const profileDeleteBtn = $('btn-profile-delete');
+
+    function setProfileStatus(text, tone) {
+      profileStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      profileStatus.textContent = text;
+    }
+
+    /** Repaint the dropdown, keeping (or moving to) a named selection. */
+    function renderProfiles(select) {
+      const profiles = profileStore.list();
+      const wanted = typeof select === 'string' && select ? select : profileSelect.value;
+      profileSelect.textContent = '';
+      if (!profiles.length) {
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = 'no profiles saved';
+        profileSelect.appendChild(none);
+        profileSelect.disabled = true;
+        return;
+      }
+      profileSelect.disabled = false;
+      let match = false;
+      for (let i = 0; i < profiles.length; i += 1) {
+        const option = document.createElement('option');
+        option.value = profiles[i].name;
+        option.textContent = profiles[i].name;
+        if (profiles[i].description) option.title = profiles[i].description;
+        if (profiles[i].name === wanted) match = true;
+        profileSelect.appendChild(option);
+      }
+      if (match) profileSelect.value = wanted;
+    }
+
+    profileSaveBtn.addEventListener('click', function () {
+      const named = validateProfileName(profileNameInput.value);
+      if (!named.ok) {
+        setProfileStatus(named.reason + '.', 'warn');
+        return;
+      }
+      const profile = profileFromWorkspace(named.value, workspaceRegistry);
+      if (!profile) {
+        setProfileStatus('that workspace cannot be saved as a profile.', 'warn');
+        return;
+      }
+      const outcome = profileStore.save(profile);
+      if (!outcome.ok) {
+        setProfileStatus(outcome.reason + '.', 'warn');
+        return;
+      }
+      renderProfiles(outcome.profile.name);
+      profileNameInput.value = '';
+      setProfileStatus(
+        '“' +
+          outcome.profile.name +
+          '” saved — ' +
+          plural(outcome.profile.genres.length, 'genre tag') +
+          ', ' +
+          plural(outcome.profile.metatags.length, 'metatag') +
+          ', three slider positions.' +
+          (outcome.persisted ? '' : ' It will not survive a reload: localStorage refused the write.')
+      );
+    });
+
+    profileLoadBtn.addEventListener('click', function () {
+      const name = profileSelect.value;
+      const profile = name ? profileStore.get(name) : null;
+      if (!profile) {
+        setProfileStatus('pick a profile to load first.', 'warn');
+        return;
+      }
+      /* SYNCHRONOUS by contract (§6.2): the sliders move, the genre section is
+       * replaced, the structure sheet is rebuilt and the 1,000-character gauge
+       * is recomputed by its subscriber — all before this handler returns. */
+      const outcome = applyProfileToWorkspace(profile, workspaceRegistry);
+      if (!outcome.ok) {
+        setProfileStatus(outcome.reason + '.', 'warn');
+        return;
+      }
+      setProfileStatus(
+        '“' +
+          profile.name +
+          '” loaded — ' +
+          plural(outcome.applied.genres, 'genre tag') +
+          ' and ' +
+          plural(outcome.applied.metatags, 'metatag') +
+          ' applied, character budget recalculated.'
+      );
+      toastHost.show('Workspace profile “' + profile.name + '” loaded.');
+    });
+
+    profileDeleteBtn.addEventListener('click', function () {
+      const name = profileSelect.value;
+      if (!name || !profileStore.remove(name)) {
+        setProfileStatus('pick a saved profile to delete first.', 'warn');
+        return;
+      }
+      renderProfiles('');
+      setProfileStatus('“' + name + '” deleted.');
+    });
+
+    /* FIRST-BOOT SEEDING (contract E). Synchronous, and deliberately first:
+     * profiles are localStorage, so they are available before anything async
+     * has had a chance to run. tests/e2e/nightly.js extracts DEFAULT_PROFILES
+     * from this file and checks it against tests/e2e/profiles.json. */
+    const seeding = profileStore.seedDefaults();
+    renderProfiles(seeding.seeded && seeding.names.length ? seeding.names[0] : '');
+    if (seeding.seeded) {
+      setProfileStatus(
+        'Seeded the default profiles: ' +
+          seeding.names.join(' and ') +
+          '. Pick one and press Load.' +
+          (seeding.persisted ? '' : ' (localStorage refused the write, so they are session-only.)')
+      );
+    }
+
+    /* -- B. Prompt history (FDD #74) -- */
+
+    const historyListEl = $('history-list');
+    const historySearch = $('history-search');
+    const historyEmpty = $('history-empty');
+    const historyCounts = $('history-counts');
+    const historyStatus = $('history-status');
+    const historyClearBtn = $('btn-history-clear');
+
+    /** Everything the bank holds, newest first. The view filters and sorts. */
+    let historyRecords = [];
+
+    function setHistoryStatus(text, tone) {
+      historyStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      historyStatus.textContent = text;
+    }
+
+    function countLabel(n, one, many) {
+      return n + ' ' + (n === 1 ? one : many);
+    }
+
+    /** One history row. Fixed height by contract — see VIRTUAL_ROW_HEIGHT. */
+    function buildHistoryRow(record) {
+      const row = document.createElement('div');
+      row.className = 'vrow';
+
+      const main = document.createElement('div');
+      main.className = 'vrow-main';
+      const title = document.createElement('div');
+      title.className = 'vrow-title';
+      title.textContent = record.text;
+      const meta = document.createElement('div');
+      meta.className = 'vrow-meta';
+      meta.textContent =
+        relativeTimeText(record.ts) +
+        ' · ' +
+        plural(record.text.length, 'character') +
+        ' · ' +
+        plural(record.tagCount, 'tag');
+      main.appendChild(title);
+      main.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'vrow-actions';
+
+      const star = document.createElement('button');
+      star.type = 'button';
+      star.className = 'btn-mini btn-star';
+      star.setAttribute('data-focus-key', 'star');
+      star.setAttribute('aria-pressed', record.favorite ? 'true' : 'false');
+      star.textContent = record.favorite ? 'Starred' : 'Star';
+      star.title = record.favorite ? 'Remove from favourites' : 'Keep this prompt at the top';
+      star.setAttribute('aria-label', star.title);
+      star.addEventListener('click', function () {
+        toggleHistoryFavorite(record.id);
+      });
+
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.className = 'btn-mini';
+      restore.setAttribute('data-focus-key', 'restore');
+      restore.textContent = 'Restore';
+      restore.title = 'Put the whole workspace back the way it was for this prompt';
+      restore.addEventListener('click', function () {
+        restoreHistoryEntry(record.id);
+      });
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn-mini';
+      remove.setAttribute('data-focus-key', 'delete');
+      remove.textContent = 'Delete';
+      remove.title = 'Remove this entry from the history bank';
+      remove.addEventListener('click', function () {
+        deleteHistoryEntry(record.id);
+      });
+
+      actions.appendChild(star);
+      actions.appendChild(restore);
+      actions.appendChild(remove);
+      row.appendChild(main);
+      row.appendChild(actions);
+      return row;
+    }
+
+    const historyView = createVirtualList({
+      container: historyListEl,
+      rowHeight: VIRTUAL_ROW_HEIGHT,
+      overscan: VIRTUAL_OVERSCAN_DEFAULT,
+      label: 'Copied prompt history',
+      renderRow: buildHistoryRow,
+      keyOf: function (record) {
+        return record.id;
+      },
+    });
+
+    function renderHistory() {
+      const query = historySearch.value;
+      const visible = sortHistoryRecords(filterHistoryRecords(historyRecords, query));
+      historyView.setItems(visible);
+      historyListEl.hidden = visible.length === 0;
+      historyEmpty.hidden = visible.length > 0;
+      historyEmpty.textContent = historyRecords.length
+        ? 'No banked prompt contains that text.'
+        : 'Nothing banked yet — copy a style prompt and it lands here.';
+
+      let favourites = 0;
+      for (let i = 0; i < historyRecords.length; i += 1) {
+        if (historyRecords[i].favorite) favourites += 1;
+      }
+      historyCounts.textContent =
+        countLabel(historyRecords.length, 'entry', 'entries') +
+        ' · ' +
+        favourites +
+        ' starred · showing ' +
+        visible.length +
+        ' of ' +
+        HISTORY_CAP +
+        ' max';
+    }
+
+    function findHistoryRecord(id) {
+      for (let i = 0; i < historyRecords.length; i += 1) {
+        if (historyRecords[i].id === id) return historyRecords[i];
+      }
+      return null;
+    }
+
+    /**
+     * FDD #74 + the ASSUMPTIONS.md FIFO cap. Called from the style-prompt copy
+     * handler, and only on a SUCCESSFUL copy. Every rejection is handled here,
+     * so nothing escapes as an unhandled promise rejection.
+     */
+    function appendHistoryEntry(text, tagCount) {
+      const record = createHistoryRecord(text, serializeWorkspace(workspaceRegistry), {
+        tagCount: tagCount,
+      });
+      return idb.put(IDB_HISTORY, record).then(
+        function () {
+          const capped = capHistoryRecords([record].concat(historyRecords), HISTORY_CAP);
+          historyRecords = capped.keep;
+          renderHistory();
+          setHistoryStatus(
+            'banked' + (idb.isPersistent() ? '' : ' (memory only — no IndexedDB here)') + '.'
+          );
+          // The overflow leaves the TABLE too, not just the view: a cap that
+          // only hid rows would keep growing the database behind the user.
+          const drops = [];
+          for (let i = 0; i < capped.drop.length; i += 1) {
+            drops.push(idb.delete(IDB_HISTORY, capped.drop[i].id));
+          }
+          return Promise.all(drops).then(
+            function () {
+              return capped.drop.length;
+            },
+            function () {
+              // A failed trim is not a failed copy; the cap is re-applied on
+              // the next append and on the next boot.
+              return 0;
+            }
+          );
+        },
+        function (err) {
+          setHistoryStatus('not banked — ' + errorMessage(err), 'warn');
+          return 0;
+        }
+      );
+    }
+
+    function toggleHistoryFavorite(id) {
+      const record = findHistoryRecord(id);
+      if (!record) return;
+      record.favorite = !record.favorite;
+      renderHistory();
+      ignoreRejection(
+        idb.put(IDB_HISTORY, record).then(null, function (err) {
+          setHistoryStatus('the star did not persist — ' + errorMessage(err), 'warn');
+        })
+      );
+    }
+
+    function deleteHistoryEntry(id) {
+      const kept = [];
+      for (let i = 0; i < historyRecords.length; i += 1) {
+        if (historyRecords[i].id !== id) kept.push(historyRecords[i]);
+      }
+      historyRecords = kept;
+      renderHistory();
+      setHistoryStatus('entry deleted.');
+      ignoreRejection(
+        idb.delete(IDB_HISTORY, id).then(null, function (err) {
+          setHistoryStatus('the deletion did not persist — ' + errorMessage(err), 'warn');
+        })
+      );
+    }
+
+    function restoreHistoryEntry(id) {
+      const record = findHistoryRecord(id);
+      if (!record) return;
+      const outcome = restoreWorkspace(record.snapshot, workspaceRegistry);
+      if (!outcome.ok) {
+        setHistoryStatus('that entry could not be restored — ' + outcome.reason + '.', 'warn');
+        return;
+      }
+      setHistoryStatus(
+        'workspace restored — ' +
+          plural(outcome.applied.tags, 'tag') +
+          ', ' +
+          plural(outcome.applied.exclusions, 'exclusion') +
+          ', ' +
+          plural(outcome.applied.blocks, 'block') +
+          '.'
+      );
+      toastHost.show('Workspace restored from history.');
+    }
+
+    historySearch.addEventListener('input', renderHistory);
+
+    historyClearBtn.addEventListener('click', function () {
+      if (!historyRecords.length) {
+        setHistoryStatus('there is nothing to clear.', 'warn');
+        return;
+      }
+      const had = historyRecords.length;
+      historyRecords = [];
+      renderHistory();
+      setHistoryStatus(countLabel(had, 'entry', 'entries') + ' cleared.');
+      ignoreRejection(
+        idb.clear(IDB_HISTORY).then(null, function (err) {
+          setHistoryStatus('the history table did not clear — ' + errorMessage(err), 'warn');
+        })
+      );
+    });
+
+    /* -- C. Presets, JSON backup and restore (FDD #86, #93) -- */
+
+    const presetNameInput = $('preset-name');
+    const presetSaveBtn = $('btn-preset-save');
+    const presetsListEl = $('presets-list');
+    const presetsEmpty = $('presets-empty');
+    const presetsCounts = $('presets-counts');
+    const presetsStatus = $('presets-status');
+    const presetsExportBtn = $('btn-presets-export');
+    const presetsCopyBtn = $('btn-presets-copy');
+    const presetImportFile = $('preset-import-file');
+    const presetImportText = $('preset-import-text');
+    const presetImportTextBtn = $('btn-preset-import-text');
+
+    /** @type {Array<object>} newest first. */
+    let presetRecords = [];
+
+    function setPresetStatus(text, tone) {
+      presetsStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      presetsStatus.textContent = text;
+    }
+
+    function presetTagCount(record) {
+      const workspace = record && record.workspace;
+      return workspace && isArrayLike(workspace.prompt) ? workspace.prompt.length : 0;
+    }
+
+    function buildPresetRow(record) {
+      const row = document.createElement('div');
+      row.className = 'vrow';
+
+      const main = document.createElement('div');
+      main.className = 'vrow-main';
+      const name = document.createElement('div');
+      name.className = 'vrow-name';
+      name.textContent = record.name;
+      const meta = document.createElement('div');
+      meta.className = 'vrow-meta';
+      meta.textContent =
+        relativeTimeText(record.ts) +
+        ' · ' +
+        plural(presetTagCount(record), 'tag') +
+        ' · ' +
+        plural(
+          record.workspace && isArrayLike(record.workspace.exclusions)
+            ? record.workspace.exclusions.length
+            : 0,
+          'exclusion'
+        );
+      main.appendChild(name);
+      main.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'vrow-actions';
+
+      const star = document.createElement('button');
+      star.type = 'button';
+      star.className = 'btn-mini btn-star';
+      star.setAttribute('data-focus-key', 'star');
+      star.setAttribute('aria-pressed', record.favorite ? 'true' : 'false');
+      star.textContent = record.favorite ? 'Starred' : 'Star';
+      star.title = record.favorite ? 'Remove from favourites' : 'Keep this preset at the top';
+      star.setAttribute('aria-label', star.title);
+      star.addEventListener('click', function () {
+        togglePresetFavorite(record.id);
+      });
+
+      const load = document.createElement('button');
+      load.type = 'button';
+      load.className = 'btn-mini';
+      load.setAttribute('data-focus-key', 'load');
+      load.textContent = 'Load';
+      load.title = 'Replace the workspace with this preset';
+      load.addEventListener('click', function () {
+        loadPreset(record.id);
+      });
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn-mini';
+      remove.setAttribute('data-focus-key', 'delete');
+      remove.textContent = 'Delete';
+      remove.title = 'Delete this preset';
+      remove.addEventListener('click', function () {
+        deletePreset(record.id);
+      });
+
+      actions.appendChild(star);
+      actions.appendChild(load);
+      actions.appendChild(remove);
+      row.appendChild(main);
+      row.appendChild(actions);
+      return row;
+    }
+
+    const presetsView = createVirtualList({
+      container: presetsListEl,
+      rowHeight: VIRTUAL_ROW_HEIGHT,
+      overscan: VIRTUAL_OVERSCAN_DEFAULT,
+      label: 'Saved presets',
+      renderRow: buildPresetRow,
+      keyOf: function (record) {
+        return record.id;
+      },
+    });
+
+    function renderPresets() {
+      // Same ordering rule as the history bank: starred float, newest first.
+      const ordered = sortHistoryRecords(presetRecords);
+      presetsView.setItems(ordered);
+      presetsListEl.hidden = ordered.length === 0;
+      presetsEmpty.hidden = ordered.length > 0;
+      presetsCounts.textContent = countLabel(presetRecords.length, 'preset', 'presets');
+    }
+
+    function findPresetRecord(id) {
+      for (let i = 0; i < presetRecords.length; i += 1) {
+        if (presetRecords[i].id === id) return presetRecords[i];
+      }
+      return null;
+    }
+
+    function presetNames() {
+      const names = [];
+      for (let i = 0; i < presetRecords.length; i += 1) names.push(presetRecords[i].name);
+      return names;
+    }
+
+    presetSaveBtn.addEventListener('click', function () {
+      const named = validatePresetName(presetNameInput.value);
+      if (!named.ok) {
+        setPresetStatus(named.reason + '.', 'warn');
+        return;
+      }
+      const workspace = serializeWorkspace(workspaceRegistry);
+
+      // "Save" over an existing name UPDATES it rather than growing a second
+      // preset the user would then have to tell apart by its timestamp.
+      let record = null;
+      for (let i = 0; i < presetRecords.length; i += 1) {
+        if (presetRecords[i].name.toLowerCase() === named.value.toLowerCase()) {
+          record = presetRecords[i];
+          break;
+        }
+      }
+      const updating = record !== null;
+      if (updating) {
+        record.workspace = workspace;
+        record.ts = Date.now();
+      } else {
+        record = createPresetRecord(named.value, workspace);
+        presetRecords = [record].concat(presetRecords);
+      }
+      renderPresets();
+      presetNameInput.value = '';
+      ignoreRejection(
+        idb.put(IDB_PRESETS, record).then(
+          function () {
+            setPresetStatus(
+              '“' +
+                record.name +
+                '” ' +
+                (updating ? 'updated' : 'saved') +
+                ' — ' +
+                plural(presetTagCount(record), 'tag') +
+                ' and the whole song flow.'
+            );
+          },
+          function (err) {
+            setPresetStatus('the preset did not persist — ' + errorMessage(err), 'warn');
+          }
+        )
+      );
+    });
+
+    function loadPreset(id) {
+      const record = findPresetRecord(id);
+      if (!record) return;
+      const outcome = restoreWorkspace(record.workspace, workspaceRegistry);
+      if (!outcome.ok) {
+        setPresetStatus('“' + record.name + '” could not be loaded — ' + outcome.reason + '.', 'warn');
+        return;
+      }
+      setPresetStatus(
+        '“' +
+          record.name +
+          '” loaded — ' +
+          plural(outcome.applied.tags, 'tag') +
+          ', ' +
+          plural(outcome.applied.exclusions, 'exclusion') +
+          ', ' +
+          plural(outcome.applied.blocks, 'block') +
+          '.'
+      );
+      toastHost.show('Preset “' + record.name + '” loaded.');
+    }
+
+    function togglePresetFavorite(id) {
+      const record = findPresetRecord(id);
+      if (!record) return;
+      record.favorite = !record.favorite;
+      renderPresets();
+      ignoreRejection(
+        idb.put(IDB_PRESETS, record).then(null, function (err) {
+          setPresetStatus('the star did not persist — ' + errorMessage(err), 'warn');
+        })
+      );
+    }
+
+    function deletePreset(id) {
+      const record = findPresetRecord(id);
+      if (!record) return;
+      const kept = [];
+      for (let i = 0; i < presetRecords.length; i += 1) {
+        if (presetRecords[i].id !== id) kept.push(presetRecords[i]);
+      }
+      presetRecords = kept;
+      renderPresets();
+      setPresetStatus('“' + record.name + '” deleted.');
+      ignoreRejection(
+        idb.delete(IDB_PRESETS, id).then(null, function (err) {
+          setPresetStatus('the deletion did not persist — ' + errorMessage(err), 'warn');
+        })
+      );
+    }
+
+    /* FDD #86: the file path. A data: URL on a throwaway anchor — the same
+     * mechanism the MIDI export uses, and for the same reason: no blob URL to
+     * revoke, no network, no library. */
+    presetsExportBtn.addEventListener('click', function () {
+      if (!presetRecords.length) {
+        setPresetStatus('there are no presets to export yet.', 'warn');
+        return;
+      }
+      const json = serializePresetExport(presetRecords);
+      const anchor = document.createElement('a');
+      anchor.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
+      anchor.download = presetBackupFilename();
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setPresetStatus(
+        countLabel(presetRecords.length, 'preset', 'presets') +
+          ' exported as ' +
+          anchor.download +
+          '.'
+      );
+    });
+
+    /* FDD #93: the clipboard path, which is the one that works on mobile where
+     * a data: download is often blocked outright. */
+    presetsCopyBtn.addEventListener('click', function () {
+      if (!presetRecords.length) {
+        setPresetStatus('there are no presets to copy yet.', 'warn');
+        return;
+      }
+      const json = serializePresetExport(presetRecords);
+      const done = function () {
+        setPresetStatus(
+          countLabel(presetRecords.length, 'preset', 'presets') +
+            ' copied as JSON — ' +
+            plural(json.length, 'character') +
+            '.'
+        );
+        toastHost.show('Preset library copied to the clipboard.');
+      };
+      copyViaClipboard(json).then(done, function () {
+        if (copyViaExecCommand(json)) done();
+        else
+          setPresetStatus(
+            'could not reach the clipboard — use Export JSON file instead.',
+            'error'
+          );
+      });
+    });
+
+    /**
+     * Commit an import plan. Per-preset accept/reject counting is FDD #86's
+     * whole point: one malformed preset costs that preset, never the file.
+     */
+    function commitPresetImport(raw, label) {
+      const plan = planPresetImport(raw, presetNames());
+      if (!plan.ok) {
+        setPresetStatus('nothing imported from ' + label + ' — ' + plan.reason + '.', 'warn');
+        return;
+      }
+      if (!plan.accepted.length) {
+        setPresetStatus(
+          'nothing imported from ' +
+            label +
+            ' — all ' +
+            countLabel(plan.counts.rejected, 'preset', 'presets') +
+            ' rejected: ' +
+            describeRejections(plan.rejected),
+          'warn'
+        );
+        return;
+      }
+
+      const added = [];
+      const writes = [];
+      let renamed = 0;
+      for (let i = 0; i < plan.accepted.length; i += 1) {
+        const entry = plan.accepted[i];
+        if (entry.renamedFrom) renamed += 1;
+        const record = createPresetRecord(entry.name, entry.workspace, {
+          favorite: entry.favorite,
+          savedAt: entry.savedAt,
+        });
+        added.push(record);
+        writes.push(idb.put(IDB_PRESETS, record));
+      }
+      presetRecords = added.concat(presetRecords);
+      renderPresets();
+
+      const summary =
+        'Imported ' +
+        plan.counts.accepted +
+        ' of ' +
+        countLabel(plan.counts.total, 'preset', 'presets') +
+        ' from ' +
+        label +
+        (renamed ? ' · ' + countLabel(renamed, 'name', 'names') + ' renamed to avoid a collision' : '') +
+        (plan.counts.rejected
+          ? ' · ' +
+            countLabel(plan.counts.rejected, 'preset', 'presets') +
+            ' rejected: ' +
+            describeRejections(plan.rejected)
+          : '') +
+        '.';
+      setPresetStatus(summary, plan.counts.rejected ? 'warn' : '');
+      toastHost.show(
+        'Imported ' + countLabel(plan.counts.accepted, 'preset', 'presets') + '.',
+        plan.counts.rejected ? 'warn' : 'info'
+      );
+
+      ignoreRejection(
+        Promise.all(writes).then(null, function (err) {
+          setPresetStatus(
+            summary + ' They did not all persist — ' + errorMessage(err),
+            'warn'
+          );
+        })
+      );
+    }
+
+    /** "Neon (not an object), Dusk (structure.blocks must be an array)". */
+    function describeRejections(rejected) {
+      const parts = [];
+      for (let i = 0; i < rejected.length && i < 4; i += 1) {
+        parts.push('“' + rejected[i].name + '” (' + rejected[i].reason + ')');
+      }
+      if (rejected.length > 4) parts.push('and ' + (rejected.length - 4) + ' more');
+      return parts.join(', ');
+    }
+
+    presetImportFile.addEventListener('change', function () {
+      const files = presetImportFile.files;
+      const file = files && files.length ? files[0] : null;
+      if (!file) return;
+      if (typeof FileReader !== 'function') {
+        setPresetStatus(
+          'this browser cannot read files here — paste the JSON below instead.',
+          'warn'
+        );
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function () {
+        commitPresetImport(String(reader.result === null ? '' : reader.result), file.name);
+        presetImportFile.value = '';
+      };
+      reader.onerror = function () {
+        setPresetStatus('could not read ' + file.name + '.', 'warn');
+        presetImportFile.value = '';
+      };
+      try {
+        reader.readAsText(file);
+      } catch (err) {
+        setPresetStatus('could not read ' + file.name + ' — ' + errorMessage(err), 'warn');
+        presetImportFile.value = '';
+      }
+    });
+
+    presetImportTextBtn.addEventListener('click', function () {
+      const raw = presetImportText.value;
+      if (!raw.trim()) {
+        setPresetStatus('paste a backup into the box first.', 'warn');
+        return;
+      }
+      commitPresetImport(raw, 'the pasted backup');
+      presetImportText.value = '';
+    });
+
+    /* -- D. Session autosave (contract F) -- */
+
+    /* Set while a restore is writing into the stores, so the autosave does not
+     * immediately re-save what it has just handed back. */
+    let restoringSession = false;
+
+    const autosave = createDebouncer(function () {
+      if (restoringSession) return;
+      const snapshot = serializeWorkspace(workspaceRegistry);
+      snapshot.id = AUTOSAVE_ID;
+      ignoreRejection(
+        idb.put(IDB_SESSION, snapshot).then(null, function () {
+          // A failed autosave must stay silent: it fires on every edit, and a
+          // toast per keystroke would be worse than the lost draft. The status
+          // line already says whether storage persists at all.
+        })
+      );
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    function scheduleAutosave() {
+      if (restoringSession) return;
+      autosave.trigger();
+    }
+
+    promptState.subscribe(scheduleAutosave);
+    exclusions.subscribe(scheduleAutosave);
+    structure.subscribe(scheduleAutosave);
+
+    /* A debounced save that only ever fires on a timer loses the last edit when
+     * the tab is closed or backgrounded, which is exactly when it matters. */
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('pagehide', function () {
+        autosave.flush();
+      });
+    }
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') autosave.flush();
+    });
+
+    /*
+     * BOOT ORDER (contract F). Profiles were seeded above, synchronously,
+     * because localStorage is synchronous. IndexedDB is not — "before the first
+     * render" is not literally available for it, and faking it with a
+     * synchronous API would be a lie about what the platform does. So the
+     * session lands one task later and repaints through the SAME subscribe
+     * pipeline every other mutation uses. The workspace starts empty, so there
+     * is no flash of a half-built state, and a restore that fails leaves a
+     * clean boot rather than a partial one.
+     */
+    ignoreRejection(
+      idb.ready().then(function () {
+        renderStorageStatus();
+        return idb.get(IDB_SESSION, AUTOSAVE_ID).then(
+          function (record) {
+            if (!record) return;
+            restoringSession = true;
+            let outcome;
+            try {
+              outcome = restoreWorkspace(record, workspaceRegistry);
+            } finally {
+              restoringSession = false;
+            }
+            if (!outcome.ok) {
+              toastHost.show(
+                'Could not restore your last session (' + outcome.reason + ') — starting clean.',
+                'warn'
+              );
+              return;
+            }
+            if (!outcome.applied.tags && !outcome.applied.exclusions && !outcome.applied.blocks) {
+              // An empty autosave is not worth announcing.
+              return;
+            }
+            showRestoredToast(outcome.applied);
+          },
+          function () {
+            toastHost.show('Could not read your last session — starting clean.', 'warn');
+          }
+        );
+      })
+    );
+
+    /** The one toast contract F asks for, with a real dismiss control on it. */
+    function showRestoredToast(applied) {
+      const toast = toastHost.show(
+        'Restored your last session — ' +
+          plural(applied.tags, 'tag') +
+          ', ' +
+          plural(applied.exclusions, 'exclusion') +
+          ', ' +
+          plural(applied.blocks, 'block') +
+          '.'
+      );
+      if (!toast) return;
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'btn-mini toast-dismiss';
+      dismiss.textContent = 'Dismiss';
+      dismiss.addEventListener('click', function () {
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+      });
+      toast.appendChild(dismiss);
+    }
+
+    /* Both tables are read once, at boot, and every rejection is handled. */
+    ignoreRejection(
+      idb.getAll(IDB_HISTORY).then(
+        function (records) {
+          // The cap is re-applied on read, so a bank left oversized by a
+          // half-finished trim in an earlier session heals itself.
+          const capped = capHistoryRecords(records, HISTORY_CAP);
+          historyRecords = capped.keep;
+          renderHistory();
+          for (let i = 0; i < capped.drop.length; i += 1) {
+            ignoreRejection(idb.delete(IDB_HISTORY, capped.drop[i].id));
+          }
+        },
+        function (err) {
+          setHistoryStatus('the history bank could not be read — ' + errorMessage(err), 'warn');
+        }
+      )
+    );
+
+    ignoreRejection(
+      idb.getAll(IDB_PRESETS).then(
+        function (records) {
+          presetRecords = records;
+          renderPresets();
+        },
+        function (err) {
+          setPresetStatus('the preset library could not be read — ' + errorMessage(err), 'warn');
+        }
+      )
+    );
+
+    /*
+     * Repaint both windowed lists against a REAL viewport.
+     *
+     * Boot paints them while #view-editor is still [hidden], and a hidden
+     * element has no layout at all: clientHeight reads 0, so virtualWindow()
+     * has nothing to size a window from and renders the overscan alone. The
+     * view manager calls this on every switch INTO the editor, which is the
+     * first moment the scroller has a height to measure. Cheap enough to be
+     * unconditional: it is one windowed repaint of at most ~20 rows.
+     */
+    function refreshPersistenceLists() {
+      historyView.refresh();
+      presetsView.refresh();
+    }
+
+    renderStorageStatus();
+    renderHistory();
+    renderPresets();
 
     applyPreset();
     syncModeUi();

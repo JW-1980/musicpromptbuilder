@@ -43,7 +43,7 @@ const INDEX = path.resolve(__dirname, '..', 'index.html');
  * two palettes must come before the Code Mode override, which wins on equal
  * specificity purely by sitting last. */
 const TOKEN_BLOCK_SELECTORS = [':root {', '.theme-light {', '.high-contrast {'];
-const EXPECTED_VERSION = '0.11.0';
+const EXPECTED_VERSION = '0.12.0';
 const PREFS_KEY = 'suno_ui_prefs';
 
 /* -------------------------------------------------------------------------- */
@@ -752,7 +752,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the Direct MIDI Export release`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the persistence release (IndexedDB, virtualized lists, JSON backup)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });
