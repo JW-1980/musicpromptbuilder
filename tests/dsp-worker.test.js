@@ -978,12 +978,12 @@ function feedNotes(tracker, midiNotes, count, startMs, stepMs) {
   return tracker;
 }
 
-s.test('DSP_ENGINE_VERSION is 0.4.0 — the harmonic-valence release', () => {
+s.test('DSP_ENGINE_VERSION is 0.5.0 — the pitch-contour recorder release', () => {
   const w = loadWorkerSandbox(INDEX);
   assert.strictEqual(
     w.evaluate('DSP_ENGINE_VERSION'),
-    '0.4.0',
-    'the valence classifier ships as DSP engine 0.4.0'
+    '0.5.0',
+    'the contour recorder (Direct MIDI Export) ships as DSP engine 0.5.0'
   );
 });
 

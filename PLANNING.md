@@ -2,13 +2,13 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Develop the `.mid` export function, translating the tracked pitch contour into MIDI events for direct import into Ableton or FL Studio.
+- [ ] Implement `localStorage` state persistence, virtualized DOM lists for presets, and JSON backup/restore.
 
 ## NEXT
-- [ ] Implement `localStorage` state persistence, virtualized DOM lists for presets, and JSON backup/restore.
 - [ ] Run the comprehensive nightly E2E verification across all 50 features and tag `v1.0.0-release`.
 
 ## DONE
+- [x] Develop the `.mid` export function, translating the tracked pitch contour into MIDI events for direct import into Ableton or FL Studio.
 - [x] Implement the Live 1,000-Character Limiter, Token Compactor, and Tag Conflict Resolution Engine. *(GATE 0 fully closed.)*
 - [x] Build the Drag-and-Drop Structure Builder (`[Intro]`, `[Chorus]`, etc.) with the `Ctrl+Z` undo/redo stack.
 - [x] Implement Layman Vibe Translators (Scene generator, 3-axis physical sliders, Safe-Mode artist dissector).

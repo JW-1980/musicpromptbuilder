@@ -668,6 +668,32 @@
     .btn-record.is-live .rec-dot { animation: none; }
   }
 
+  /* Direct MIDI Export (docs/FEATURE-MECHANICS.md §1.1, FDD #10). Shares the
+     record button's shape — it is the other half of the same capture panel —
+     but never its armed state, so it carries a note glyph instead of the
+     recording dot.
+
+     A disabled export says so with a dashed edge and dim text, NEVER with
+     opacity: Code Mode's whole job is legibility, and a faded control is the
+     first thing it loses. Same rule as .btn-mini[disabled] further down. */
+  .btn-record[disabled] {
+    color: var(--text-dim);
+    border-style: dashed;
+    cursor: not-allowed;
+  }
+
+  .btn-record[disabled]:hover { border-color: var(--surface-border); }
+
+  .midi-row { margin-top: 12px; }
+
+  .btn-midi .midi-glyph {
+    font-size: 1.05rem;
+    line-height: 1;
+    color: var(--accent-cyan);
+  }
+
+  .btn-midi[disabled] .midi-glyph { color: var(--text-dim); }
+
   .capture-readout {
     font-family: var(--font-mono);
     font-size: 0.78rem;
@@ -2005,6 +2031,16 @@
           chunks 0 · last ack —
         </span>
       </div>
+      <div class="capture-controls midi-row">
+        <button type="button" id="btn-midi" class="btn-record btn-midi" disabled
+                aria-label="Export the captured melody as a MIDI file">
+          <span class="midi-glyph" aria-hidden="true">♪</span>
+          <span id="btn-midi-label">Export MIDI</span>
+        </button>
+        <span id="midi-readout" class="capture-readout" role="status" aria-live="polite">
+          no melody captured yet
+        </span>
+      </div>
       <div id="mic-help" class="mic-help" role="region" aria-label="Microphone troubleshooting" hidden>
         <h3 class="mic-help-title">Microphone unavailable</h3>
         <p id="mic-help-lead" class="mic-help-lead"></p>
@@ -2456,11 +2492,13 @@
  *   { type: 'ping' }
  *   { type: 'audio-chunk', seq: number, sampleRate: number, samples: Float32Array }
  *   { type: 'analyze',     seq: number, sampleRate: number, samples: Float32Array }
+ *   { type: 'contour',     seq?: number }
  * Message protocol (worker -> main):
  *   { type: 'pong', engine: 'dsp', version }
  *   { type: 'chunk-ack', seq, samples }      // samples = frame count received
  *   { type: 'analysis', seq, samples, rms, gated, pitchHz, midiNote, snappedHz,
  *                       bpm, onsets, valence }
+ *   { type: 'contour', frames: [{n, t}], dropped, seq? }
  *   { type: 'error', error }
  *
  * 'audio-chunk' is the transport half of the capture pipeline: it proves the
@@ -2468,24 +2506,34 @@
  * without a copy). It is kept as-is so the transport can be exercised on its
  * own. 'analyze' is the full DSP pass over the same payload.
  *
+ * 'contour' hands back the pitch trajectory this worker recorded across the
+ * session — one entry per analysed frame, `n` being the frame's MIDI note or
+ * `null` for a gated/unvoiced one, `t` the capture-clock timestamp in ms. It
+ * is the tracking half of Direct MIDI Export (docs/FEATURE-MECHANICS.md §1.1:
+ * "the Web Worker tracks F0 and stores it in an array alongside timestamp
+ * deltas"). The FILE is built on the main thread — the worker tracks, it does
+ * not encode.
+ *
  * ANTI-SIMULATION: every reported number is measured from the caller's samples.
  * A gated (too quiet), unvoiced or ambiguous frame reports `null` — never a
  * plausible-looking Hz or tempo. There is no Math.random() anywhere below.
  *
  * STATE POLICY (documented choice): every DSP routine here is a pure function.
- * Two quantities need history across chunks — tempo and harmonic valence — so
- * each owns a tracker object: `createBpmTracker(sampleRate)` and
- * `createValenceTracker()`. `handleMessage(msg, tracker, valence)` takes both
- * as explicit arguments and never touches a module-level mutable, which keeps
- * the handler unit-testable and deterministic. The `self.onmessage` closure at
- * the bottom owns the single live pair and passes them in (rebuilding on a
- * sample-rate change, resetting when a new capture session starts at seq 0).
- * Called WITHOUT them, 'analyze' still reports rms/pitch and reports
- * `bpm: null` / `valence: null`, because without cross-chunk history there is
- * no measured tempo and no accumulated pitch-class histogram to report.
+ * Three quantities need history across chunks — tempo, harmonic valence and
+ * the pitch contour — so each owns a tracker object: `createBpmTracker(
+ * sampleRate)`, `createValenceTracker()` and `createContourRecorder()`.
+ * `handleMessage(msg, tracker, valence, contour)` takes all three as explicit
+ * arguments and never touches a module-level mutable, which keeps the handler
+ * unit-testable and deterministic. The `self.onmessage` closure at the bottom
+ * owns the single live trio and passes them in (rebuilding on a sample-rate
+ * change, resetting when a new capture session starts at seq 0). Called
+ * WITHOUT them, 'analyze' still reports rms/pitch and reports `bpm: null` /
+ * `valence: null`, because without cross-chunk history there is no measured
+ * tempo and no accumulated pitch-class histogram to report; 'contour' answers
+ * with an empty frame list, because nothing was recorded.
  */
 
-const DSP_ENGINE_VERSION = '0.4.0';
+const DSP_ENGINE_VERSION = '0.5.0';
 
 /* --- Algorithm contracts (docs/FEATURE-MECHANICS.md §1.2-§1.4) ------------ */
 
@@ -2528,6 +2576,14 @@ const VALENCE_THIRD_FULL_SUPPORT = 3;
 const VALENCE_MAX_NOTES = 2048;
 /** Pitch-class names, index = MIDI note number modulo 12. */
 const PITCH_CLASS_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+/* --- Pitch-contour recorder contracts (docs/FEATURE-MECHANICS.md §1.1) ---- */
+
+/** Hard cap on retained contour frames. One 2048-sample frame at 44.1 kHz is
+ *  ~46.4 ms, so 13000 frames is a little over ten minutes of continuous
+ *  capture. Past that the OLDEST frame is dropped and the drop is COUNTED and
+ *  reported, so a truncated export is visible rather than silent. */
+const CONTOUR_MAX_FRAMES = 13000;
 
 /**
  * True for anything indexable with a numeric `.length` — Float32Array, plain
@@ -3186,6 +3242,120 @@ function createValenceTracker(options) {
 }
 
 /* ------------------------------------------------------------------------- *
+ * Pitch-contour recorder (docs/FEATURE-MECHANICS.md §1.1, docs/FDD.md #10)
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Pitch-contour recorder: the THIRD (and last) stateful object in this worker.
+ *
+ * §1.1 step 1 is explicit — "the Web Worker tracks F0 and stores it in an array
+ * alongside timestamp deltas". This is that array. One entry per ANALYSED
+ * frame, in capture order:
+ *
+ *   { n: number|null,  the frame's MIDI note number, or null
+ *     t: number }      capture-clock timestamp in ms of the frame's START
+ *
+ * `n` is null for exactly the frames that had no pitch to report: a frame the
+ * RMS gate rejected, an unvoiced frame YIN found no period in, and a frequency
+ * that maps outside the 0-127 MIDI range. A rest is recorded AS a rest — it is
+ * what ends the note before it — rather than being skipped, which would silently
+ * glue two separate notes into one long one.
+ *
+ * CLOCK: the recorder owns its own capture clock, advanced by each frame's own
+ * duration (samples / sampleRate). It is therefore independent of wall time and
+ * of how fast the main thread happens to poll, which is what makes the exported
+ * MIDI durations reproducible.
+ *
+ * MEMORY: at most `limit` frames are retained (CONTOUR_MAX_FRAMES ~= 10 minutes
+ * of capture). Beyond that the OLDEST entry is dropped and `dropped()` counts
+ * it, so a truncated contour is reported rather than hidden. Dropping is O(1) —
+ * the head index simply advances — and the backing array is compacted only once
+ * the dead prefix has grown to the size of the window itself, which makes the
+ * amortised cost per frame constant.
+ *
+ * @param {{limit?:number}} [options]
+ * @returns {{push:Function, frames:Function, count:Function, dropped:Function,
+ *            nowMs:Function, reset:Function, limit:number}}
+ */
+function createContourRecorder(options) {
+  const o = options || {};
+  const limit = isPositiveNumber(o.limit) ? Math.floor(o.limit) : CONTOUR_MAX_FRAMES;
+
+  /** @type {Array<{n:number|null, t:number}>} */
+  let entries = [];
+  let head = 0;
+  let clock = 0;
+  let dropped = 0;
+
+  function live() {
+    return entries.length - head;
+  }
+
+  return {
+    limit: limit,
+
+    /**
+     * Record one analysed frame at the current clock, then advance the clock by
+     * that frame's duration.
+     *
+     * @param {number|null} midiNote null for a gated or unvoiced frame
+     * @param {number} [durationMs] the frame's own length; a non-positive or
+     *        missing value records the frame but does not move the clock
+     * @returns {{n:number|null, t:number}} the entry as recorded
+     */
+    push: function (midiNote, durationMs) {
+      const rounded =
+        typeof midiNote === 'number' && isFinite(midiNote) ? Math.round(midiNote) : null;
+      // A note number MIDI cannot express is not a note. Recording it as a rest
+      // is honest; rounding it into range would export a pitch nobody hummed.
+      const n = rounded !== null && rounded >= 0 && rounded <= 127 ? rounded : null;
+      const entry = { n: n, t: clock };
+      entries.push(entry);
+      if (isPositiveNumber(durationMs)) clock += durationMs;
+      if (live() > limit) {
+        head += 1;
+        dropped += 1;
+        if (head >= limit) {
+          entries = entries.slice(head);
+          head = 0;
+        }
+      }
+      return entry;
+    },
+
+    /** Copy of the retained contour, oldest first. Safe to structured-clone. */
+    frames: function () {
+      const out = [];
+      for (let i = head; i < entries.length; i += 1) {
+        out.push({ n: entries[i].n, t: entries[i].t });
+      }
+      return out;
+    },
+
+    /** Frames currently retained. */
+    count: function () {
+      return live();
+    },
+
+    /** Frames discarded to stay under the cap. Never hidden from the caller. */
+    dropped: function () {
+      return dropped;
+    },
+
+    nowMs: function () {
+      return clock;
+    },
+
+    reset: function () {
+      entries = [];
+      head = 0;
+      clock = 0;
+      dropped = 0;
+    },
+  };
+}
+
+/* ------------------------------------------------------------------------- *
  * Message protocol
  * ------------------------------------------------------------------------- */
 
@@ -3197,8 +3367,11 @@ function createValenceTracker(options) {
  * @param {number} sampleRate
  * @param {object} [tracker] a createBpmTracker() instance
  * @param {object} [valenceTracker] a createValenceTracker() instance
+ * @param {object} [contour] a createContourRecorder() instance
  */
-function analyzeFrame(samples, sampleRate, tracker, valenceTracker) {
+function analyzeFrame(samples, sampleRate, tracker, valenceTracker, contour) {
+  const sr = isPositiveNumber(sampleRate) ? sampleRate : 44100;
+  const hasSamples = isArrayLike(samples) && samples.length > 0;
   const level = rms(samples);
   const gated = isGated(level);
 
@@ -3206,14 +3379,19 @@ function analyzeFrame(samples, sampleRate, tracker, valenceTracker) {
   if (!gated) pitchHz = yinPitch(samples, sampleRate);
   const midiNote = pitchHz === null ? null : midiNoteFromHz(pitchHz);
 
+  // The contour records EVERY analysed frame, voiced or not (§1.1): the null
+  // entries are what separate one note from the next when the runs are grouped.
+  if (contour && typeof contour.push === 'function' && hasSamples) {
+    contour.push(midiNote, (samples.length / sr) * 1000);
+  }
+
   const bpmSource = tracker && typeof tracker.push === 'function' ? tracker.push(samples) : null;
 
   let valence = null;
   if (valenceTracker && typeof valenceTracker.classify === 'function') {
     // Every frame advances the window, voiced or not: the histogram decays on
     // the capture clock, so a key really does fade during silence.
-    if (typeof valenceTracker.advance === 'function' && isArrayLike(samples) && samples.length > 0) {
-      const sr = isPositiveNumber(sampleRate) ? sampleRate : 44100;
+    if (typeof valenceTracker.advance === 'function' && hasSamples) {
       valenceTracker.advance((samples.length / sr) * 1000);
     }
     // Only a frame that cleared the gate AND resolved to a real 12-TET note may
@@ -3246,8 +3424,9 @@ function analyzeFrame(samples, sampleRate, tracker, valenceTracker) {
  * @param {*} msg
  * @param {object} [tracker] tempo tracker owned by the caller
  * @param {object} [valenceTracker] valence tracker owned by the caller
+ * @param {object} [contour] contour recorder owned by the caller
  */
-function handleMessage(msg, tracker, valenceTracker) {
+function handleMessage(msg, tracker, valenceTracker, contour) {
   if (!msg || typeof msg.type !== 'string') {
     return { type: 'error', error: 'malformed message' };
   }
@@ -3277,7 +3456,7 @@ function handleMessage(msg, tracker, valenceTracker) {
         return { type: 'error', error: 'analyze: sampleRate must be a positive number' };
       }
       const sr = isPositiveNumber(msg.sampleRate) ? msg.sampleRate : 44100;
-      const result = analyzeFrame(msg.samples, sr, tracker, valenceTracker);
+      const result = analyzeFrame(msg.samples, sr, tracker, valenceTracker, contour);
       return {
         type: 'analysis',
         seq: msg.seq,
@@ -3293,6 +3472,25 @@ function handleMessage(msg, tracker, valenceTracker) {
         valence: result.valence,
       };
     }
+    case 'contour': {
+      // `seq` is optional and echoed back so a caller can pair the reply with
+      // the session it asked about. Present-but-not-a-number is a caller bug,
+      // not "a contour with no seq", so it is refused rather than ignored.
+      if (msg.seq !== undefined && (typeof msg.seq !== 'number' || !isFinite(msg.seq))) {
+        return { type: 'error', error: 'contour: seq must be a finite number when present' };
+      }
+      const usable =
+        contour && typeof contour.frames === 'function' && typeof contour.dropped === 'function';
+      // No recorder means no capture session has been analysed yet. An empty
+      // contour is the honest answer; an error would imply something broke.
+      const reply = {
+        type: 'contour',
+        frames: usable ? contour.frames() : [],
+        dropped: usable ? contour.dropped() : 0,
+      };
+      if (msg.seq !== undefined) reply.seq = msg.seq;
+      return reply;
+    }
     default:
       return { type: 'error', error: 'unknown message type: ' + msg.type };
   }
@@ -3302,6 +3500,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
   // The closure owns the live trackers; handleMessage stays pure.
   let sessionTracker = null;
   let sessionValence = null;
+  let sessionContour = null;
 
   self.onmessage = function (e) {
     const msg = e.data;
@@ -3310,15 +3509,18 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
       if (!sessionTracker || sessionTracker.sampleRate !== sr) {
         sessionTracker = createBpmTracker(sr);
         sessionValence = createValenceTracker();
+        sessionContour = createContourRecorder();
       } else if (msg.seq === 0) {
         // seq restarts at 0 for every capture session (see #app-main), so the
-        // previous session's beats and key must not leak into this one.
+        // previous session's beats, key and melody must not leak into this one.
         sessionTracker.reset();
         if (sessionValence) sessionValence.reset();
         else sessionValence = createValenceTracker();
+        if (sessionContour) sessionContour.reset();
+        else sessionContour = createContourRecorder();
       }
     }
-    self.postMessage(handleMessage(msg, sessionTracker, sessionValence));
+    self.postMessage(handleMessage(msg, sessionTracker, sessionValence, sessionContour));
   };
 }
 </script>
@@ -3334,7 +3536,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.11.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -3718,6 +3920,462 @@ function createAudioCapture(deps) {
       return readyPromise || Promise.resolve(state);
     },
   };
+}
+
+/* ==========================================================================
+ * DIRECT MIDI EXPORT — docs/FEATURE-MECHANICS.md §1.1, docs/FDD.md #10 / #78.
+ *
+ * A hummed melody leaves this app as a real .mid file that Ableton Live, FL
+ * Studio, Logic and Reaper open directly. §1.1 is categorical about how:
+ *
+ *   "The agent cannot use external MIDI libraries. It must construct a
+ *    base64-encoded Standard MIDI File (SMF) format 0 directly in memory."
+ *
+ * So every byte below is written by hand. There is no library, no polyfill and
+ * no `btoa` — the base64 encoder is here too, because the Node vm sandbox the
+ * tests run in has no `btoa` and a function that only works in one of the two
+ * environments is a function that is only half tested.
+ *
+ * DIVISION OF LABOUR. The WORKER tracks (F0 + timestamps, see
+ * createContourRecorder in #dsp-worker-src); the MAIN THREAD builds the file.
+ * The worker never encodes and this section never analyses audio, so each half
+ * can be tested against the other's recorded output rather than against a mock.
+ *
+ * PIPELINE:
+ *   worker 'contour' reply  ->  groupContourToNotes()  ->  buildSmf0()
+ *                           ->  bytesToBase64()        ->  data:audio/midi URL
+ *
+ * FILE LAYOUT PRODUCED (SMF format 0, one track):
+ *   MThd  len 6   format 0, ntrks 1, division = ppq ticks per quarter note
+ *   MTrk  len N   delta 0  FF 51 03 tttttt   set-tempo (us per quarter note)
+ *                 delta 0  FF 03 ll <text>   sequence/track name
+ *                 delta d  9c nn vv          note_on   (channel c)
+ *                 delta d  8c nn 00          note_off
+ *                 ...
+ *                 delta 0  FF 2F 00          end of track
+ * ========================================================================== */
+
+/* Notes shorter than this are DROPPED (documented choice).
+ *
+ * One analysis frame is ~46 ms, so a "note" of one or two frames is shorter
+ * than any note a human can deliberately sing. What actually produces those is
+ * the pitch tracker itself: a single frame landing on an octave error or on the
+ * boundary between two semitones during a glide. Exporting them would fill a
+ * DAW's piano roll with 40 ms grace notes nobody hummed, which is worse than
+ * useless — it is wrong. 90 ms is just over two frames: long enough to require
+ * evidence from more than one frame, short enough to keep a fast sung run
+ * (90 ms per note is a 16th at 166 BPM). */
+const MIDI_MIN_NOTE_MS = 90;
+/* Fallback length for the final note of a contour too short to measure its own
+ * frame rate: one 2048-sample frame at 44.1 kHz (~46.4 ms). */
+const MIDI_FALLBACK_FRAME_MS = (CAPTURE_FFT_SIZE / 44100) * 1000;
+/* Tempo written when the session measured none. 120 BPM is the MIDI file
+ * default a DAW assumes anyway when a file carries no tempo event; writing it
+ * explicitly (and SAYING SO in the UI) beats omitting the event and letting the
+ * host guess silently. */
+const MIDI_DEFAULT_BPM = 120;
+/* Ticks per quarter note. 480 is the ubiquitous DAW default (Live, FL, Logic,
+ * Reaper all import it without resampling) and divides cleanly by 2/3/4/5/6/8. */
+const MIDI_DEFAULT_PPQ = 480;
+/* Note-on velocity. A hum carries no dynamics we can honestly measure — RMS is
+ * microphone-gain-dependent — so one constant, mezzo-forte, mid-scale value is
+ * used rather than a fabricated dynamic curve. */
+const MIDI_DEFAULT_VELOCITY = 96;
+/* What the track is called in the DAW's track list. */
+const MIDI_TRACK_NAME = 'SunoPrompt hum';
+/* Stem of every exported filename (FDD #78: DAW-ready naming). */
+const MIDI_FILENAME_STEM = 'sunoprompt-hum';
+/* RFC 4648 §4 alphabet — the standard one, not the URL-safe variant. */
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * Median of a numeric list. Median, not mean, so one abnormally long gap (a
+ * dropped frame, a stalled timer) cannot stretch the estimate.
+ * @param {ArrayLike<number>} values
+ * @returns {number|null} null when there is no usable number at all
+ */
+function medianOfNumbers(values) {
+  if (!isArrayLike(values) || values.length === 0) return null;
+  const sorted = [];
+  for (let i = 0; i < values.length; i += 1) {
+    const v = values[i];
+    if (typeof v === 'number' && isFinite(v)) sorted.push(v);
+  }
+  if (sorted.length === 0) return null;
+  sorted.sort(function (a, b) {
+    return a - b;
+  });
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Group a recorded pitch contour into notes — §1.1 step 2, verbatim: "groups
+ * consecutive identical note numbers into a single MIDI note_on and note_off
+ * event pair".
+ *
+ * RULES, in the order they apply to each frame:
+ *   same note number as the open note  -> the run continues; ONE note, not two
+ *   different note number              -> the open note ends HERE, the new one
+ *                                         starts HERE (no gap is invented)
+ *   null (gated / unvoiced / unmappable) -> the open note ends here; silence
+ *   end of contour with a note still open -> it ends one median frame-gap after
+ *                                         the last frame, because capture
+ *                                         stopped while it was still sounding
+ *                                         and its true end was never observed
+ *
+ * Then every note shorter than `minDurationMs` is dropped — see the
+ * MIDI_MIN_NOTE_MS comment for why sub-frame blips are tracker noise, not
+ * intent.
+ *
+ * @param {ArrayLike<{n:number|null, t:number}>} frames worker 'contour' frames
+ * @param {{minDurationMs?:number}} [opts]
+ * @returns {Array<{note:number, startMs:number, durationMs:number}>} ascending
+ *          by startMs, never overlapping
+ */
+function groupContourToNotes(frames, opts) {
+  const o = opts || {};
+  const minDurationMs =
+    typeof o.minDurationMs === 'number' && isFinite(o.minDurationMs) && o.minDurationMs >= 0
+      ? o.minDurationMs
+      : MIDI_MIN_NOTE_MS;
+
+  if (!isArrayLike(frames) || frames.length === 0) return [];
+
+  // Normalise first. A frame without a finite timestamp is not a frame and is
+  // discarded outright; a frame whose note is not an integer in 0..127 is a
+  // REST, exactly like a gated frame — a pitch MIDI cannot express must not be
+  // rounded into one it can.
+  const points = [];
+  for (let i = 0; i < frames.length; i += 1) {
+    const f = frames[i];
+    if (!f || typeof f !== 'object') continue;
+    if (typeof f.t !== 'number' || !isFinite(f.t)) continue;
+    let n = typeof f.n === 'number' && isFinite(f.n) ? Math.round(f.n) : null;
+    if (n !== null && (n < 0 || n > 127)) n = null;
+    points.push({ n: n, t: f.t });
+  }
+  if (points.length === 0) return [];
+
+  // Defensive: the recorder emits frames in capture order, but a caller that
+  // spliced two sessions together would not. Sorting costs nothing on already
+  // sorted input and guarantees every duration below is non-negative.
+  points.sort(function (a, b) {
+    return a.t - b.t;
+  });
+
+  const gaps = [];
+  for (let i = 1; i < points.length; i += 1) {
+    const d = points[i].t - points[i - 1].t;
+    if (d > 0) gaps.push(d);
+  }
+  const measuredGap = medianOfNumbers(gaps);
+  const medianGap =
+    measuredGap !== null && measuredGap > 0 ? measuredGap : MIDI_FALLBACK_FRAME_MS;
+
+  const notes = [];
+  let open = null;
+
+  function close(endMs) {
+    if (open === null) return;
+    const durationMs = endMs - open.startMs;
+    if (durationMs >= minDurationMs) {
+      notes.push({ note: open.note, startMs: open.startMs, durationMs: durationMs });
+    }
+    open = null;
+  }
+
+  for (let i = 0; i < points.length; i += 1) {
+    const p = points[i];
+    if (p.n === null) {
+      close(p.t);
+      continue;
+    }
+    if (open === null) {
+      open = { note: p.n, startMs: p.t };
+      continue;
+    }
+    if (open.note !== p.n) {
+      close(p.t);
+      open = { note: p.n, startMs: p.t };
+    }
+    // Identical note number: the run continues. This IS the grouping rule.
+  }
+  close(points[points.length - 1].t + medianGap);
+
+  return notes;
+}
+
+/**
+ * MIDI variable-length quantity: 7 bits per byte, big-endian, every byte but
+ * the last carrying the continuation bit 0x80. The format defines values
+ * 0..0x0FFFFFFF (four bytes); anything outside that band cannot be encoded, so
+ * it is CLAMPED into it rather than emitted as a byte sequence a DAW would
+ * mis-parse and then read the rest of the track from the wrong offset.
+ *
+ * A non-finite or non-numeric input encodes as 0, not as the maximum: it
+ * carries no information, and 0 is the neutral delta, whereas 0x0FFFFFFF would
+ * shove the event years into the future and destroy the rest of the track.
+ *
+ * @param {number} n
+ * @returns {number[]} 1-4 bytes
+ */
+function encodeVlq(n) {
+  let value = typeof n === 'number' && isFinite(n) ? Math.floor(n) : 0;
+  if (value < 0) value = 0;
+  if (value > 0x0fffffff) value = 0x0fffffff;
+  // Division, not >>: the shift operators coerce to int32, and the intent here
+  // is base-128 digits, which division states directly.
+  const out = [value % 128];
+  value = Math.floor(value / 128);
+  while (value > 0) {
+    out.unshift((value % 128) | 0x80);
+    value = Math.floor(value / 128);
+  }
+  return out;
+}
+
+/**
+ * Printable-ASCII bytes of `text`. A MIDI meta event's text field is BYTES, not
+ * UTF-16 code units, and the format defines no encoding for them. Anything
+ * outside 0x20..0x7E is dropped rather than truncated to a wrong byte, so a DAW
+ * shows a short name instead of mojibake.
+ * @param {string} text
+ * @returns {number[]}
+ */
+function midiTextBytes(text) {
+  const out = [];
+  const s = text === undefined || text === null ? '' : String(text);
+  for (let i = 0; i < s.length; i += 1) {
+    const code = s.charCodeAt(i);
+    if (code >= 0x20 && code <= 0x7e) out.push(code);
+  }
+  return out;
+}
+
+/**
+ * Build a complete Standard MIDI File, format 0, in memory.
+ *
+ * TICK CONVERSION: ticks = round(ms * ppq * bpm / 60000). One quarter note is
+ * 60000/bpm ms and ppq ticks, so this is just "how many quarter notes is this,
+ * times ticks per quarter". The tempo meta event carries the SAME bpm, so a
+ * DAW placing the notes on its grid lands them exactly where they were hummed.
+ *
+ * OUT-OF-RANGE NOTES ARE REJECTED, NOT CLAMPED (documented choice). A note
+ * number outside 0..127 has no MIDI representation; clamping it would write a
+ * pitch the user never hummed and present it as a measurement, which
+ * docs/ENGINEERING-STANDARD.md §1.2 forbids. Dropping loses the note and says
+ * nothing false about it. In practice this can never fire on real capture — the
+ * worker's F0 band is 65..1050 Hz, i.e. MIDI 36..84 — so it only guards against
+ * a caller passing junk.
+ *
+ * OVERLAP: groupContourToNotes() cannot produce overlapping notes (a note only
+ * ends where the next begins). buildSmf0 does not rely on that: it sorts the
+ * notes by start time, sorts the resulting event stream by tick with note_off
+ * ordered before note_on at an equal tick, and clamps any negative delta to 0.
+ * A hand-built overlapping note list therefore still yields a valid file.
+ *
+ * @param {Array<{note:number, startMs:number, durationMs:number}>} notes
+ * @param {{bpm?:number, ppq?:number, velocity?:number, channel?:number,
+ *          trackName?:string|null}} [opts]
+ * @returns {Uint8Array} the complete file
+ */
+function buildSmf0(notes, opts) {
+  const o = opts || {};
+  const bpm = typeof o.bpm === 'number' && isFinite(o.bpm) && o.bpm > 0 ? o.bpm : MIDI_DEFAULT_BPM;
+  const ppq =
+    typeof o.ppq === 'number' && isFinite(o.ppq) && o.ppq >= 1 && o.ppq <= 32767
+      ? Math.floor(o.ppq)
+      : MIDI_DEFAULT_PPQ;
+  const velocity =
+    typeof o.velocity === 'number' && isFinite(o.velocity) && o.velocity >= 1 && o.velocity <= 127
+      ? Math.floor(o.velocity)
+      : MIDI_DEFAULT_VELOCITY;
+  const channel =
+    typeof o.channel === 'number' && isFinite(o.channel) && o.channel >= 0 && o.channel <= 15
+      ? Math.floor(o.channel)
+      : 0;
+  const trackName =
+    o.trackName === null ? null : typeof o.trackName === 'string' ? o.trackName : MIDI_TRACK_NAME;
+
+  function toTicks(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms <= 0) return 0;
+    return Math.round((ms * ppq * bpm) / 60000);
+  }
+
+  const usable = [];
+  const list = isArrayLike(notes) ? notes : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    if (!item || typeof item !== 'object') continue;
+    const note = typeof item.note === 'number' && isFinite(item.note) ? Math.round(item.note) : null;
+    if (note === null || note < 0 || note > 127) continue;
+    const startMs =
+      typeof item.startMs === 'number' && isFinite(item.startMs) && item.startMs >= 0
+        ? item.startMs
+        : null;
+    const durationMs =
+      typeof item.durationMs === 'number' && isFinite(item.durationMs) && item.durationMs > 0
+        ? item.durationMs
+        : null;
+    if (startMs === null || durationMs === null) continue;
+    usable.push({ note: note, startMs: startMs, durationMs: durationMs });
+  }
+  usable.sort(function (a, b) {
+    return a.startMs - b.startMs;
+  });
+
+  const events = [];
+  for (let i = 0; i < usable.length; i += 1) {
+    const n = usable[i];
+    const onTick = toTicks(n.startMs);
+    let offTick = toTicks(n.startMs + n.durationMs);
+    // A zero-length note is a note nothing plays. One tick is the shortest
+    // thing the file can express, so that is the floor.
+    if (offTick <= onTick) offTick = onTick + 1;
+    events.push({ tick: onTick, on: 1, note: n.note });
+    events.push({ tick: offTick, on: 0, note: n.note });
+  }
+  events.sort(function (a, b) {
+    if (a.tick !== b.tick) return a.tick - b.tick;
+    // note_off before note_on at the same tick: if two notes ever did meet
+    // exactly, the earlier releases before the later sounds — no stuck voice.
+    return a.on - b.on;
+  });
+
+  const track = [];
+  function emit(bytes) {
+    for (let i = 0; i < bytes.length; i += 1) track.push(bytes[i] & 0xff);
+  }
+
+  // Set tempo, at delta 0. FF 51 03 + 24-bit microseconds per quarter note.
+  const usPerQuarter = Math.max(1, Math.min(0xffffff, Math.round(60000000 / bpm)));
+  emit(encodeVlq(0));
+  emit([
+    0xff,
+    0x51,
+    0x03,
+    (usPerQuarter >> 16) & 0xff,
+    (usPerQuarter >> 8) & 0xff,
+    usPerQuarter & 0xff,
+  ]);
+
+  if (trackName !== null) {
+    const nameBytes = midiTextBytes(trackName);
+    emit(encodeVlq(0));
+    emit([0xff, 0x03]);
+    emit(encodeVlq(nameBytes.length));
+    emit(nameBytes);
+  }
+
+  let lastTick = 0;
+  for (let i = 0; i < events.length; i += 1) {
+    const ev = events[i];
+    const delta = ev.tick - lastTick;
+    emit(encodeVlq(delta < 0 ? 0 : delta));
+    lastTick = ev.tick;
+    emit([(ev.on ? 0x90 : 0x80) | channel, ev.note, ev.on ? velocity : 0]);
+  }
+
+  // End of track. Required, and required to be last.
+  emit(encodeVlq(0));
+  emit([0xff, 0x2f, 0x00]);
+
+  const out = new Uint8Array(14 + 8 + track.length);
+  let p = 0;
+  function put(bytes) {
+    for (let i = 0; i < bytes.length; i += 1) {
+      out[p] = bytes[i] & 0xff;
+      p += 1;
+    }
+  }
+  put([0x4d, 0x54, 0x68, 0x64]); // "MThd"
+  put([0x00, 0x00, 0x00, 0x06]); // header length, always 6
+  put([0x00, 0x00]); // format 0: one track holding everything
+  put([0x00, 0x01]); // ntrks
+  put([(ppq >> 8) & 0xff, ppq & 0xff]); // division, ticks per quarter note
+  put([0x4d, 0x54, 0x72, 0x6b]); // "MTrk"
+  const len = track.length;
+  put([(len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff]);
+  put(track);
+  return out;
+}
+
+/**
+ * Base64-encode a byte sequence — RFC 4648, standard alphabet, '=' padded.
+ *
+ * Written out rather than delegated to `btoa` because `btoa` exists only in the
+ * browser: the Node vm sandbox the tests run in has no such global, and an
+ * encoder that can only be exercised in one of the two environments is an
+ * encoder that is only half tested. Output is byte-for-byte identical to
+ * Buffer.from(bytes).toString('base64'), which is what the suite asserts.
+ *
+ * @param {ArrayLike<number>} bytes
+ * @returns {string}
+ */
+function bytesToBase64(bytes) {
+  const src = isArrayLike(bytes) ? bytes : [];
+  const n = src.length;
+  let out = '';
+  let i = 0;
+  while (i + 2 < n) {
+    const triple = ((src[i] & 0xff) << 16) | ((src[i + 1] & 0xff) << 8) | (src[i + 2] & 0xff);
+    out +=
+      BASE64_ALPHABET.charAt((triple >> 18) & 63) +
+      BASE64_ALPHABET.charAt((triple >> 12) & 63) +
+      BASE64_ALPHABET.charAt((triple >> 6) & 63) +
+      BASE64_ALPHABET.charAt(triple & 63);
+    i += 3;
+  }
+  const rest = n - i;
+  if (rest === 1) {
+    const a = src[i] & 0xff;
+    out += BASE64_ALPHABET.charAt(a >> 2) + BASE64_ALPHABET.charAt((a << 4) & 63) + '==';
+  } else if (rest === 2) {
+    const a = src[i] & 0xff;
+    const b = src[i + 1] & 0xff;
+    out +=
+      BASE64_ALPHABET.charAt(a >> 2) +
+      BASE64_ALPHABET.charAt(((a << 4) | (b >> 4)) & 63) +
+      BASE64_ALPHABET.charAt((b << 2) & 63) +
+      '=';
+  }
+  return out;
+}
+
+/**
+ * Name the exported file after what the session actually MEASURED (FDD #78 —
+ * DAW-ready sync headers, same principle applied to a filename): tempo and key
+ * appear only when the worker reported them.
+ *
+ *   bpm + key   sunoprompt-hum-124bpm-Amin.mid
+ *   bpm only    sunoprompt-hum-124bpm.mid
+ *   key only    sunoprompt-hum-Amin.mid
+ *   neither     sunoprompt-hum.mid
+ *
+ * A root with no third (valence.mode === null) is NOT a key, so it contributes
+ * nothing: half a key in a filename would read as a claim the app never made.
+ * '#' becomes 's' (C# -> Cs) because '#' opens a fragment in a URL and is
+ * mangled by several file managers — the note is still unambiguous.
+ *
+ * @param {{bpm?:number|null, key?:{rootName?:string, mode?:string|null}|null}} [opts]
+ * @returns {string}
+ */
+function midiFilename(opts) {
+  const o = opts || {};
+  const parts = [MIDI_FILENAME_STEM];
+
+  const bpm = typeof o.bpm === 'number' && isFinite(o.bpm) && o.bpm > 0 ? Math.round(o.bpm) : null;
+  if (bpm !== null && bpm >= 1 && bpm <= 999) parts.push(bpm + 'bpm');
+
+  const key = o.key && typeof o.key === 'object' ? o.key : null;
+  const rootName = key && typeof key.rootName === 'string' ? key.rootName : null;
+  const mode = key && (key.mode === 'major' || key.mode === 'minor') ? key.mode : null;
+  if (rootName && mode && NOTE_NAMES.indexOf(rootName) !== -1) {
+    parts.push(rootName.replace('#', 's') + (mode === 'minor' ? 'min' : 'maj'));
+  }
+
+  return parts.join('-') + '.mid';
 }
 
 /*
@@ -10256,6 +10914,8 @@ function createRibbonRenderer(deps) {
     const micHelp = $('mic-help');
     const micHelpLead = $('mic-help-lead');
     const micHelpDetail = $('mic-help-detail');
+    const midiBtn = $('btn-midi');
+    const midiReadout = $('midi-readout');
 
     let dspWorker = null;
     let sentChunks = 0;
@@ -10264,6 +10924,20 @@ function createRibbonRenderer(deps) {
     // colour, and it is deliberately null until the classifier has enough
     // voiced frames to commit to a key.
     let lastValence = null;
+
+    /* --- Direct MIDI Export state (FEATURE-MECHANICS.md §1.1, FDD #10) ---
+     * What the LAST FINISHED capture session produced. Everything here stays
+     * empty until a session ends and the worker hands its contour back — a
+     * half-finished melody is not an exportable one. */
+    let midiNotes = [];
+    let midiDropped = 0;
+    /* The tempo and key the worker MEASURED during that session. Unlike the
+     * live chips (which are cleared the moment capture stops, so no stale
+     * number is left on screen) these survive the end of the session, because
+     * the exported file is named after what the session measured. Both stay
+     * null when nothing was measured — the filename then simply omits them. */
+    let capturedBpm = null;
+    let capturedKey = null;
 
     function renderReadout() {
       readout.textContent =
@@ -10289,6 +10963,42 @@ function createRibbonRenderer(deps) {
       renderAnalysis(null);
     }
 
+    /**
+     * Paint the MIDI export control from the grouped contour. Three honest
+     * states and no fourth: nothing captured (disabled, and it says why), a
+     * melody with a measured tempo, or a melody with none — in which case the
+     * readout NAMES the fallback tempo the file will be written at rather than
+     * quietly presenting 120 BPM as a measurement.
+     */
+    function renderMidi() {
+      const count = midiNotes.length;
+      if (count === 0) {
+        midiBtn.disabled = true;
+        midiReadout.textContent = 'no melody captured yet';
+        return;
+      }
+      midiBtn.disabled = false;
+      const tempo =
+        capturedBpm === null
+          ? 'no tempo measured — exporting at ' + MIDI_DEFAULT_BPM + ' BPM'
+          : Math.round(capturedBpm) + ' BPM';
+      midiReadout.textContent =
+        count +
+        (count === 1 ? ' note' : ' notes') +
+        ' captured · ' +
+        tempo +
+        (midiDropped > 0 ? ' · ' + midiDropped + ' frames dropped (10-minute cap)' : '');
+    }
+
+    /** A new session starts from nothing exportable. */
+    function resetMidi() {
+      midiNotes = [];
+      midiDropped = 0;
+      capturedBpm = null;
+      capturedKey = null;
+      renderMidi();
+    }
+
     try {
       dspWorker = spawnDspWorker();
       const timeout = setTimeout(function () {
@@ -10309,8 +11019,27 @@ function createRibbonRenderer(deps) {
           // An analysis reply IS the ack for that frame — same seq, same trip.
           lastAck = data.seq;
           lastValence = data.valence || null;
+          // Remember what this session MEASURED, for the exported filename.
+          // Only real readings are kept: a null bpm or a root with no third
+          // leaves the previous value alone rather than erasing it, because a
+          // momentary gap in the reading is not evidence the key changed.
+          if (typeof data.bpm === 'number' && isFinite(data.bpm) && data.bpm > 0) {
+            capturedBpm = data.bpm;
+          }
+          if (lastValence && (lastValence.mode === 'major' || lastValence.mode === 'minor')) {
+            capturedKey = lastValence;
+          }
           renderReadout();
           renderAnalysis(data);
+        } else if (data.type === 'contour') {
+          // The session's tracked pitch trajectory, grouped into notes here on
+          // the main thread (FEATURE-MECHANICS.md §1.1 step 2).
+          midiNotes = groupContourToNotes(data.frames);
+          midiDropped =
+            typeof data.dropped === 'number' && isFinite(data.dropped) && data.dropped > 0
+              ? data.dropped
+              : 0;
+          renderMidi();
         } else if (data.type === 'error') {
           workerStatus.textContent = 'DSP worker: ' + data.error;
           workerStatus.className = 'err';
@@ -10819,12 +11548,26 @@ function createRibbonRenderer(deps) {
             renderReadout();
             clearAnalysis();
             // A new session starts from an empty ribbon, exactly as the worker
-            // starts from an empty histogram.
+            // starts from an empty histogram — and with nothing to export yet.
             ribbon.reset();
+            resetMidi();
           } else if (state !== 'live') {
             // Nothing is being measured any more; keep no stale numbers on screen.
             lastValence = null;
             clearAnalysis();
+          }
+          if (state === 'stopped' && dspWorker) {
+            // The session is over: ask the worker for the contour it tracked.
+            // Worker messages are FIFO, so every 'analyze' already posted is
+            // processed first and the reply carries the WHOLE session rather
+            // than a prefix of it. A failed post leaves the button disabled,
+            // which is the honest outcome — there is nothing to export.
+            try {
+              dspWorker.postMessage({ type: 'contour' });
+            } catch (err) {
+              workerStatus.textContent = 'DSP worker: contour request failed — ' + err.message;
+              workerStatus.className = 'err';
+            }
           }
           // The rAF loop runs ONLY while capture is live: no idle GPU burn on a
           // tab that is just sitting in the Hum view. One last frame is drawn
@@ -10854,6 +11597,25 @@ function createRibbonRenderer(deps) {
       // "press Record again" in #mic-help actually does.
       if (state !== 'idle' && state !== 'stopped') capture = makeCapture();
       capture.start();
+    });
+
+    // Direct MIDI Export (FEATURE-MECHANICS.md §1.1 step 3): the SMF is built
+    // in memory, base64'd and handed to the browser as a data: URL on a
+    // throwaway anchor. No blob URL to revoke, no network, no library.
+    resetMidi();
+    midiBtn.addEventListener('click', function () {
+      if (midiNotes.length === 0) return;
+      const bytes = buildSmf0(midiNotes, {
+        bpm: capturedBpm === null ? MIDI_DEFAULT_BPM : capturedBpm,
+      });
+      const anchor = document.createElement('a');
+      anchor.href = 'data:audio/midi;base64,' + bytesToBase64(bytes);
+      anchor.download = midiFilename({ bpm: capturedBpm, key: capturedKey });
+      // The anchor has to be IN the document for a synthetic click to count as
+      // a user-initiated download in Firefox. It is removed immediately after.
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
     });
 
     /* ---------------- AI acoustic dissector wiring ---------------- */
