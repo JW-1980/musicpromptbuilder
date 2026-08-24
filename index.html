@@ -5772,7 +5772,8 @@ var OLLAMA_DEFAULT_MODEL = 'llama3.2';
 var DISSECTOR_FALLBACK_TOAST = 'Cloud API busy. Falling back to local offline model.';
 /** Selectable modes, in UI order. 'auto' runs the §7.3 chain. */
 var DISSECTOR_MODES = ['auto', 'local', 'cloud', 'ollama'];
-/** Output caps — a prompt with 40 instruments is not a prompt (FDD.md #81). */
+/** Dissector output caps, keeping local results focused. (Not FDD #81 — the
+    user-facing >15-instrument Tag Clutter Warning remains unimplemented.) */
 var LOCAL_MAX_TOKENS = 18;
 var LOCAL_MAX_LIST = 12;
 
