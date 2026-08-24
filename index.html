@@ -189,6 +189,11 @@
     --tint-violet: color-mix(in srgb, var(--accent-violet) 16%, transparent);
     --tint-amber: color-mix(in srgb, var(--warning-amber) 8%, transparent);
     --tint-amber-border: color-mix(in srgb, var(--warning-amber) 36%, transparent);
+    /* The Negative Tag Shield's own wash (FDD #30). An exclusion is a NEGATIVE
+       statement, so its chips borrow the danger accent — a toggled "no male
+       vocals" must never read as another additive cyan tag. */
+    --tint-crimson: color-mix(in srgb, var(--danger-crimson) 12%, transparent);
+    --tint-crimson-border: color-mix(in srgb, var(--danger-crimson) 40%, transparent);
     /* The armed-record halo. Its far keyframe is plain `transparent`: CSS
        interpolates colours premultiplied, so it fades out without a grey
        fringe and needs no second token. */
@@ -1241,14 +1246,149 @@
     gap: 12px;
   }
 
-  /* A plain character count. It carries no budget verdict: the 1,000-character
-     gauge (FDD #67) is its own task and nothing here trims anything. */
+  /* A plain character count of the INGREDIENTS. The budget verdict belongs to
+     the Style prompt card's gauge below (FDD #67), which counts the compiled
+     string rather than this one. */
   .draft-counts {
     font-family: var(--font-mono);
     font-size: 0.74rem;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
+
+  /* --- Negative Tag Shield (FDD #30) ------------------------------------- */
+
+  .exclude-panel { margin-top: 24px; }
+
+  .exclude-presets {
+    margin-top: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* A toggled exclusion reads in the danger accent, so the "do not do this"
+     row can never be confused with the additive cyan chips above it. The
+     pressed state is carried by aria-pressed, so the styling and the
+     accessibility tree can never drift apart. */
+  .exclude-chip[aria-pressed="true"] {
+    color: var(--danger-crimson);
+    background: var(--tint-crimson);
+    border-color: var(--tint-crimson-border);
+  }
+
+  .exclude-row {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .exclude-chips {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .exclude-chips:empty { display: none; }
+
+  /* --- Strict 1,000-character gauge + compiled style prompt (FDD #67) ----- */
+
+  .style-panel { margin-top: 24px; }
+
+  .style-gauge-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .style-gauge-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* The live count. Its colour is the same three-zone signal the bar carries,
+     so the number alone is readable without seeing the bar at all. */
+  .style-count {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--accent-cyan);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .style-count.is-warn { color: var(--warning-amber); }
+  .style-count.is-danger { color: var(--danger-crimson); }
+
+  .style-meter {
+    margin-top: 6px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--meter-track);
+    overflow: hidden;
+  }
+
+  /*
+     SAFETY ZONES — docs/FDD.md #67. Inclusive upper bounds, mirrored exactly
+     by PROMPT_ZONE_SAFE_MAX / PROMPT_ZONE_WARN_MAX in #app-main:
+
+       0 .. 850    accent cyan      plenty of room
+       851 .. 950  warning amber    getting close
+       951 ..      danger crimson   a few tags from being trimmed
+  */
+  .style-meter-fill {
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: var(--accent-cyan);
+    transition: width 220ms ease, background-color 220ms ease;
+  }
+
+  .style-meter.is-warn .style-meter-fill { background: var(--warning-amber); }
+  .style-meter.is-danger .style-meter-fill { background: var(--danger-crimson); }
+
+  .style-zone-note {
+    margin: 8px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .style-block { margin-top: 18px; }
+
+  /* What the limiter actually had to throw away. Amber, because it is a
+     warning about the prompt rather than an error in the app. */
+  .style-trimmed {
+    margin: 14px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--warning-amber);
+  }
+
+  .style-trimmed[hidden] { display: none; }
+
+  /* Conflict notes stay put for as long as the conflict does: they are not
+     dismissable, because dismissing one would hide a tag that is missing from
+     the prompt the user is about to paste. */
+  .style-conflicts {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.6;
+    color: var(--danger-crimson);
+  }
+
+  .style-conflicts[hidden] { display: none; }
+
+  .style-conflicts li + li { margin-top: 4px; }
 
   /* --- Song structure builder (FDD #39/#40/#42/#50) ----------------------- */
 
@@ -1570,6 +1710,8 @@
     .dissect-facts dd { margin-bottom: 10px; }
     .scene-row { flex-direction: column; align-items: stretch; }
     .scene-row .field { width: 100%; }
+    .exclude-row { flex-direction: column; align-items: stretch; }
+    .exclude-row .field { width: 100%; }
     .draft-foot { align-items: stretch; flex-direction: column; }
     /* A narrow structure card stacks the block toolbar rather than letting the
        tag line, the handle and four buttons fight over one line. */
@@ -1693,6 +1835,8 @@
   .high-contrast .confidence-meter,
   .high-contrast .view-tabs,
   .high-contrast .slider-chip,
+  .high-contrast .style-meter,
+  .high-contrast .exclude-chip[aria-pressed="true"],
   .high-contrast .view-tab[aria-selected="true"] {
     background: var(--bg);
   }
@@ -1700,8 +1844,17 @@
   .high-contrast .confidence-meter,
   .high-contrast .colors-note,
   .high-contrast .slider-chip,
+  .high-contrast .style-meter,
   .high-contrast .genre-badge {
     border: 1px solid var(--surface-border);
+  }
+
+  /* The shield's pressed state is a colour on a translucent wash, and Code
+     Mode has just flattened the wash. The crimson border becomes the whole
+     signal, so it has to be the accent rather than the neutral hairline the
+     rule above would otherwise give it. */
+  .high-contrast .exclude-chip[aria-pressed="true"] {
+    border: 1px solid var(--danger-crimson);
   }
 
   /* The selected tab loses its gradient here, so the accent border becomes the
@@ -1744,6 +1897,7 @@
   @media (prefers-reduced-motion: reduce) {
     .toast { animation: none; }
     .confidence-fill { transition: none; }
+    .style-meter-fill { transition: none; }
     /* Motion off means motion off, including the view transition itself. */
     ::view-transition-group(*),
     ::view-transition-old(*),
@@ -2205,6 +2359,84 @@
           0 tags · 0 characters
         </span>
         <button type="button" id="btn-draft-copy" class="btn-mini">Copy draft</button>
+      </div>
+    </section>
+
+    <!-- Negative Tag Shield (docs/FDD.md #30) over FEATURE-MECHANICS.md §3.3.
+         Everything toggled here is compiled into ONE bracketed block at the
+         very end of the style prompt, never sprinkled through it. -->
+    <section class="view-col vibe-card exclude-panel" aria-labelledby="exclude-heading">
+      <h3 id="exclude-heading" class="panel-heading">Exclusions</h3>
+      <p class="panel-note">
+        What Suno must <em>not</em> do. Toggle a common exclusion or type your own;
+        they are compiled into a single <code>[Exclude: …]</code> block at the very
+        end of the style prompt. Nothing toggled means no block is written at all —
+        an empty one would tell Suno to exclude nothing.
+      </p>
+
+      <div id="exclude-presets" class="exclude-presets" role="group"
+           aria-label="Common exclusions"></div>
+
+      <div class="exclude-row">
+        <span class="field field-grow">
+          <label class="field-label" for="exclude-input">Add an exclusion</label>
+          <input type="text" id="exclude-input" class="field-input" autocomplete="off"
+                 spellcheck="false" maxlength="40" placeholder="e.g. saxophone solo">
+        </span>
+        <button type="button" id="btn-exclude-add" class="btn-mini">Add exclusion</button>
+      </div>
+
+      <p id="exclude-empty" class="draft-empty">
+        Nothing excluded yet — the style prompt carries no exclusion block.
+      </p>
+      <div id="exclude-chips" class="exclude-chips"></div>
+      <p id="exclude-status" class="dissect-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <!-- The compiled Suno v5.5 STYLE field (docs/FDD.md #67 gauge, #68 conflict
+         resolver, #73 token weighting). The draft card above is the ingredients
+         list; this is the string that gets pasted. The song structure sheet is
+         a SEPARATE Suno field and is deliberately not counted against this
+         budget. -->
+    <section class="view-col vibe-card style-panel" aria-labelledby="style-heading">
+      <h3 id="style-heading" class="panel-heading">Style prompt</h3>
+      <p class="panel-note">
+        The finished style field: genre tokens weighted to the front, contradictory
+        tags resolved in favour of the heavier one, exclusions appended last, and the
+        whole string held under the strict 1,000-character Suno v5.5 ceiling. Anything
+        that had to be dropped is listed below rather than disappearing quietly.
+      </p>
+
+      <div class="style-gauge">
+        <div class="style-gauge-head">
+          <span class="style-gauge-label" id="style-gauge-label">Character budget</span>
+          <!-- Deliberately NOT a live region: this number changes on every
+               keystroke and every slider pixel, and a screen reader reading
+               "731, 732, 733…" over the interaction would be unusable.
+               #style-zone-note below is the live region, and it speaks only
+               when the SAFETY ZONE changes. -->
+          <span id="style-count" class="style-count">0 / 1000</span>
+        </div>
+        <div id="style-meter" class="style-meter" role="img"
+             aria-label="Character budget: 0 of 1000 characters used">
+          <div id="style-meter-fill" class="style-meter-fill"></div>
+        </div>
+        <p id="style-zone-note" class="style-zone-note" role="status" aria-live="polite">
+          Plenty of room — 850 characters or fewer.
+        </p>
+      </div>
+
+      <p id="style-empty" class="draft-empty style-block">
+        Nothing compiled yet — add a tag, match a scene or move a slider.
+      </p>
+      <p id="style-text" class="draft-text" hidden></p>
+
+      <p id="style-trimmed" class="style-trimmed" role="status" aria-live="polite" hidden></p>
+      <ul id="style-conflicts" class="style-conflicts" hidden></ul>
+
+      <div class="draft-foot">
+        <span id="style-tally" class="draft-counts">0 tags · 0 exclusions</span>
+        <button type="button" id="btn-style-copy" class="btn-mini">Copy style prompt</button>
       </div>
     </section>
   </section>
@@ -3102,7 +3334,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.10.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -7584,6 +7816,985 @@ function structureMoveShortcut(event) {
   return 0;
 }
 
+/* ==========================================================================
+ * STYLE-PROMPT COMPILER — docs/FDD.md #67 (Strict 1,000-Character Gauge),
+ * #68 (Tag Redundancy & Conflict Resolver), #73 (Token Weighting Engine) and
+ * #30 (Negative Tag Shield), over docs/FEATURE-MECHANICS.md §3.3 and §5.1.
+ *
+ * WHAT IS AND IS NOT LIMITED
+ *   Suno v5.5 takes TWO fields. The STYLE prompt — the comma-separated
+ *   descriptor string this module compiles — is the one carrying the strict
+ *   1,000-character ceiling (docs/FDD.md header, CLAUDE.md "Non-Negotiable
+ *   Rules"). The structure/lyrics sheet compiled by createStructureState() is
+ *   a SEPARATE field and is NOT governed by this budget; nothing here touches
+ *   it.
+ *
+ * THE PIPELINE, IN ORDER
+ *   1. weightTokens(entries)          #73 — genre first, heaviest first
+ *   2. resolveConflicts(orderedTags)  #68 — drop the contradiction, REPORT it
+ *   3. compileStylePrompt(state, ex)  §3.3 — one [Exclude: …] block, last
+ *   4. limitPrompt(text, max)         #67 — <= 1000, whole words only
+ *   buildFinalPrompt() runs all four. Every step is a pure function of its
+ *   input: the same state compiles to the same string, every time.
+ *
+ * HONESTY (docs/ENGINEERING-STANDARD.md §1.1-§1.2)
+ *   Nothing is ever dropped silently. A tag removed for a conflict comes back
+ *   in `conflicts` naming what it lost to; a tag removed for the budget comes
+ *   back in `droppedTags`; an exclusion term the budget forced out comes back
+ *   in `droppedExclusions`. The UI prints all three.
+ * ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* A. THE BUDGET AND ITS ZONES (FDD #67)                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The Suno v5.5 style-field ceiling, counted in JS string length — i.e. UTF-16
+ * code units, which is what `.length` reports and what every comparison in
+ * this module uses. An accented letter costs 1, an emoji outside the BMP costs
+ * 2, and both are budgeted by the same arithmetic; no cut is ever allowed to
+ * land between the two halves of a surrogate pair.
+ */
+var PROMPT_CHAR_LIMIT = 1000;
+
+/*
+ * Colour-coded safety zones. Both bounds are INCLUSIVE upper bounds, so the
+ * three bands are 0..850, 851..950 and 951.. — which is exactly what
+ * promptBudgetZone() implements and what the gauge paints:
+ *
+ *   safe    <=  850   var(--accent-cyan)     plenty of room
+ *   warn    851..950  var(--warning-amber)   getting close
+ *   danger   >  950   var(--danger-crimson)  a few tags from being trimmed
+ */
+var PROMPT_ZONE_SAFE_MAX = 850;
+var PROMPT_ZONE_WARN_MAX = 950;
+
+/**
+ * Which safety band a length falls in.
+ *
+ * The thresholds are absolute character counts, not percentages of `max`: they
+ * describe how much Suno prompt is left, and that does not change because a
+ * caller passed a smaller ceiling for a test.
+ *
+ * @param {number} length characters currently compiled
+ * @param {number} [max] the ceiling in force; only used to catch an overflow
+ * @returns {'safe'|'warn'|'danger'}
+ */
+function promptBudgetZone(length, max) {
+  var n = typeof length === 'number' && isFinite(length) ? length : 0;
+  var limit = typeof max === 'number' && isFinite(max) ? max : PROMPT_CHAR_LIMIT;
+  if (n > limit) return 'danger';
+  if (n > PROMPT_ZONE_WARN_MAX) return 'danger';
+  if (n > PROMPT_ZONE_SAFE_MAX) return 'warn';
+  return 'safe';
+}
+
+/* -------------------------------------------------------------------------- */
+/* B. TOKEN WEIGHTING ENGINE (FDD #73)                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Order the working set the way Suno reads it.
+ *
+ * #73 is specifically about GENRE: "sorts high-impact genre tokens to the
+ * front of the prompt string". So the genre section — and only it — is
+ * re-sorted by weight, descending; every other section keeps the order the
+ * user built it in, because a mood or an instrument carries no comparable
+ * "impact" score and re-sorting it would just scramble a deliberate list.
+ *
+ *   1. genre, heaviest first (equal weights keep insertion order — the sort
+ *      is stable by construction: ties fall back to the original index);
+ *   2. mood, instrument, scene, era, custom, in PROMPT_SECTION_ORDER;
+ *   3. the slider tags last, energy -> warmth -> density, matching
+ *      draftText(); a slider-section tag from any other source follows them
+ *      rather than going missing.
+ *
+ * An entry with no numeric weight counts as 0, so a hand-typed genre sits
+ * behind a dissection the engine actually scored — which is the ranking #73
+ * asks for.
+ *
+ * @param {Array<{section?:string, tag:string, weight?:number, source?:string}>} entries
+ * @returns {string[]} tags in emission order; a fresh array of plain strings
+ */
+function weightTokens(entries) {
+  var list = isArrayLike(entries) ? entries : [];
+  var buckets = {};
+  var genre = [];
+  var out = [];
+  var i;
+  var j;
+
+  for (i = 0; i < PROMPT_SECTIONS.length; i += 1) buckets[PROMPT_SECTIONS[i]] = [];
+
+  for (i = 0; i < list.length; i += 1) {
+    var entry = list[i];
+    if (!entry || typeof entry !== 'object') continue;
+    var tag = typeof entry.tag === 'string' ? entry.tag.replace(/\s+/g, ' ').trim() : '';
+    if (!tag) continue;
+    var section = typeof entry.section === 'string' ? entry.section.trim().toLowerCase() : '';
+    if (PROMPT_SECTIONS.indexOf(section) === -1) section = 'custom';
+    var record = {
+      tag: tag,
+      weight: typeof entry.weight === 'number' && isFinite(entry.weight) ? entry.weight : 0,
+      source: typeof entry.source === 'string' ? entry.source : '',
+      order: i,
+    };
+    if (section === 'genre') genre.push(record);
+    else buckets[section].push(record);
+  }
+
+  genre.sort(function (a, b) {
+    if (b.weight !== a.weight) return b.weight - a.weight;
+    // The tie-break IS the stability guarantee; it does not rely on the
+    // engine's own sort being stable.
+    return a.order - b.order;
+  });
+  for (i = 0; i < genre.length; i += 1) out.push(genre[i].tag);
+
+  // PROMPT_SECTION_ORDER[0] is 'genre', already emitted above.
+  for (i = 1; i < PROMPT_SECTION_ORDER.length; i += 1) {
+    var bucket = buckets[PROMPT_SECTION_ORDER[i]];
+    for (j = 0; j < bucket.length; j += 1) out.push(bucket[j].tag);
+  }
+
+  var slider = buckets[PROMPT_SLIDER_SECTION];
+  for (i = 0; i < PROMPT_SLIDER_SOURCES.length; i += 1) {
+    for (j = 0; j < slider.length; j += 1) {
+      if (slider[j].source === PROMPT_SLIDER_SOURCES[i]) out.push(slider[j].tag);
+    }
+  }
+  for (j = 0; j < slider.length; j += 1) {
+    if (PROMPT_SLIDER_SOURCES.indexOf(slider[j].source) === -1) out.push(slider[j].tag);
+  }
+
+  return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* C. TAG REDUNDANCY & CONFLICT RESOLVER (FDD #68)                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The rules table of known acoustic contradictions.
+ *
+ * Each rule names two mutually exclusive families. A tag on side `a` and a tag
+ * on side `b` cannot both describe one mix, so the later (lighter) one is
+ * dropped and the drop is reported — never silently swallowed.
+ *
+ * MATCHING MODES — the difference matters, and getting it wrong is how a
+ * conflict resolver starts inventing conflicts:
+ *   'exact'  — the whole normalised tag must equal a listed member. Used for
+ *              the three slider sets, which are closed, verbatim lists from
+ *              FEATURE-MECHANICS.md §4. Matching those by substring would make
+ *              "warm acoustic guitar" collide with "driving rhythm" through
+ *              the bare word "acoustic", which is not a contradiction at all.
+ *   'phrase' — the listed phrase must appear in the tag at word boundaries.
+ *              Used where the family is open-ended (any tag mentioning tape
+ *              hiss belongs to the lo-fi family). Phrases are kept SPECIFIC
+ *              for the same reason: "vinyl crackle", never bare "crackle",
+ *              which would drag in "crackling fireplace texture".
+ *
+ * A tag matching BOTH sides of a rule is treated as matching neither: it is
+ * ambiguous evidence, and ambiguous evidence must not drop anybody's tag.
+ */
+var TAG_CONFLICTS = [
+  {
+    /* FEATURE-MECHANICS.md §5.1's own worked example, verbatim: "known
+     * acoustic conflicts (e.g. tagging both `lo-fi cassette hiss` and
+     * `modern hyper-clean radio master`)". */
+    id: 'lofi-texture-vs-clean-master',
+    match: 'phrase',
+    rule: 'lo-fi tape and vinyl texture cannot survive a modern hyper-clean radio master',
+    a: [
+      'lo fi',
+      'lo-fi',
+      'lofi',
+      'cassette hiss',
+      'cassette tape',
+      'tape hiss',
+      'vinyl crackle',
+      'wow and flutter',
+    ],
+    b: [
+      'hyper clean',
+      'hyper-clean',
+      'radio master',
+      'modern master',
+      'pristine master',
+      'glossy digital mix',
+      'polished digital',
+      'clinical mix',
+      'sterile',
+    ],
+  },
+  {
+    /* FEATURE-MECHANICS.md §4.1 — the two ends of the Energy axis. */
+    id: 'energy-low-vs-high',
+    match: 'exact',
+    rule: 'the restrained Energy set and the explosive Energy set describe opposite performances',
+    a: SLIDER_TAG_SETS.energy.low,
+    b: SLIDER_TAG_SETS.energy.high,
+  },
+  {
+    /* FEATURE-MECHANICS.md §4.2 — the two ends of the Warmth axis. */
+    id: 'warmth-cold-vs-analog',
+    match: 'exact',
+    rule: 'a cold digital master and warm analog saturation are opposite mastering chains',
+    a: SLIDER_TAG_SETS.warmth.low,
+    b: SLIDER_TAG_SETS.warmth.high,
+  },
+  {
+    /* FEATURE-MECHANICS.md §4.3 — the two ends of the Density axis. */
+    id: 'density-sparse-vs-dense',
+    match: 'exact',
+    rule: 'a minimalist arrangement and a wall of sound are opposite arrangements',
+    a: SLIDER_TAG_SETS.density.low,
+    b: SLIDER_TAG_SETS.density.high,
+  },
+  {
+    id: 'acoustic-vs-synthetic',
+    match: 'phrase',
+    rule: 'played acoustic instrumentation and pure digital synthesis are opposite sound sources',
+    a: [
+      'acoustic guitar',
+      'acoustic guitars',
+      'purely acoustic',
+      'all acoustic',
+      'unplugged',
+      'live band',
+      'organic instrumentation',
+    ],
+    b: [
+      'digital synthesis',
+      'fully synthesised',
+      'fully synthesized',
+      'pure synthesis',
+      'synthetic instrumentation',
+      'all synth',
+    ],
+  },
+  {
+    /* FDD #49's Pure Instrumental Mode Lock, expressed as a conflict: an
+     * instrumental-only directive and a named vocal timbre cannot both hold. */
+    id: 'instrumental-vs-vocals',
+    match: 'phrase',
+    rule: 'an instrumental-only directive cannot coexist with a named vocal part',
+    a: ['instrumental only', 'purely instrumental', 'no vocals', 'without vocals', 'instrumental version'],
+    b: [
+      'lead vocal',
+      'vocal hook',
+      'vocal harmonies',
+      'vocal ad libs',
+      'screamed vocal',
+      'gospel style vocal',
+      'sung vocal',
+      'rap vocal',
+      'talkbox vocal',
+      'male vocals',
+      'female vocals',
+    ],
+  },
+  {
+    id: 'tempo-slow-vs-fast',
+    match: 'phrase',
+    rule: 'a half-time/downtempo directive and an uptempo one cannot both set the tempo',
+    a: ['slow tempo', 'slow-tempo', 'half time', 'half-time', 'downtempo', 'ballad tempo'],
+    b: ['uptempo', 'up-tempo', 'fast tempo', 'double time', 'double-time', 'breakneck tempo'],
+  },
+  {
+    id: 'dry-vs-drenched',
+    match: 'phrase',
+    rule: 'a dry close-miked room and a cavernous reverb are opposite spaces',
+    a: ['dry mix', 'bone dry', 'no reverb', 'close mic', 'close-mic', 'dead room', 'tight dry drums'],
+    b: [
+      'reverb drenched',
+      'reverb-drenched',
+      'cavernous',
+      'submerged reverb',
+      'huge hall reverb',
+      'cathedral reverb',
+      'washed out reverb',
+    ],
+  },
+  {
+    id: 'dynamics-open-vs-crushed',
+    match: 'phrase',
+    rule: 'an open dynamic range and a crushed, maximised master are opposite masters',
+    a: ['wide dynamic range', 'open dynamics', 'uncompressed', 'delicate dynamics'],
+    b: ['brickwalled', 'maximised loudness', 'maximized loudness', 'crushed dynamics'],
+  },
+  {
+    id: 'mono-vs-wide-stereo',
+    match: 'phrase',
+    rule: 'a mono production and a wide stereo image are opposite stereo fields',
+    a: ['mono mix', 'narrow mono', 'am radio mono', 'mono production'],
+    b: ['wide stereo', 'ultra wide stereo', 'huge stereo field', 'spatial audio mix'],
+  },
+];
+
+/** What a drop caused by plain repetition is reported as (the #68 "redundancy"
+ *  half — the same words twice is not a contradiction, but it is still waste). */
+var TAG_DUPLICATE_RULE = 'exact duplicate of an earlier tag';
+
+/** Escape a phrase for use inside a RegExp. */
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+}
+
+/*
+ * The compiled rules table, built once on first use.
+ *
+ * This cache is not a micro-optimisation. Resolution is pairwise, so a maximal
+ * selection (~600 tags) is ~180,000 comparisons; compiling a fresh RegExp for
+ * every phrase of every rule inside that loop turned one compile into tens of
+ * millions of them and the whole pipeline into a 30-second job.
+ */
+var TAG_CONFLICT_MATCHERS = null;
+
+/**
+ * One side of one rule, ready to test: normalised strings for an 'exact' rule,
+ * RegExps for a 'phrase' one.
+ *
+ * `\b` is deliberately not used in the phrase patterns: the phrases carry
+ * hyphens ("lo-fi", "close-mic") and `\b` around a hyphen behaves the opposite
+ * of the way it reads. The explicit alphanumeric guards mean "hyper-clean"
+ * matches "modern hyper-clean radio master" while "acoustic" never matches
+ * "natural room acoustics".
+ */
+function compileConflictSide(rule, side) {
+  var out = [];
+  for (var i = 0; i < side.length; i += 1) {
+    var phrase = normalizePromptTag(side[i]);
+    if (!phrase) continue;
+    out.push(
+      rule.match === 'exact'
+        ? phrase
+        : new RegExp('(^|[^a-z0-9])' + escapeRegExp(phrase) + '([^a-z0-9]|$)')
+    );
+  }
+  return out;
+}
+
+/** @returns {Array<{rule:object, exact:boolean, a:Array, b:Array}>} */
+function conflictMatchers() {
+  if (TAG_CONFLICT_MATCHERS) return TAG_CONFLICT_MATCHERS;
+  var compiled = [];
+  for (var i = 0; i < TAG_CONFLICTS.length; i += 1) {
+    var rule = TAG_CONFLICTS[i];
+    compiled.push({
+      rule: rule,
+      exact: rule.match === 'exact',
+      a: compileConflictSide(rule, rule.a),
+      b: compileConflictSide(rule, rule.b),
+    });
+  }
+  TAG_CONFLICT_MATCHERS = compiled;
+  return TAG_CONFLICT_MATCHERS;
+}
+
+/** Does the normalised tag match any member of one compiled side? */
+function conflictSideHolds(members, exact, norm) {
+  for (var i = 0; i < members.length; i += 1) {
+    if (exact) {
+      if (members[i] === norm) return true;
+    } else if (members[i].test(norm)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The side one compiled rule puts a tag on. Both sides at once is ambiguous
+ *  evidence, and ambiguous evidence must never drop anybody's tag. */
+function conflictSideIn(matcher, norm) {
+  var inA = conflictSideHolds(matcher.a, matcher.exact, norm);
+  var inB = conflictSideHolds(matcher.b, matcher.exact, norm);
+  if (inA && inB) return null;
+  if (inA) return 'a';
+  if (inB) return 'b';
+  return null;
+}
+
+/**
+ * A tag's side under EVERY rule, in TAG_CONFLICTS order. Computing this once
+ * per tag is what makes the pairwise pass cheap: comparing two tags is then
+ * ten string comparisons rather than a few hundred regex tests.
+ * @returns {Array<'a'|'b'|null>}
+ */
+function conflictSidesOf(norm) {
+  var compiled = conflictMatchers();
+  var sides = [];
+  for (var i = 0; i < compiled.length; i += 1) sides.push(conflictSideIn(compiled[i], norm));
+  return sides;
+}
+
+/**
+ * Which side of a rule a tag is on, or null when it is on neither — or, just
+ * as importantly, on both.
+ * @returns {'a'|'b'|null}
+ */
+function conflictSideOf(rule, norm) {
+  var compiled = conflictMatchers();
+  for (var i = 0; i < compiled.length; i += 1) {
+    if (compiled[i].rule === rule) return conflictSideIn(compiled[i], norm);
+  }
+  return null;
+}
+
+/**
+ * The first rule under which two normalised tags contradict each other.
+ * @returns {object|null} the TAG_CONFLICTS entry, or null if they are compatible
+ */
+function conflictBetween(normA, normB) {
+  return conflictRuleForSides(conflictSidesOf(normA), conflictSidesOf(normB));
+}
+
+/** The same decision, from two pre-computed side vectors. */
+function conflictRuleForSides(sidesA, sidesB) {
+  var compiled = conflictMatchers();
+  for (var i = 0; i < compiled.length; i += 1) {
+    if (sidesA[i] === null || sidesB[i] === null) continue;
+    if (sidesA[i] !== sidesB[i]) return compiled[i].rule;
+  }
+  return null;
+}
+
+/**
+ * Clean an ORDERED tag list of contradictions and repeats (FDD #68).
+ *
+ * The order is the ranking: weightTokens() has already put the highest-impact
+ * tags first, so the EARLIER tag always wins and the later one is dropped.
+ * That is the whole resolution policy — no scoring, no guessing which of two
+ * contradictory tags the user "meant".
+ *
+ * Every drop is reported. `conflicts` is never a summary count; it names the
+ * tag that survived, the tag that went, and the rule that decided it, so the
+ * UI can print "«X» dropped — conflicts with «Y»" rather than a mystery.
+ *
+ * @param {Array<string|{tag:string}>} orderedTags
+ * @returns {{tags:string[], conflicts:Array<{kept:string, dropped:string, rule:string, id:string}>}}
+ */
+function resolveConflicts(orderedTags) {
+  var list = isArrayLike(orderedTags) ? orderedTags : [];
+  var kept = [];
+  var keptSides = [];
+  var conflicts = [];
+  var seen = Object.create(null);
+  var i;
+  var k;
+
+  for (i = 0; i < list.length; i += 1) {
+    var raw = list[i];
+    var tag = '';
+    if (typeof raw === 'string') tag = raw.replace(/\s+/g, ' ').trim();
+    else if (raw && typeof raw === 'object' && typeof raw.tag === 'string') {
+      tag = raw.tag.replace(/\s+/g, ' ').trim();
+    }
+    if (!tag) continue;
+
+    var norm = normalizePromptTag(tag);
+    if (seen[norm] !== undefined) {
+      conflicts.push({ kept: seen[norm], dropped: tag, rule: TAG_DUPLICATE_RULE, id: 'duplicate' });
+      continue;
+    }
+
+    var sides = conflictSidesOf(norm);
+    var hit = null;
+    for (k = 0; k < kept.length; k += 1) {
+      var rule = conflictRuleForSides(keptSides[k], sides);
+      if (rule) {
+        hit = { kept: kept[k], rule: rule };
+        break;
+      }
+    }
+    if (hit) {
+      conflicts.push({ kept: hit.kept, dropped: tag, rule: hit.rule.rule, id: hit.rule.id });
+      continue;
+    }
+
+    seen[norm] = tag;
+    keptSides.push(sides);
+    kept.push(tag);
+  }
+
+  return { tags: kept, conflicts: conflicts };
+}
+
+/* -------------------------------------------------------------------------- */
+/* D. NEGATIVE TAG SHIELD (FDD #30) — FEATURE-MECHANICS.md §3.3               */
+/* -------------------------------------------------------------------------- */
+
+/** The literal §3.3 syntax. One block, at the very end, never repeated. */
+var EXCLUDE_OPEN = '[Exclude: ';
+var EXCLUDE_CLOSE = ']';
+/*
+ * What separates the descriptive tags from the block. A SPACE, not ", ":
+ * the block is a bracketed directive rather than another descriptor, and if
+ * the budget sacrifices every descriptive tag the block is left standing on
+ * its own with no orphaned comma in front of it.
+ */
+var EXCLUDE_JOIN = ' ';
+
+/** Longest a single exclusion term may be. Longer is a sentence, not a tag. */
+var EXCLUSION_MAX_LEN = 40;
+
+/** The curated one-click shield (FDD #30); free text adds to the same list. */
+var EXCLUSION_PRESETS = [
+  'harsh noise',
+  'male vocals',
+  'female vocals',
+  'acoustic guitars',
+  'autotune',
+  'spoken word',
+  'heavy distortion',
+  'trap hi-hats',
+];
+
+/** Cut to `n` code units without stranding half of a surrogate pair. */
+function sliceCodeUnits(text, n) {
+  if (typeof text !== 'string' || text.length <= n) return text;
+  var end = n;
+  var code = text.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return text.slice(0, end);
+}
+
+/**
+ * Canonicalise one exclusion term, or '' if there is nothing usable in it.
+ *
+ * Commas and brackets are stripped rather than escaped: §3.3 gives the shield
+ * exactly one bracketed, comma-separated block, so a comma or a `]` typed
+ * inside a term would silently split or close it.
+ *
+ * @param {*} text
+ * @returns {string}
+ */
+function normalizeExclusion(text) {
+  if (typeof text !== 'string') return '';
+  var value = text
+    .replace(/[[\]]/g, ' ')
+    .replace(/,/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!value) return '';
+  return sliceCodeUnits(value, EXCLUSION_MAX_LEN).replace(/\s+$/, '');
+}
+
+/**
+ * Clean a whole exclusion list: normalise, drop the unusable, de-duplicate
+ * case-insensitively, keep the order they were toggled in.
+ * @param {Array<*>} list
+ * @returns {string[]}
+ */
+function normalizeExclusionList(list) {
+  var source = isArrayLike(list) ? list : [];
+  var out = [];
+  var seen = Object.create(null);
+  for (var i = 0; i < source.length; i += 1) {
+    var value = normalizeExclusion(source[i]);
+    if (!value) continue;
+    var key = value.toLowerCase();
+    if (seen[key]) continue;
+    seen[key] = true;
+    out.push(value);
+  }
+  return out;
+}
+
+/**
+ * The toggled-exclusions store behind the shield card.
+ *
+ * Deliberately its own tiny store rather than another section of
+ * createPromptState(): an exclusion is not a descriptor competing for the
+ * front of the prompt, it never takes part in weighting or conflict
+ * resolution, and it is emitted in a completely different syntax.
+ */
+function createExclusionState() {
+  /** @type {string[]} display forms, in the order they were added */
+  var items = [];
+  /** lower-cased term -> true */
+  var index = Object.create(null);
+  /** @type {Array<{fn: Function}>} */
+  var subscribers = [];
+
+  function notify() {
+    var snapshot = subscribers.slice();
+    var view = items.slice();
+    for (var i = 0; i < snapshot.length; i += 1) {
+      try {
+        snapshot[i].fn(view);
+      } catch (err) {
+        // A broken subscriber is the subscriber's problem, not the store's.
+      }
+    }
+  }
+
+  return {
+    /** @returns {string|null} the stored form, or null if unusable/already held */
+    add: function (text) {
+      var value = normalizeExclusion(text);
+      if (!value) return null;
+      var key = value.toLowerCase();
+      if (index[key]) return null;
+      index[key] = true;
+      items.push(value);
+      notify();
+      return value;
+    },
+
+    /** @returns {boolean} true if there was one to remove */
+    remove: function (text) {
+      var value = normalizeExclusion(text);
+      if (!value) return false;
+      var key = value.toLowerCase();
+      if (!index[key]) return false;
+      delete index[key];
+      for (var i = 0; i < items.length; i += 1) {
+        if (items[i].toLowerCase() === key) {
+          items.splice(i, 1);
+          break;
+        }
+      }
+      notify();
+      return true;
+    },
+
+    /** @returns {boolean} whether the term is held AFTER the toggle */
+    toggle: function (text) {
+      var value = normalizeExclusion(text);
+      if (!value) return false;
+      if (index[value.toLowerCase()]) {
+        this.remove(value);
+        return false;
+      }
+      return this.add(value) !== null;
+    },
+
+    has: function (text) {
+      var value = normalizeExclusion(text);
+      return !!value && !!index[value.toLowerCase()];
+    },
+
+    /** @returns {string[]} a copy — a caller cannot edit the store */
+    list: function () {
+      return items.slice();
+    },
+
+    count: function () {
+      return items.length;
+    },
+
+    /** @returns {number} how many terms were dropped */
+    clear: function () {
+      var had = items.length;
+      if (!had) return 0;
+      items = [];
+      index = Object.create(null);
+      notify();
+      return had;
+    },
+
+    /** @returns {() => void} unsubscribe; idempotent */
+    subscribe: function (fn) {
+      if (typeof fn !== 'function') {
+        return function () {};
+      }
+      var record = { fn: fn };
+      subscribers.push(record);
+      return function () {
+        var i = subscribers.indexOf(record);
+        if (i !== -1) subscribers.splice(i, 1);
+      };
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* E. THE COMPILER                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** Accept either a live prompt store or a plain array of its entries. */
+function promptEntriesOf(source) {
+  if (source && typeof source.list === 'function') return source.list();
+  if (isArrayLike(source)) return Array.prototype.slice.call(source);
+  return [];
+}
+
+/**
+ * Compile the untrimmed style prompt: weighted, de-conflicted, with the
+ * Negative Tag Shield as ONE bracketed block at the very end (§3.3).
+ *
+ * With no exclusions the string contains no '[Exclude:' substring at all —
+ * an empty '[Exclude: ]' would be a syntax artefact telling Suno to exclude
+ * nothing, which is worse than saying nothing.
+ *
+ * @param {object|Array} promptState the store, or its entries
+ * @param {Array<string>} [exclusions]
+ * @returns {{text:string, meta:{tags:string[], ordered:string[],
+ *            conflicts:Array<object>, exclusions:string[], excludeBlock:string}}}
+ */
+function compileStylePrompt(promptState, exclusions) {
+  var ordered = weightTokens(promptEntriesOf(promptState));
+  var resolved = resolveConflicts(ordered);
+  var terms = normalizeExclusionList(exclusions);
+
+  var body = resolved.tags.join(', ');
+  var block = terms.length ? EXCLUDE_OPEN + terms.join(', ') + EXCLUDE_CLOSE : '';
+  var text = body && block ? body + EXCLUDE_JOIN + block : body || block;
+
+  return {
+    text: text,
+    meta: {
+      tags: resolved.tags,
+      ordered: ordered,
+      conflicts: resolved.conflicts,
+      exclusions: terms,
+      excludeBlock: block,
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* F. THE LIMITER (FDD #67) — <= 1000, on whole words, shield last            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Split a compiled string into its comma-separated tags, remembering where
+ * each one ENDS in the original string so a cut can be made without
+ * re-joining (and therefore without rewriting) a single byte of it.
+ *
+ * @param {string} text
+ * @returns {Array<{text:string, end:number}>} always at least one element
+ */
+function splitTags(text) {
+  var parts = [];
+  var re = /\s*,\s*/g;
+  var start = 0;
+  var m;
+  while ((m = re.exec(text)) !== null) {
+    parts.push({ text: text.slice(start, m.index), end: m.index });
+    start = m.index + m[0].length;
+  }
+  parts.push({ text: text.slice(start), end: text.length });
+  return parts;
+}
+
+/**
+ * Cut `text` to at most `budget` code units at a WHITESPACE boundary.
+ *
+ * The cut index always lands on a whitespace character, which is always a
+ * single BMP code unit, so the surviving prefix can never end on half of a
+ * surrogate pair. If not even the first word fits, the honest answer is an
+ * empty string — never a fragment of a word.
+ */
+function cutAtWord(text, budget) {
+  if (budget <= 0) return '';
+  if (text.length <= budget) return text;
+  var i = budget;
+  while (i >= 0 && !/\s/.test(text.charAt(i))) i -= 1;
+  if (i < 0) return '';
+  return text.slice(0, i).replace(/[\s,]+$/, '');
+}
+
+/**
+ * Drop whole tags off the END of `text` until it fits `budget`.
+ *
+ * Tags are dropped, not truncated: a half-tag is not a smaller version of a
+ * tag, it is a different tag. The one exception is the degenerate case where
+ * the FIRST tag is on its own longer than the entire budget — then there is
+ * no whole tag to keep, and the fallback is a whole-word cut inside it, which
+ * is still never a split word.
+ *
+ * @returns {{text:string, dropped:string[]}}
+ */
+function cutTagsToBudget(text, budget) {
+  var parts = splitTags(text);
+  var dropped = [];
+  var i;
+
+  if (text.length <= budget) return { text: text, dropped: dropped };
+
+  var keptCount = 0;
+  for (i = 0; i < parts.length; i += 1) {
+    if (parts[i].end <= budget) keptCount = i + 1;
+    else break;
+  }
+
+  if (keptCount > 0) {
+    for (i = keptCount; i < parts.length; i += 1) {
+      if (parts[i].text) dropped.push(parts[i].text);
+    }
+    return {
+      text: text.slice(0, parts[keptCount - 1].end).replace(/[\s,]+$/, ''),
+      dropped: dropped,
+    };
+  }
+
+  var word = cutAtWord(text, budget);
+  // Everything after the first tag is gone outright; the first is reported as
+  // dropped only when nothing of it survived at all.
+  for (i = word ? 1 : 0; i < parts.length; i += 1) {
+    if (parts[i].text) dropped.push(parts[i].text);
+  }
+  return { text: word, dropped: dropped };
+}
+
+/**
+ * Find the trailing '[Exclude: …]' block, if the string carries one.
+ * @returns {{head:string, block:string}} block is '' when there is none
+ */
+function splitExcludeBlock(text) {
+  var idx = text.lastIndexOf(EXCLUDE_OPEN);
+  if (idx === -1) return { head: text, block: '' };
+  if (text.charAt(text.length - 1) !== EXCLUDE_CLOSE) return { head: text, block: '' };
+  var block = text.slice(idx);
+  // A ']' anywhere but the very end means this is not a well-formed block, so
+  // it is treated as ordinary text rather than being "repaired" into one.
+  if (block.indexOf(EXCLUDE_CLOSE) !== block.length - 1) return { head: text, block: '' };
+  return { head: text.slice(0, idx).replace(/[\s,]+$/, ''), block: block };
+}
+
+/**
+ * Shrink an exclusion block until it fits, dropping whole terms off the end.
+ *
+ * The result is either a syntactically complete block — '[Exclude: ' … ']'
+ * with no half-written term inside — or the empty string, which means not
+ * even one term fits and the shield cannot be represented at all. It never
+ * emits '[Exclude: ]'.
+ *
+ * @returns {{text:string, dropped:string[]}}
+ */
+function shrinkExcludeBlock(block, limit) {
+  if (block.length <= limit) return { text: block, dropped: [] };
+  var inner = block.slice(EXCLUDE_OPEN.length, block.length - EXCLUDE_CLOSE.length);
+  var terms = inner.split(/\s*,\s*/);
+  var kept = [];
+  var dropped = [];
+  for (var i = 0; i < terms.length; i += 1) {
+    if (!terms[i]) continue;
+    // Once one term has been sacrificed every later one goes too: the shield
+    // is trimmed from the end, never re-ordered to make a short term fit.
+    if (dropped.length === 0) {
+      var candidate = EXCLUDE_OPEN + kept.concat([terms[i]]).join(', ') + EXCLUDE_CLOSE;
+      if (candidate.length <= limit) {
+        kept.push(terms[i]);
+        continue;
+      }
+    }
+    dropped.push(terms[i]);
+  }
+  return {
+    text: kept.length ? EXCLUDE_OPEN + kept.join(', ') + EXCLUDE_CLOSE : '',
+    dropped: dropped,
+  };
+}
+
+/**
+ * THE LIMITER (FDD #67, CLAUDE.md "Strict 1,000-Character Ceiling").
+ *
+ * Guarantees, all of them enforced by tests/limiter-eval.js:
+ *   - the result is at most `max` UTF-16 code units, for every input;
+ *   - an input already inside the budget comes back BYTE-IDENTICAL (a string
+ *     with surrounding whitespace is the one exception: the ends are trimmed,
+ *     because a compiled prompt never carries any);
+ *   - no cut ever splits a word, and never a surrogate pair;
+ *   - no orphaned ', ' or trailing comma is left at the cut;
+ *   - the '[Exclude: …]' block is the LAST thing sacrificed and stays at the
+ *     very end (FEATURE-MECHANICS.md §3.3): descriptive tags go first;
+ *   - if the shield itself must shrink it stays syntactically complete.
+ *
+ * @param {string} text a compiled style prompt
+ * @param {number} [max] defaults to PROMPT_CHAR_LIMIT
+ * @returns {{text:string, trimmed:boolean, droppedTags:string[],
+ *            droppedExclusions:string[]}}
+ */
+function limitPrompt(text, max) {
+  var limit = typeof max === 'number' && isFinite(max) ? Math.floor(max) : PROMPT_CHAR_LIMIT;
+  if (limit < 0) limit = 0;
+
+  var source = typeof text === 'string' ? text.replace(/^\s+/, '').replace(/\s+$/, '') : '';
+  var out = { text: source, trimmed: false, droppedTags: [], droppedExclusions: [] };
+  if (source.length <= limit) return out;
+
+  out.trimmed = true;
+  var split = splitExcludeBlock(source);
+  var i;
+
+  if (!split.block) {
+    var plain = cutTagsToBudget(split.head, limit);
+    out.text = plain.text;
+    out.droppedTags = plain.dropped;
+    return out;
+  }
+
+  // §3.3: the shield outranks every descriptor, so it keeps its space first
+  // and whatever is left over is what the descriptive tags get to spend.
+  var budget = limit - split.block.length - EXCLUDE_JOIN.length;
+  if (budget >= 1) {
+    var cut = cutTagsToBudget(split.head, budget);
+    out.text = cut.text ? cut.text + EXCLUDE_JOIN + split.block : split.block;
+    out.droppedTags = cut.dropped;
+    return out;
+  }
+
+  // Pathological: the shield alone leaves no room for a single tag, so every
+  // descriptor goes and the block itself has to shrink.
+  var parts = splitTags(split.head);
+  for (i = 0; i < parts.length; i += 1) {
+    if (parts[i].text) out.droppedTags.push(parts[i].text);
+  }
+  var shrunk = shrinkExcludeBlock(split.block, limit);
+  out.droppedExclusions = shrunk.dropped;
+  out.text = shrunk.text;
+
+  if (!shrunk.text) {
+    // Not even one exclusion term fits. Rather than emit a broken block, the
+    // shield is abandoned outright and the whole budget goes back to the tags.
+    var fallback = cutTagsToBudget(split.head, limit);
+    out.text = fallback.text;
+    out.droppedTags = fallback.dropped;
+  }
+  return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* G. THE WHOLE PIPELINE                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Compile and limit in one deterministic step — the function the UI calls on
+ * every single state change (ENGINEERING-STANDARD.md §1.2: the character count
+ * is the real length of the real string, recomputed, never estimated).
+ *
+ * @param {object|Array} promptState the store, or its entries
+ * @param {Array<string>} [exclusions]
+ * @param {{max?: number}} [options]
+ * @returns {{text:string, length:number, limit:number, zone:string,
+ *            trimmed:boolean, droppedTags:string[], droppedExclusions:string[],
+ *            conflicts:Array<object>, tags:string[], exclusions:string[]}}
+ */
+function buildFinalPrompt(promptState, exclusions, options) {
+  var limit =
+    options && typeof options.max === 'number' && isFinite(options.max)
+      ? Math.floor(options.max)
+      : PROMPT_CHAR_LIMIT;
+  var compiled = compileStylePrompt(promptState, exclusions);
+  var limited = limitPrompt(compiled.text, limit);
+
+  return {
+    text: limited.text,
+    length: limited.text.length,
+    limit: limit,
+    zone: promptBudgetZone(limited.text.length, limit),
+    trimmed: limited.trimmed,
+    droppedTags: limited.droppedTags,
+    droppedExclusions: limited.droppedExclusions,
+    conflicts: compiled.meta.conflicts,
+    tags: compiled.meta.tags,
+    exclusions: compiled.meta.exclusions,
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Studio shell — two-view switching + lightweight UI preferences             */
 /* -------------------------------------------------------------------------- */
@@ -10440,6 +11651,260 @@ function createRibbonRenderer(deps) {
     });
 
     renderDraft();
+
+    /* -- F. the Negative Tag Shield (FDD #30) -- */
+
+    const exclusions = createExclusionState();
+
+    const excludePresetHost = $('exclude-presets');
+    const excludeInput = $('exclude-input');
+    const excludeAddBtn = $('btn-exclude-add');
+    const excludeChips = $('exclude-chips');
+    const excludeEmpty = $('exclude-empty');
+    const excludeStatus = $('exclude-status');
+
+    /**
+     * One toggle per curated exclusion. `aria-pressed` is the state — both the
+     * styling and the accessibility tree read it, so they cannot drift apart.
+     * @type {Array<{term: string, button: HTMLButtonElement}>}
+     */
+    const excludePresetButtons = [];
+    for (let i = 0; i < EXCLUSION_PRESETS.length; i += 1) {
+      const term = EXCLUSION_PRESETS[i];
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chip exclude-chip';
+      button.textContent = term;
+      button.setAttribute('aria-pressed', 'false');
+      button.title = 'Exclude “' + term + '” from the generation';
+      button.addEventListener('click', function () {
+        const on = exclusions.toggle(term);
+        excludeStatus.className = 'dissect-status';
+        excludeStatus.textContent = on
+          ? '“' + term + '” excluded.'
+          : '“' + term + '” is no longer excluded.';
+      });
+      excludePresetHost.appendChild(button);
+      excludePresetButtons.push({ term: term, button: button });
+    }
+
+    /** Add whatever is in the box, and say plainly what happened to it. */
+    function addTypedExclusion() {
+      const raw = excludeInput.value.replace(/\s+/g, ' ').trim();
+      const value = normalizeExclusion(raw);
+      if (!value) {
+        excludeStatus.className = 'dissect-status warn';
+        excludeStatus.textContent = 'type something to exclude first — an empty term is not one.';
+        return;
+      }
+      const added = exclusions.add(value);
+      if (added === null) {
+        excludeStatus.className = 'dissect-status warn';
+        excludeStatus.textContent = '“' + value + '” is already excluded.';
+        return;
+      }
+      excludeInput.value = '';
+      excludeStatus.className = 'dissect-status';
+      excludeStatus.textContent =
+        raw.length > EXCLUSION_MAX_LEN
+          ? '“' + added + '” excluded — shortened to the ' + EXCLUSION_MAX_LEN + '-character limit.'
+          : '“' + added + '” excluded.';
+    }
+
+    excludeAddBtn.addEventListener('click', addTypedExclusion);
+    excludeInput.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      addTypedExclusion();
+    });
+
+    /**
+     * Repaint the shield. Like the draft card this replaces the whole chip row
+     * from inside a click handler on one of its own chips, so the same focus
+     * rescue applies: the next chip along, or the input box when the row empties.
+     */
+    function renderExclusions() {
+      const terms = exclusions.list();
+      const all = Array.prototype.slice.call(excludeChips.children);
+      const focusedIndex = all.indexOf(document.activeElement);
+
+      excludeChips.textContent = '';
+      for (let i = 0; i < terms.length; i += 1) {
+        const term = terms[i];
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip tag-chip exclude-chip';
+        chip.setAttribute('aria-pressed', 'true');
+        chip.title = 'Stop excluding “' + term + '”';
+        chip.setAttribute('aria-label', chip.title);
+        const label = document.createElement('span');
+        label.textContent = term;
+        const cross = document.createElement('span');
+        cross.className = 'tag-chip-x';
+        cross.setAttribute('aria-hidden', 'true');
+        cross.textContent = '×';
+        chip.appendChild(label);
+        chip.appendChild(cross);
+        chip.addEventListener('click', function () {
+          exclusions.remove(term);
+        });
+        excludeChips.appendChild(chip);
+      }
+
+      for (let p = 0; p < excludePresetButtons.length; p += 1) {
+        const entry = excludePresetButtons[p];
+        entry.button.setAttribute('aria-pressed', exclusions.has(entry.term) ? 'true' : 'false');
+      }
+
+      excludeEmpty.hidden = terms.length > 0;
+
+      if (focusedIndex !== -1) {
+        const rebuilt = excludeChips.children;
+        const target = rebuilt.length
+          ? rebuilt[Math.min(focusedIndex, rebuilt.length - 1)]
+          : excludeInput;
+        if (target && typeof target.focus === 'function') target.focus();
+      }
+    }
+
+    /* -- G. the compiled style prompt and its 1,000-character gauge (FDD #67) -- */
+
+    const styleCount = $('style-count');
+    const styleMeter = $('style-meter');
+    const styleMeterFill = $('style-meter-fill');
+    const styleZoneNote = $('style-zone-note');
+    const styleEmpty = $('style-empty');
+    const styleTextEl = $('style-text');
+    const styleTrimmedNote = $('style-trimmed');
+    const styleConflictList = $('style-conflicts');
+    const styleTally = $('style-tally');
+    const styleCopyBtn = $('btn-style-copy');
+
+    /* One sentence per safety band, naming the threshold that was crossed. */
+    const ZONE_NOTES = {
+      safe: 'Plenty of room — ' + PROMPT_ZONE_SAFE_MAX + ' characters or fewer.',
+      warn:
+        'Getting close — over ' + PROMPT_ZONE_SAFE_MAX + ' of ' + PROMPT_CHAR_LIMIT + ' characters.',
+      danger:
+        'Almost full — over ' + PROMPT_ZONE_WARN_MAX + ' of ' + PROMPT_CHAR_LIMIT + ' characters.',
+    };
+
+    /* The markup ships in the safe band, so the live region has nothing to
+     * announce until the band actually changes. */
+    let lastZone = 'safe';
+
+    /**
+     * The single render path for the compiled prompt. It SUBSCRIBES to both
+     * stores, so no mutation anywhere else has to remember to repaint: add a
+     * tag, remove a tag, drag a slider or toggle an exclusion and this runs.
+     *
+     * docs/ENGINEERING-STANDARD.md §1.2: the number on screen is the real
+     * `.length` of the real compiled string, recomputed from scratch on every
+     * change — never an estimate, never the ingredient count.
+     */
+    function renderStylePrompt() {
+      const final = buildFinalPrompt(promptState, exclusions.list());
+      const zoneClass = final.zone === 'safe' ? '' : ' is-' + final.zone;
+
+      styleMeterFill.style.width = Math.min(100, (final.length / final.limit) * 100).toFixed(2) + '%';
+      styleMeter.className = 'style-meter' + zoneClass;
+      styleMeter.setAttribute(
+        'aria-label',
+        'Character budget: ' + final.length + ' of ' + final.limit + ' characters used'
+      );
+      styleCount.className = 'style-count' + zoneClass;
+      styleCount.textContent = final.length + ' / ' + final.limit;
+
+      // The live region speaks on a ZONE CHANGE and nothing else: announcing
+      // every character would bury the interaction it is describing.
+      if (final.zone !== lastZone) {
+        lastZone = final.zone;
+        styleZoneNote.textContent = ZONE_NOTES[final.zone];
+      }
+
+      styleEmpty.hidden = final.length > 0;
+      styleTextEl.hidden = final.length === 0;
+      styleTextEl.textContent = final.text;
+
+      const notes = [];
+      if (final.droppedTags.length) {
+        notes.push(
+          'Trimmed to the ' +
+            final.limit +
+            '-character ceiling — ' +
+            plural(final.droppedTags.length, 'tag') +
+            ' dropped: ' +
+            final.droppedTags.join(', ') +
+            '.'
+        );
+      }
+      if (final.droppedExclusions.length) {
+        notes.push(
+          plural(final.droppedExclusions.length, 'exclusion') +
+            ' dropped for the same reason: ' +
+            final.droppedExclusions.join(', ') +
+            '.'
+        );
+      }
+      styleTrimmedNote.hidden = notes.length === 0;
+      styleTrimmedNote.textContent = notes.join(' ');
+
+      // Conflict notes are persistent, not dismissable: dismissing one would
+      // hide the fact that a tag is missing from the prompt about to be pasted.
+      styleConflictList.textContent = '';
+      for (let c = 0; c < final.conflicts.length; c += 1) {
+        const conflict = final.conflicts[c];
+        const item = document.createElement('li');
+        item.textContent =
+          '“' +
+          conflict.dropped +
+          '” dropped — conflicts with “' +
+          conflict.kept +
+          '” (' +
+          conflict.rule +
+          ').';
+        styleConflictList.appendChild(item);
+      }
+      styleConflictList.hidden = final.conflicts.length === 0;
+
+      styleTally.textContent =
+        plural(final.tags.length, 'tag') + ' · ' + plural(final.exclusions.length, 'exclusion');
+    }
+
+    promptState.subscribe(renderStylePrompt);
+    exclusions.subscribe(renderExclusions);
+    exclusions.subscribe(renderStylePrompt);
+
+    styleCopyBtn.addEventListener('click', function () {
+      // Recompiled rather than read from a cached render: the pipeline is
+      // deterministic, so this is the same string the panel is showing, and
+      // there is no cached copy that could ever go stale behind it.
+      const final = buildFinalPrompt(promptState, exclusions.list());
+      if (!final.text) {
+        toastHost.show('Nothing to copy yet — the style prompt is empty.', 'warn');
+        return;
+      }
+      const done = function () {
+        toastHost.show(
+          'Style prompt copied — ' +
+            plural(final.length, 'character') +
+            ' of ' +
+            final.limit +
+            (final.trimmed ? ' (trimmed to fit).' : '.')
+        );
+      };
+      copyViaClipboard(final.text).then(done, function () {
+        if (copyViaExecCommand(final.text)) done();
+        else
+          toastHost.show(
+            'Could not reach the clipboard — select the style prompt and copy it manually.',
+            'error'
+          );
+      });
+    });
+
+    renderExclusions();
+    renderStylePrompt();
 
     /* ---------------- song structure builder (FDD Domain D) ---------------- */
 

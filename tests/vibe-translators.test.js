@@ -30,9 +30,10 @@
  *     the handles would immediately re-add). Those need a browser; they are
  *     verified by hand against a served localhost build, the boot IIFE is
  *     proven to stay inert outside one, and every pure half is exercised here.
- *   - Any character-budget behaviour. There is none yet — counts() reports a
- *     length and stops. tests/limiter-eval.js owns that contract and is still
- *     honestly all-todo.
+ *   - Any character-budget behaviour. counts() deliberately still reports a
+ *     length and stops: the budget belongs to the compiler pipeline, and
+ *     tests/limiter-eval.js (the ceiling) and tests/compiler.test.js (the
+ *     weighting, the conflict rules and the shield) own that contract.
  *
  * Node built-ins only: fs, path, assert, vm.
  */
@@ -575,8 +576,10 @@ s.test('counts() reports sizes only — a length, never a verdict', () => {
   assert.strictEqual(counts.sections.mood, 1);
   assert.strictEqual(counts.sources.manual, 2);
 
-  // No budget flag of any kind: trimming is the queued limiter task and this
-  // release must not pretend to do it (docs/ENGINEERING-STANDARD.md §1.1).
+  // No budget flag of any kind. The limiter has shipped, but it lives in the
+  // compiler pipeline (buildFinalPrompt), not in the ingredient store: this
+  // store's job is to hold what the user picked, and a verdict smuggled in
+  // here would give the app two sources of truth for one number.
   for (const key of Object.keys(counts)) {
     assert.ok(
       ['total', 'length', 'sections', 'sources'].indexOf(key) !== -1,
@@ -1212,12 +1215,26 @@ s.test('the draft panel states its empty case and announces its counts', () => {
   assert.ok(/id="draft-empty"[\s\S]{0,200}Nothing added yet/.test(editor), 'the empty state must say so plainly');
   assert.ok(/id="draft-counts"[^>]*role="status"/.test(editor), 'the counts must be a live region');
   assert.ok(/id="draft-counts"[^>]*aria-live="polite"/.test(editor));
-  // Honesty check: the draft card must not claim a budget it does not enforce.
+  /*
+   * Honesty check, still. The 1,000-character budget now EXISTS, but it is not
+   * this card's: the draft is the ingredients list, and the gauge that counts,
+   * colours and enforces the ceiling lives in the Style prompt card
+   * (tests/compiler.test.js owns that contract). So the draft card must still
+   * not claim a budget — it is a plain tag count, and a user reading a number
+   * here must not think it is the one Suno will reject them for.
+   *
+   * The slice runs from the draft heading to the END OF THE CARD, not to the
+   * end of the view: the Style prompt card that follows is entitled to say
+   * "1,000" on every other line, and it does.
+   */
   const draftStart = editor.indexOf('id="draft-heading"');
-  const draftMarkup = editor.slice(draftStart);
+  const draftEnd = editor.indexOf('</section>', draftStart);
+  assert.ok(draftEnd > draftStart, 'the draft card is not a closed <section>');
+  const draftMarkup = editor.slice(draftStart, draftEnd);
   assert.ok(
     !/1,?000/.test(draftMarkup),
-    'the draft card must not mention a 1,000-character budget — nothing enforces one yet'
+    'the draft card must not mention a 1,000-character budget — it counts ingredients, ' +
+      'not the compiled style prompt the gauge enforces'
   );
 });
 
