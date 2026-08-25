@@ -51,9 +51,14 @@
        sliderTags / sliderValueText (FEATURE-MECHANICS §4), matchScenes, the
        Safe-Mode sanitizer (sanitizeSafeMode and its vocabulary helpers) and
        the single var VOCAL_REGISTRY (FDD #65) with the pure selector helpers
-       the Vocal Persona card (FDD #28) is built on, and beside it the single
+       the Vocal Persona card (FDD #28) is built on, beside it the single
        var ERA_REGISTRY (FDD #66) with the matching helpers the Production
-       Era & Signature card is built on
+       Era & Signature card is built on, then var INSTRUMENT_REGISTRY
+       (FDD #27) with its derivation record (INSTRUMENT_KB_MAP /
+       INSTRUMENT_KB_EXCLUDED, which account for every instrument string
+       MUSIC_KB names) and finally the "Inspire Me" slot machine (FDD #71):
+       var INSPIRE_AFFINITY, the seedable createSeededRng, the pure
+       spinInspiration and the one writer applyInspiration
     5. the Song Structure Builder (FDD Domain D) — the SUNO_METATAGS taxonomy
        and its sanitiser/compiler (validateMetatag, sanitizeStructureTag,
        formatStructureTag), createStructureState with the §2.3 auto-chorus
@@ -1645,7 +1650,9 @@
   .scene-panel,
   .slider-panel,
   .vocal-panel,
+  .instrument-panel,
   .era-panel,
+  .inspire-panel,
   .structure-panel,
   .exclude-panel,
   .style-panel,
@@ -2019,6 +2026,227 @@
     color: var(--accent-cyan);
     background: var(--tint-cyan);
     border-color: var(--tint-cyan-border);
+  }
+
+  /* --- Modular Instrument "Lego Blocks" (FDD #27) ------------------------- */
+
+  /* The third card built on the shared parts — .vlist scroller, .chip filters,
+     the same search row — because 87 blocks in eight families is the same
+     problem the other two solved (ENGINEERING-STANDARD.md §2.2). Only what
+     this card ADDS is below. */
+  .instrument-panel { margin-top: 24px; }
+
+  .instrument-row {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .instrument-count {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .instrument-families {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* A FAMILY CHIP IS A FILTER, exactly as the era card's group chips are, and
+     it wears the same violet-ink-plus-violet-border state for the same reason:
+     cyan has meant "this is in your prompt" since the persona card shipped, so
+     a control that only changes the VIEW must not borrow it. No wash behind
+     it either — the measurement in the era block above applies verbatim, since
+     this is the same token on the same .chip ground. */
+  .instrument-family-chip[aria-pressed="true"] {
+    color: var(--ink-violet);
+    border-color: var(--accent-violet);
+  }
+
+  /* THE LAYERING SURFACE — FDD #27's "visual badges for layering specific
+     instruments". This row is the one place this card deliberately does NOT
+     reuse the pill its siblings use: an arrangement is a stack, and a stack
+     wants to be looked at, so a badge is a two-line block (family over name)
+     with a weighted left edge rather than a one-line chip. It is the same
+     additive cyan the pressed toggles wear, at more weight, and the same
+     click-to-remove contract as every other selected chip in this app. */
+  .instrument-badges {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .instrument-badges:empty { display: none; }
+
+  .instrument-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 7px 12px 8px;
+    font: inherit;
+    text-align: left;
+    color: var(--text);
+    background: var(--tint-cyan);
+    border: 1px solid var(--tint-cyan-border);
+    border-left: 3px solid var(--accent-cyan);
+    border-radius: 4px 10px 10px 4px;
+    cursor: pointer;
+    /* NO COLOUR TRANSITION, deliberately — this is the bug PLANNING.md already
+       carries for .btn-record and .btn-mini, and a new card is not the place to
+       add a third instance of it.
+       MEASURED IN CHROME on this element: a `background 120ms` here left the
+       badge painted black after Code Mode was switched back OFF, and a
+       `border-color 120ms` left four border-colour transitions permanently in
+       flight (getAnimations() still listed all four 600ms later) with the
+       colour stuck on the pre-swap value — an interpolation from a color-mix()
+       token to a plain rgb one never lands when the token is replaced under it.
+       Killing the transition snapped the colour to the correct one instantly.
+       Hover changes only the border, so an instant change costs nothing. */
+  }
+
+  .instrument-badge:hover { border-color: var(--accent-cyan); }
+
+  .instrument-badge:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  .instrument-badge-family {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .instrument-badge-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+
+  /* Added / not added, same pressed-toggle contract and the same cyan as the
+     persona and era rows: all three ADD tags to the draft, so they say so the
+     same way. Declared separately rather than sharing a selector list, so any
+     one card can diverge without silently repainting the other two. */
+  .btn-instrument[aria-pressed="true"] {
+    color: var(--accent-cyan);
+    background: var(--tint-cyan);
+    border-color: var(--tint-cyan-border);
+  }
+
+  /* --- "Inspire Me" slot machine (FDD #71) -------------------------------- */
+
+  .inspire-panel { margin-top: 24px; }
+
+  .inspire-row {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* The one big button the feature is. It borrows .btn-record's shape (the
+     app's only "primary action" pill) and adds the violet edge, because this
+     button GENERATES rather than records — and it must not read as a second
+     Dissect. */
+  .inspire-spin {
+    border-color: var(--tint-violet);
+    background: var(--tint-violet);
+    /* .btn-record's own rule transitions background, border-color and
+       box-shadow, and this button repaints ALL of those from theme tokens —
+       which is exactly the freeze measured on .instrument-badge above
+       (reproduced here too: the violet wash and the violet border both
+       survived Code Mode being switched on, and snapped to the right colours
+       the instant the transition was removed). The shorthand is CANCELLED
+       rather than narrowed, because narrowing it to border-color still froze. */
+    transition: none;
+  }
+
+  .inspire-spin:hover { border-color: var(--accent-violet); }
+
+  .inspire-spin:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-violet);
+    outline-offset: 2px;
+  }
+
+  /* HONESTY, PAINTED: the line that names the genre the combination was drawn
+     from. It is beside the button rather than under the chips because it is
+     the answer to "where did this come from?", not a footnote. */
+  .inspire-seeded {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  .inspire-seeded:empty { display: none; }
+
+  .inspire-strip {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .inspire-strip:empty { display: none; }
+
+  /* One spun descriptor. Read-only — the strip is a PROPOSAL, so a chip here
+     is a <span> with no affordance, and the only way anything reaches the
+     draft is the Add all button below. */
+  .inspire-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 12px;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+  }
+
+  .inspire-chip-kind {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-violet);
+  }
+
+  .inspire-actions {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .inspire-actions[hidden] { display: none; }
+
+  /* The tumble. A spin is a moment of chance and the strip should look like
+     one, so the new combination drops in rather than appearing. It is a
+     one-shot class the boot removes on animationend, NOT an infinite loop:
+     nothing on this page animates while the user is reading it.
+     prefers-reduced-motion turns it off at the bottom of this sheet, and the
+     boot additionally never adds the class when the query matches — belt and
+     braces, because the class also gates nothing else. */
+  @keyframes inspire-tumble {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .inspire-strip.is-spinning .inspire-chip {
+    animation: inspire-tumble 260ms ease-out both;
   }
 
   /* --- Strict 1,000-character gauge + compiled style prompt (FDD #67) ----- */
@@ -2692,6 +2920,15 @@
     .vocal-row .field { width: 100%; }
     .era-row { flex-direction: column; align-items: stretch; }
     .era-row .field { width: 100%; }
+    .instrument-row { flex-direction: column; align-items: stretch; }
+    .instrument-row .field { width: 100%; }
+    /* A narrow Inspire card stacks the spin button over the provenance line
+       rather than letting a 200px pill and a genre name fight over one row,
+       and the badges stretch so a two-line block is not squeezed to a
+       three-line one. */
+    .inspire-row { flex-direction: column; align-items: stretch; }
+    .inspire-spin { justify-content: center; }
+    .instrument-badge { flex: 1 1 auto; }
     .draft-foot { align-items: stretch; flex-direction: column; }
     /* A narrow structure card stacks the block toolbar rather than letting the
        tag line, the handle and four buttons fight over one line. */
@@ -2946,6 +3183,43 @@
     border: 1px solid var(--accent-violet);
   }
 
+  /* The instrument card is the same pair one more time: an added block keeps
+     the cyan border once the wash is flattened, and its FAMILY filter keeps
+     the violet one — the two must stay a different colour from each other, or
+     the mode that removes the washes would also remove the difference between
+     filtering the list and changing the draft. */
+  .high-contrast .btn-instrument[aria-pressed="true"] {
+    border: 1px solid var(--accent-cyan);
+  }
+
+  .high-contrast .instrument-family-chip[aria-pressed="true"] {
+    border: 1px solid var(--accent-violet);
+  }
+
+  /* The layering badges lose their cyan wash here like every other tint, so
+     the accent left edge becomes the whole "this is stacked" signal — it is
+     kept at full weight rather than flattened to the hairline the rule above
+     would otherwise give it. */
+  .high-contrast .instrument-badge {
+    background: var(--bg);
+    border: 1px solid var(--surface-border);
+    border-left: 3px solid var(--accent-cyan);
+  }
+
+  /* The Inspire card's own two washes: the spin button's violet ground and the
+     read-only chips' recessed one. Both flatten to black, and the button keeps
+     the violet border so it still reads as the generator rather than a second
+     Dissect. */
+  .high-contrast .inspire-spin {
+    background: var(--bg);
+    border: 1px solid var(--accent-violet);
+  }
+
+  .high-contrast .inspire-chip {
+    background: var(--bg);
+    border: 1px solid var(--surface-border);
+  }
+
   /* A warning panel must survive the mode that removes washes: the accent
      border is the signal once the tint is gone. */
   .high-contrast .storage-note {
@@ -2994,6 +3268,15 @@
     .studio-view.is-entering,
     #view-hum.is-entering { animation: none; }
     .view-tab, .btn-toggle, .btn-mini { transition: none; }
+    /* A slot machine that tumbles is motion, and #71 is not worth overriding
+       the OS setting for: the combination simply appears. The boot ALSO skips
+       adding the class when this query matches, so the animation is off at
+       both ends rather than relying on one. */
+    .inspire-strip.is-spinning .inspire-chip { animation: none; }
+    /* No `.instrument-badge, .inspire-spin { transition: none; }` line here:
+       neither element transitions anything in the first place (see their own
+       rules and the theme-swap freeze measured there), so it would be dead CSS
+       that looked like a guard. */
     /* The jump strip's smooth scroll is motion too: a jump becomes an instant
        one rather than a 400ms glide across the whole workspace. */
     html { scroll-behavior: auto; }
@@ -3446,6 +3729,46 @@
     </div>
     </div>
 
+    <!-- "Inspire Me" slot machine (docs/FDD.md #71). It closes the Describe
+         zone because it answers the same question the dissector does — "where
+         do I start?" — from the opposite direction: the dissector needs you to
+         have an idea, this one hands you one.
+         The strip NAMES the genre that seeded the combination, because a
+         suggestion whose provenance is hidden is a suggestion you cannot
+         argue with. Nothing here touches the draft: spinning shows a
+         combination, and only "Add all to prompt" adds it. -->
+    <section class="view-col vibe-card inspire-panel" aria-labelledby="inspire-heading">
+      <h4 id="inspire-heading" class="panel-heading">Inspire me</h4>
+      <p class="panel-note">
+        One pull gives you a whole starting point: two or three descriptors, an
+        instrument or two, a mood, and sometimes a production era or a scene. Everything
+        in a spin is read off <em>one</em> genre's own row in the embedded taxonomy — that
+        is what stops it handing you amapiano log drums under a black-metal tag — and the
+        result is checked against the conflict resolver before you ever see it.
+        <strong>Spinning never changes your prompt.</strong>
+      </p>
+
+      <div class="inspire-row">
+        <button type="button" id="btn-inspire" class="btn-record inspire-spin">
+          <span id="btn-inspire-label">Spin</span>
+        </button>
+        <span id="inspire-seeded" class="inspire-seeded"></span>
+      </div>
+
+      <p id="inspire-empty" class="draft-empty">
+        Nothing spun yet — press Spin for a combination drawn from one genre.
+      </p>
+      <div id="inspire-strip" class="inspire-strip" role="group"
+           aria-label="Spun combination"></div>
+
+      <div id="inspire-actions" class="inspire-actions" role="group"
+           aria-label="Spun combination actions" hidden>
+        <button type="button" id="btn-inspire-add" class="btn-mini">Add all to prompt</button>
+        <button type="button" id="btn-inspire-again" class="btn-mini">Spin again</button>
+      </div>
+      <p id="inspire-status" class="dissect-status" role="status" aria-live="polite"></p>
+    </section>
+
     <!-- ZONES 2 and 3, side by side once the view can hold both.
          SHAPE is everything that FEEDS the prompt; COMPILE is the draft, the
          exclusions and the compiled style field the user actually pastes.
@@ -3557,6 +3880,51 @@
       <p id="vocal-empty" class="draft-empty" hidden></p>
       <div id="vocal-list" class="vlist" tabindex="0" aria-label="Vocal personas"></div>
       <p id="vocal-status" class="dissect-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <!-- Modular Instrument "Lego Blocks" (docs/FDD.md #27) over var
+         INSTRUMENT_REGISTRY, with #26's world instruments folded in as one
+         family. Built from the same parts as the two cards around it — the
+         shared virtualized .vlist, the same search row, the same pressed
+         toggle — because it is the same kind of thing: a table, a filter, a
+         selection that writes into one prompt group.
+         The one place it deliberately differs is the SELECTED row. #27 asks
+         for "visual badges for layering specific instruments", and that row IS
+         the layering surface: a stacked badge per block, each carrying its
+         family over its name, so what the arrangement is built out of can be
+         read at a glance instead of counted out of a tag string. -->
+    <section class="view-col vibe-card instrument-panel" aria-labelledby="instrument-heading">
+      <h4 id="instrument-heading" class="panel-heading">Instrument blocks</h4>
+      <p class="panel-note">
+        Layer the arrangement one block at a time. Every block is a generic,
+        copyright-safe instrument description — search by family (drums, bass, keys),
+        by name (marimba, koto, Rhodes) or by how it is played (slap, brushed, palm-muted),
+        and narrow to one family with the chips. Adding one puts <em>all</em> of its tags
+        in the Instruments group, weighted so the name leads; clicking it again takes them
+        straight back out.
+      </p>
+
+      <div class="instrument-row">
+        <span class="field field-grow">
+          <label class="field-label" for="instrument-search">Search instruments</label>
+          <input type="search" id="instrument-search" class="field-input" autocomplete="off"
+                 spellcheck="false" placeholder="e.g. shaker, 808, rhodes, koto, slap">
+        </span>
+        <span id="instrument-count" class="instrument-count"></span>
+      </div>
+
+      <div id="instrument-families" class="instrument-families" role="group"
+           aria-label="Filter by instrument family"></div>
+
+      <p id="instrument-selected-empty" class="draft-empty">
+        No blocks stacked yet — the prompt names no instruments.
+      </p>
+      <div id="instrument-badges" class="instrument-badges" role="group"
+           aria-label="Stacked instrument blocks"></div>
+
+      <p id="instrument-empty" class="draft-empty" hidden></p>
+      <div id="instrument-list" class="vlist" tabindex="0" aria-label="Instrument blocks"></div>
+      <p id="instrument-status" class="dissect-status" role="status" aria-live="polite"></p>
     </section>
 
     <!-- Expanded Production Eras (docs/FDD.md #66) over var ERA_REGISTRY. The
@@ -5707,7 +6075,7 @@ if (typeof self !== 'undefined') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.19.0';
+const APP_VERSION = '0.20.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -9844,6 +10212,34 @@ var ERA_SECTION = 'era';
 var ERA_SIGNATURE_SOURCE = 'era-signature';
 
 /*
+ * The Modular Instrument "Lego Blocks" section (FDD #27, section G below).
+ *
+ * Like 'era', the SECTION is not new — 'instrument' has been in the order
+ * below since the first release, filled by the dissector when a description
+ * mentions a sound source. What #27 adds is a second SOURCE writing into it:
+ * 'instrument-block', the direct-selection card. Two sources, one section, one
+ * de-duplication index — so picking "Log Drums" by hand and dissecting a track
+ * that reads as amapiano cannot put the same tag in the group twice.
+ */
+var INSTRUMENT_SECTION = 'instrument';
+var INSTRUMENT_BLOCK_SOURCE = 'instrument-block';
+
+/*
+ * The "Inspire Me" slot machine (FDD #71, section H below).
+ *
+ * This one is a SOURCE WITHOUT A SECTION OF ITS OWN, and deliberately so: a
+ * spin hands back a genre token, an instrument, a mood and (sometimes) an era
+ * or a scene, and each of those belongs in the group it has always belonged
+ * in. Every seed spinInspiration() produces therefore NAMES its section, and
+ * the entry in PROMPT_SOURCE_SECTION below is only the fallback the store
+ * reaches for when an entry does not — which, for this source, never happens.
+ * What the source buys is provenance: counts().sources.inspire says how much
+ * of the draft the slot machine put there, and 'Clear' paths that work by
+ * source can take exactly that back out.
+ */
+var INSPIRE_SOURCE = 'inspire';
+
+/*
  * Emission order. Suno reads a style prompt front-to-back and weights what it
  * sees first, so the genre leads, the feel follows, and the physical-slider
  * tags (which colour everything before them) are appended last.
@@ -9867,7 +10263,7 @@ var PROMPT_SECTION_ORDER = [
   'genre',
   'mood',
   VOCAL_SECTION,
-  'instrument',
+  INSTRUMENT_SECTION,
   'scene',
   ERA_SECTION,
   'custom',
@@ -9887,6 +10283,8 @@ var PROMPT_SOURCES = [
   'manual',
   VOCAL_PERSONA_SOURCE,
   ERA_SIGNATURE_SOURCE,
+  INSTRUMENT_BLOCK_SOURCE,
+  INSPIRE_SOURCE,
 ].concat(PROMPT_SLIDER_SOURCES);
 
 /** Section a source writes to when an entry does not name one itself. */
@@ -9896,6 +10294,11 @@ var PROMPT_SOURCE_SECTION = {
   manual: 'custom',
   'vocal-persona': VOCAL_SECTION,
   'era-signature': ERA_SECTION,
+  'instrument-block': INSTRUMENT_SECTION,
+  /* See INSPIRE_SOURCE above: every inspiration seed names its own section, so
+   * this is a fallback that is never reached in practice. 'custom' rather than
+   * a guessed group, because a tag whose home was lost belongs in Other. */
+  inspire: 'custom',
   'slider-energy': PROMPT_SLIDER_SECTION,
   'slider-warmth': PROMPT_SLIDER_SECTION,
   'slider-density': PROMPT_SLIDER_SECTION,
@@ -13736,6 +14139,1659 @@ function toggleEraSignature(store, signature) {
     }
   });
   return result;
+}
+
+/* ==========================================================================
+ * G. MODULAR INSTRUMENT "LEGO BLOCKS" — docs/FDD.md #27, with #26's world
+ *    instruments folded in as one family rather than a second selector.
+ *
+ * WHAT THIS TABLE IS, AND WHERE IT CAME FROM
+ * MUSIC_KB already names 157 distinct sound sources across its 32 genres —
+ * real strings like "log drum", "shaker", "TR-909 kick", "muted Rhodes
+ * chords". Those strings exist to be EMITTED by the dissector, so they are
+ * phrased for a prompt ("soft shaker groove") rather than for a picker
+ * ("Shakers"), and a dozen of them are the same instrument said three ways
+ * ("sub bass" / "deep sub bass" / "rounded sub bass" / "warm sub bass").
+ *
+ * INSTRUMENT_REGISTRY is that vocabulary DEDUPED INTO BLOCKS: one entry per
+ * instrument a person would actually reach for, in eight families, plus the
+ * staples the genre table never happened to need (a trombone, a harp, a koto,
+ * a kalimba — FDD #26 names Koto and Nyckelharpa by hand, and both are here).
+ * INSTRUMENT_KB_MAP below records which KB string each block covers, and
+ * INSTRUMENT_KB_EXCLUDED records the ones that are deliberately NOT
+ * instruments; tests/instruments-inspire.test.js checks the two tables against
+ * the live MUSIC_KB and fails if a genre gains a sound source with no home.
+ *
+ * THE SHAPE, AND WHY IT IS SIMPLER THAN #65's OR #66's
+ * A vocal persona needs three or four tags because "who is singing" is a
+ * bundle of qualities. An instrument mostly IS its own name: the tag for a
+ * marimba is "marimba loop". So an entry carries ONE or TWO tags — the name,
+ * and at most one phrase that says how it is played — and no description
+ * field, because "Slap Bass" does not owe the reader a sentence.
+ *
+ * NAMING: the same Safe-Mode standard the other two registries hold to. No
+ * manufacturer, model or product name reaches a tag — MUSIC_KB's own
+ * "TR-909 kick" is covered by the generic "punchy analog machine kick", and
+ * the acid entry says "resonant filter squelch" rather than naming the box.
+ * ========================================================================== */
+
+/*
+ * Position -> weight for a block's tags. One notch under the era weights and
+ * two under the vocal ones, which is the honest ranking: a named voice decides
+ * who is singing, a production signature decides what the recording sounds
+ * like, and an instrument is one layer inside that. The #67 limiter trims from
+ * the light end, so a shaker is shed before the singer or the tape machine.
+ */
+var INSTRUMENT_TAG_WEIGHTS = [0.7, 0.5];
+
+/*
+ * The eight families, in the order the card reads them: the rhythm section
+ * first (drums, bass), then what plays the harmony (keys, guitars), then the
+ * horns, then the two families that are about colour (world, electronic), then
+ * the orchestra. Unlike ERA_GROUP_ORDER there is no second source of truth for
+ * this order — the array below is authored in it, exactly the way
+ * VOCAL_REGISTRY is, because there is no chronology to reconstruct. The suite
+ * pins the eight ids so a reshuffle is a decision rather than an accident.
+ */
+var INSTRUMENT_REGISTRY = [
+  /* -- Drums & Percussion ------------------------------------------------- */
+  {
+    id: 'drums-percussion-four-on-the-floor-kick',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Four-on-the-Floor Kick',
+    tags: ['four-on-the-floor kick', 'punchy analog machine kick'],
+  },
+  {
+    id: 'drums-percussion-808-kick',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Booming 808 Kick',
+    tags: ['booming 808 kick', 'sub-heavy 808 boom'],
+  },
+  {
+    id: 'drums-percussion-industrial-kick',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Pounding Industrial Kick',
+    tags: ['pounding kick drum', 'distorted industrial kick'],
+  },
+  {
+    id: 'drums-percussion-double-kick',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Double Kick Pedal',
+    tags: ['double kick drum pedal', 'relentless double bass drum'],
+  },
+  {
+    id: 'drums-percussion-live-kit',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Live Drum Kit',
+    tags: ['driving drum kit', 'live room drum kit'],
+  },
+  {
+    id: 'drums-percussion-drum-machine',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Drum Machine Kit',
+    tags: ['retro drum machine', 'punchy programmed drums'],
+  },
+  {
+    id: 'drums-percussion-sampled-break',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Sampled Drum Break',
+    tags: ['boom bap drum break', 'chopped amen break'],
+  },
+  {
+    id: 'drums-percussion-brushed-kit',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Brushed Snare Kit',
+    tags: ['brushed snare drums', 'soft brushed kit'],
+  },
+  {
+    id: 'drums-percussion-snare',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Snare & Rimshot',
+    tags: ['half-time snare', 'cross-stick rimshot'],
+  },
+  {
+    id: 'drums-percussion-swung-hats',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Swung Hi-Hats',
+    tags: ['swung hi-hats', 'wide open hi-hats'],
+  },
+  {
+    id: 'drums-percussion-hat-rolls',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Hi-Hat Rolls',
+    tags: ['rapid hi-hat rolls', 'fast triplet hi-hats'],
+  },
+  {
+    id: 'drums-percussion-cymbals',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Ride & Crash Cymbals',
+    tags: ['swung ride cymbal', 'crash cymbal accent'],
+  },
+  {
+    id: 'drums-percussion-claps-tambourine',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Handclaps & Tambourine',
+    tags: ['handclap groove', 'tambourine groove'],
+  },
+  {
+    id: 'drums-percussion-shakers',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Shakers',
+    tags: ['shakers', 'soft shaker groove'],
+  },
+  {
+    id: 'drums-percussion-rolling-percussion',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Rolling Percussion Groove',
+    tags: ['rolling groove percussion', 'syncopated percussion layer'],
+  },
+  {
+    id: 'drums-percussion-dembow',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Dembow Pattern',
+    tags: ['dembow drum pattern', 'dembow rhythm'],
+  },
+  {
+    id: 'drums-percussion-two-step',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Two-Step Shuffle',
+    tags: ['shuffled 2-step drum pattern', 'swung garage groove'],
+  },
+  {
+    id: 'drums-percussion-industrial-percussion',
+    family: 'drums-percussion',
+    familyLabel: 'Drums & Percussion',
+    label: 'Industrial Percussion',
+    tags: ['distorted machine percussion', 'metallic clang samples'],
+  },
+
+  /* -- Bass ---------------------------------------------------------------- */
+  {
+    id: 'bass-sub-bass',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Sub Bass',
+    tags: ['sub bass', '808 sub bass'],
+  },
+  {
+    id: 'bass-electric-bass',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Electric Bass Guitar',
+    tags: ['bass guitar', 'fingered electric bass'],
+  },
+  {
+    id: 'bass-slap-bass',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Slap Bass',
+    tags: ['slap bass', 'popped slap bass groove'],
+  },
+  {
+    id: 'bass-upright-bass',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Upright Double Bass',
+    tags: ['upright walking bass', 'warm double bass'],
+  },
+  {
+    id: 'bass-disco-bassline',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Disco Bassline',
+    tags: ['funky disco bassline', 'nu-disco bassline'],
+  },
+  {
+    id: 'bass-distorted-bass',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Distorted Analog Bass',
+    tags: ['distorted analog bass', 'crunchy saturated bass'],
+  },
+  {
+    id: 'bass-reese-wobble',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Reese & Wobble Bass',
+    tags: ['reese bassline', 'wobble bass synth'],
+  },
+  {
+    id: 'bass-rolling-bassline',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Rolling Bassline',
+    tags: ['rolling bassline', 'driving 16th-note bass'],
+  },
+  {
+    id: 'bass-acid-bass',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'Squelchy Acid Bass',
+    tags: ['squelchy bassline', 'resonant acid bass'],
+  },
+  {
+    id: 'bass-fm-bass',
+    family: 'bass',
+    familyLabel: 'Bass',
+    label: 'FM Bass',
+    tags: ['fm bass', 'metallic fm bass'],
+  },
+
+  /* -- Keys & Synths ------------------------------------------------------- */
+  {
+    id: 'keys-synths-grand-piano',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Grand Piano',
+    tags: ['grand piano', 'piano stabs'],
+  },
+  {
+    id: 'keys-synths-jazz-piano',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Extended Jazz Piano',
+    tags: ['extended jazz piano chords', 'jazzy chord stabs'],
+  },
+  {
+    id: 'keys-synths-rhodes',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Rhodes Electric Piano',
+    tags: ['rhodes electric piano', 'mellow rhodes chords'],
+  },
+  {
+    id: 'keys-synths-clavinet-organ',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Clavinet & Drawbar Organ',
+    tags: ['clavinet riff', 'drawbar organ'],
+  },
+  {
+    id: 'keys-synths-analog-pad',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Warm Analog Pad',
+    tags: ['warm analog synth pads', 'lush atmospheric pad'],
+  },
+  {
+    id: 'keys-synths-evolving-pad',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Evolving Synth Pad',
+    tags: ['evolving synth pad', 'airy pad wash'],
+  },
+  {
+    id: 'keys-synths-bright-chords',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Bright Synth Chords',
+    tags: ['bright synth chords', 'gated pad stabs'],
+  },
+  {
+    id: 'keys-synths-filtered-chords',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Filtered Chord Stabs',
+    tags: ['filtered chord stabs', 'deep dubby chords'],
+  },
+  {
+    id: 'keys-synths-dark-stabs',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Dark Synth Stabs',
+    tags: ['dark synth stabs', 'saturated synth stabs'],
+  },
+  {
+    id: 'keys-synths-supersaw-lead',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Supersaw Lead',
+    tags: ['massive supersaw lead', 'supersaw stack'],
+  },
+  {
+    id: 'keys-synths-neon-lead',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Neon Synth Lead',
+    tags: ['neon synth lead', 'retro synth lead'],
+  },
+  {
+    id: 'keys-synths-acid-lead',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Acid Squelch Lead',
+    tags: ['acid squelch lead', 'resonant filter squelch'],
+  },
+  {
+    id: 'keys-synths-arpeggio',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Synth Arpeggio',
+    tags: ['analog synth arpeggio', 'plucked arpeggio'],
+  },
+  {
+    id: 'keys-synths-modular-bleeps',
+    family: 'keys-synths',
+    familyLabel: 'Keys & Synths',
+    label: 'Modular Bleeps',
+    tags: ['modular synth bleeps', 'patched modular blips'],
+  },
+
+  /* -- Guitars & Strings --------------------------------------------------- */
+  {
+    id: 'guitars-strings-clean-electric',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Clean Electric Guitar',
+    tags: ['clean electric guitar', 'chiming clean guitar'],
+  },
+  {
+    id: 'guitars-strings-distorted-electric',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Distorted Electric Guitar',
+    tags: ['distorted electric guitar', 'power chords'],
+  },
+  {
+    id: 'guitars-strings-palm-muted',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Palm-Muted Rhythm Guitar',
+    tags: ['palm-muted rhythm guitar', 'chugging muted riff'],
+  },
+  {
+    id: 'guitars-strings-lead-solo',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Lead Guitar Solo',
+    tags: ['shredding guitar solo', 'soaring guitar lead'],
+  },
+  {
+    id: 'guitars-strings-funk-rhythm',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Funk Rhythm Guitar',
+    tags: ['tight rhythm guitar', 'wah-wah guitar'],
+  },
+  {
+    id: 'guitars-strings-highlife',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Highlife Guitar Riff',
+    tags: ['highlife guitar riff', 'interlocking guitar figure'],
+  },
+  {
+    id: 'guitars-strings-nylon',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Nylon-String Guitar',
+    tags: ['nylon-string guitar', 'soft nylon fingerpicking'],
+  },
+  {
+    id: 'guitars-strings-steel-acoustic',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Steel-String Acoustic',
+    tags: ['steel-string acoustic guitar', 'finger-picked acoustic'],
+  },
+  {
+    id: 'guitars-strings-slide',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Slide Guitar',
+    tags: ['dusty slide guitar', 'bottleneck slide guitar'],
+  },
+  {
+    id: 'guitars-strings-disco-strings',
+    family: 'guitars-strings',
+    familyLabel: 'Guitars & Strings',
+    label: 'Filtered Disco Strings',
+    tags: ['filtered disco strings', 'lush string stabs'],
+  },
+
+  /* -- Brass & Woodwind ---------------------------------------------------- */
+  {
+    id: 'brass-woodwind-horn-section',
+    family: 'brass-woodwind',
+    familyLabel: 'Brass & Woodwind',
+    label: 'Horn Section Stabs',
+    tags: ['horn section stabs', 'warm horn section'],
+  },
+  {
+    id: 'brass-woodwind-synth-brass',
+    family: 'brass-woodwind',
+    familyLabel: 'Brass & Woodwind',
+    label: 'Synth Brass Stabs',
+    tags: ['synth brass stab', 'punchy synth brass'],
+  },
+  {
+    id: 'brass-woodwind-saxophone',
+    family: 'brass-woodwind',
+    familyLabel: 'Brass & Woodwind',
+    label: 'Saxophone',
+    tags: ['saxophone'],
+  },
+  {
+    id: 'brass-woodwind-trumpet',
+    family: 'brass-woodwind',
+    familyLabel: 'Brass & Woodwind',
+    label: 'Muted Trumpet',
+    tags: ['muted trumpet', 'soft muted trumpet loop'],
+  },
+  {
+    id: 'brass-woodwind-trombone',
+    family: 'brass-woodwind',
+    familyLabel: 'Brass & Woodwind',
+    label: 'Trombone',
+    tags: ['trombone'],
+  },
+  {
+    id: 'brass-woodwind-flute',
+    family: 'brass-woodwind',
+    familyLabel: 'Brass & Woodwind',
+    label: 'Flute',
+    tags: ['airy flute', 'breathy flute line'],
+  },
+  {
+    id: 'brass-woodwind-clarinet',
+    family: 'brass-woodwind',
+    familyLabel: 'Brass & Woodwind',
+    label: 'Clarinet',
+    tags: ['clarinet', 'woody clarinet line'],
+  },
+
+  /* -- World & Traditional (FDD #26's geographic matrix, as one family) ----- */
+  {
+    id: 'world-traditional-log-drums',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Log Drums',
+    tags: ['log drums', 'pitched log drum bassline'],
+  },
+  {
+    id: 'world-traditional-congas',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Congas & Bongos',
+    tags: ['congas', 'hand drum groove'],
+  },
+  {
+    id: 'world-traditional-talking-drum',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Talking Drum',
+    tags: ['talking drum', 'pitch-bending talking drum'],
+  },
+  {
+    id: 'world-traditional-latin-samba',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Latin & Samba Percussion',
+    tags: ['latin percussion loop', 'samba percussion battery'],
+  },
+  {
+    id: 'world-traditional-marimba',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Marimba',
+    tags: ['marimba loop', 'wooden marimba melody'],
+  },
+  {
+    id: 'world-traditional-kalimba',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Kalimba',
+    tags: ['kalimba', 'plucked thumb piano'],
+  },
+  {
+    id: 'world-traditional-koto',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Koto',
+    tags: ['koto', 'plucked koto phrase'],
+  },
+  {
+    id: 'world-traditional-nyckelharpa',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Nyckelharpa',
+    tags: ['nyckelharpa', 'bowed keyed fiddle'],
+  },
+  {
+    id: 'world-traditional-sitar',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Sitar',
+    tags: ['sitar', 'droning sitar line'],
+  },
+  {
+    id: 'world-traditional-tabla',
+    family: 'world-traditional',
+    familyLabel: 'World & Traditional',
+    label: 'Tabla',
+    tags: ['tabla', 'tuned tabla pattern'],
+  },
+
+  /* -- Electronic Textures ------------------------------------------------- */
+  {
+    id: 'electronic-textures-vocal-chops',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Vocal Chops',
+    tags: ['vocal chops', 'pitched-up vocal chop'],
+  },
+  {
+    id: 'electronic-textures-sample-chop',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Chopped Sample Loop',
+    tags: ['chopped sample loop', 'chopped disco sample'],
+  },
+  {
+    id: 'electronic-textures-turntable',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Turntable Scratch',
+    tags: ['turntable scratch', 'scratch fx'],
+  },
+  {
+    id: 'electronic-textures-delay-throws',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Analog Delay Throws',
+    tags: ['analog delay throws', 'dub delay throw'],
+  },
+  {
+    id: 'electronic-textures-granular-drone',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Granular Drone',
+    tags: ['granular drone', 'grainy sustained drone'],
+  },
+  {
+    id: 'electronic-textures-field-recording',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Field Recording Texture',
+    tags: ['field recording texture', 'found-sound ambience'],
+  },
+  {
+    id: 'electronic-textures-noise',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Noise Texture',
+    tags: ['harsh noise texture', 'white noise wash'],
+  },
+  {
+    id: 'electronic-textures-fx-sweep',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'FX Sweep & Riser',
+    tags: ['psychedelic fx sweeps', 'tension riser fx'],
+  },
+  {
+    id: 'electronic-textures-reverb-wash',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Reverb Wash',
+    tags: ['soft reverb wash', 'long ambient tail'],
+  },
+  {
+    id: 'electronic-textures-chiptune',
+    family: 'electronic-textures',
+    familyLabel: 'Electronic Textures',
+    label: 'Chiptune Square Lead',
+    tags: ['chiptune square lead', '8-bit square wave'],
+  },
+
+  /* -- Orchestral ---------------------------------------------------------- */
+  {
+    id: 'orchestral-string-section',
+    family: 'orchestral',
+    familyLabel: 'Orchestral',
+    label: 'String Section',
+    tags: ['string section', 'sweeping string swell'],
+  },
+  {
+    id: 'orchestral-string-tremolo',
+    family: 'orchestral',
+    familyLabel: 'Orchestral',
+    label: 'String Tremolo',
+    tags: ['tense string tremolo', 'dissonant string cluster'],
+  },
+  {
+    id: 'orchestral-french-horn',
+    family: 'orchestral',
+    familyLabel: 'Orchestral',
+    label: 'French Horn',
+    tags: ['french horn', 'french horn swell'],
+  },
+  {
+    id: 'orchestral-woodwind-ensemble',
+    family: 'orchestral',
+    familyLabel: 'Orchestral',
+    label: 'Woodwind Ensemble',
+    tags: ['woodwind ensemble', 'blended woodwind section'],
+  },
+  {
+    id: 'orchestral-timpani',
+    family: 'orchestral',
+    familyLabel: 'Orchestral',
+    label: 'Timpani',
+    tags: ['timpani', 'rolling timpani swell'],
+  },
+  {
+    id: 'orchestral-choir',
+    family: 'orchestral',
+    familyLabel: 'Orchestral',
+    label: 'Choir',
+    tags: ['epic choir', 'ominous choir pad'],
+  },
+  {
+    id: 'orchestral-harp',
+    family: 'orchestral',
+    familyLabel: 'Orchestral',
+    label: 'Harp',
+    tags: ['harp', 'cascading harp glissando'],
+  },
+  {
+    id: 'orchestral-trailer-percussion',
+    family: 'orchestral',
+    familyLabel: 'Orchestral',
+    label: 'Trailer Percussion',
+    tags: ['booming trailer percussion', 'huge cinematic drum hits'],
+  },
+];
+
+/*
+ * THE DERIVATION RECORD — every instrument string MUSIC_KB names, and the
+ * block that covers it.
+ *
+ * This is not decoration and it is not documentation-by-comment: it is the
+ * table tests/instruments-inspire.test.js reads MUSIC_KB against, so a genre
+ * that gains a sound source with no block (or a block id that is renamed out
+ * from under one) fails a test instead of quietly leaving a KB instrument
+ * unreachable from the card.
+ *
+ * "Covers" means SELECTING THE BLOCK PUTS AN EQUIVALENT INSTRUMENT IN THE
+ * PROMPT — not that the strings are equal. The four ways MUSIC_KB says "sub
+ * bass" all map to one block, which is the whole point of deduping into Lego
+ * pieces; and MUSIC_KB's own phrasing is left exactly as it is, because the
+ * dissector still emits those strings verbatim.
+ */
+var INSTRUMENT_KB_MAP = {
+  /* drums & percussion */
+  'four-on-the-floor kick': 'drums-percussion-four-on-the-floor-kick',
+  'stripped-back kick': 'drums-percussion-four-on-the-floor-kick',
+  'TR-909 kick': 'drums-percussion-four-on-the-floor-kick',
+  'booming 808 kick': 'drums-percussion-808-kick',
+  'pounding kick drum': 'drums-percussion-industrial-kick',
+  'double kick drum pedal': 'drums-percussion-double-kick',
+  'driving drum kit': 'drums-percussion-live-kit',
+  'retro drum machine': 'drums-percussion-drum-machine',
+  'crunchy drum machine': 'drums-percussion-drum-machine',
+  'punchy programmed drums': 'drums-percussion-drum-machine',
+  'boom bap drum break': 'drums-percussion-sampled-break',
+  'chopped breakbeat drums': 'drums-percussion-sampled-break',
+  'amen break': 'drums-percussion-sampled-break',
+  'muffled drum loop': 'drums-percussion-sampled-break',
+  'brushed snare drums': 'drums-percussion-brushed-kit',
+  'soft brushed drums': 'drums-percussion-brushed-kit',
+  'half-time snare': 'drums-percussion-snare',
+  'swung hi-hats': 'drums-percussion-swung-hats',
+  'skippy hi-hats': 'drums-percussion-swung-hats',
+  'wide open hi-hats': 'drums-percussion-swung-hats',
+  'rapid hi-hat rolls': 'drums-percussion-hat-rolls',
+  'fast triplet hi-hats': 'drums-percussion-hat-rolls',
+  'tight hi-hat pattern': 'drums-percussion-hat-rolls',
+  'swung ride cymbal': 'drums-percussion-cymbals',
+  'handclap groove': 'drums-percussion-claps-tambourine',
+  'tambourine groove': 'drums-percussion-claps-tambourine',
+  shakers: 'drums-percussion-shakers',
+  'soft shaker groove': 'drums-percussion-shakers',
+  'rolling groove percussion': 'drums-percussion-rolling-percussion',
+  'syncopated percussion': 'drums-percussion-rolling-percussion',
+  'syncopated drum groove': 'drums-percussion-rolling-percussion',
+  'dembow drum pattern': 'drums-percussion-dembow',
+  'shuffled 2-step drum pattern': 'drums-percussion-two-step',
+  'swung garage groove': 'drums-percussion-two-step',
+  'distorted machine percussion': 'drums-percussion-industrial-percussion',
+  'metallic clang samples': 'drums-percussion-industrial-percussion',
+  'metallic percussion': 'drums-percussion-industrial-percussion',
+
+  /* bass */
+  'sub bass': 'bass-sub-bass',
+  'deep sub bass': 'bass-sub-bass',
+  'rounded sub bass': 'bass-sub-bass',
+  'warm sub bass': 'bass-sub-bass',
+  'sub bass rumble': 'bass-sub-bass',
+  '808 sub bass': 'bass-sub-bass',
+  '808 sub bass with slides': 'bass-sub-bass',
+  'bass guitar': 'bass-electric-bass',
+  'warm bass groove': 'bass-electric-bass',
+  'slap bass': 'bass-slap-bass',
+  'upright walking bass': 'bass-upright-bass',
+  'warm double bass': 'bass-upright-bass',
+  'soft jazzy bass': 'bass-upright-bass',
+  'funky disco bassline': 'bass-disco-bassline',
+  'nu-disco bassline': 'bass-disco-bassline',
+  'distorted analog bass': 'bass-distorted-bass',
+  'reese bassline': 'bass-reese-wobble',
+  'growl bass': 'bass-reese-wobble',
+  'wobble bass synth': 'bass-reese-wobble',
+  'sub bass wobble': 'bass-reese-wobble',
+  'rolling psy bassline': 'bass-rolling-bassline',
+  'rolling sub bassline': 'bass-rolling-bassline',
+  'driving 16th-note bass': 'bass-rolling-bassline',
+  'squelchy bassline': 'bass-acid-bass',
+  'FM bass': 'bass-fm-bass',
+
+  /* keys & synths */
+  'grand piano': 'keys-synths-grand-piano',
+  'sparse piano notes': 'keys-synths-grand-piano',
+  'piano stabs': 'keys-synths-grand-piano',
+  'soft piano stabs': 'keys-synths-grand-piano',
+  'extended jazz piano chords': 'keys-synths-jazz-piano',
+  'jazzy piano chords': 'keys-synths-jazz-piano',
+  'jazzy chord stabs': 'keys-synths-jazz-piano',
+  'Rhodes electric piano': 'keys-synths-rhodes',
+  'mellow Rhodes chords': 'keys-synths-rhodes',
+  'muted Rhodes chords': 'keys-synths-rhodes',
+  'clavinet riff': 'keys-synths-clavinet-organ',
+  'warm analog synth pads': 'keys-synths-analog-pad',
+  'atmospheric pad': 'keys-synths-analog-pad',
+  'evolving synth pad': 'keys-synths-evolving-pad',
+  'airy pad wash': 'keys-synths-evolving-pad',
+  'bright synth chords': 'keys-synths-bright-chords',
+  'gated pad stabs': 'keys-synths-bright-chords',
+  'filtered chord stabs': 'keys-synths-filtered-chords',
+  'deep dubby chords': 'keys-synths-filtered-chords',
+  'sparse dub chords': 'keys-synths-filtered-chords',
+  'dark synth stabs': 'keys-synths-dark-stabs',
+  'saturated synth stabs': 'keys-synths-dark-stabs',
+  'massive supersaw lead': 'keys-synths-supersaw-lead',
+  'supersaw stack': 'keys-synths-supersaw-lead',
+  'soaring lead synth': 'keys-synths-supersaw-lead',
+  'neon synth lead': 'keys-synths-neon-lead',
+  'acid squelch lead': 'keys-synths-acid-lead',
+  'analog synth arpeggio': 'keys-synths-arpeggio',
+  'plucked arpeggio': 'keys-synths-arpeggio',
+  'fast plucked arpeggio': 'keys-synths-arpeggio',
+  'modular synth bleeps': 'keys-synths-modular-bleeps',
+
+  /* guitars & strings */
+  'clean electric guitar': 'guitars-strings-clean-electric',
+  'distorted electric guitar': 'guitars-strings-distorted-electric',
+  'distorted rhythm guitar': 'guitars-strings-distorted-electric',
+  'power chords': 'guitars-strings-distorted-electric',
+  'palm-muted rhythm guitar': 'guitars-strings-palm-muted',
+  'shredding guitar solo': 'guitars-strings-lead-solo',
+  'tight rhythm guitar': 'guitars-strings-funk-rhythm',
+  'wah-wah guitar': 'guitars-strings-funk-rhythm',
+  'highlife guitar riff': 'guitars-strings-highlife',
+  'nylon-string guitar': 'guitars-strings-nylon',
+  'filtered disco strings': 'guitars-strings-disco-strings',
+  'lush string stabs': 'guitars-strings-disco-strings',
+  'shimmering strings': 'guitars-strings-disco-strings',
+
+  /* brass & woodwind */
+  'horn section stabs': 'brass-woodwind-horn-section',
+  'warm horn section': 'brass-woodwind-horn-section',
+  'brass stabs': 'brass-woodwind-horn-section',
+  'synth brass stab': 'brass-woodwind-synth-brass',
+  saxophone: 'brass-woodwind-saxophone',
+  'airy flute': 'brass-woodwind-flute',
+
+  /* world & traditional */
+  'log drums': 'world-traditional-log-drums',
+  'log percussion': 'world-traditional-log-drums',
+  'congas and shakers': 'world-traditional-congas',
+  'talking drum': 'world-traditional-talking-drum',
+  'latin percussion loop': 'world-traditional-latin-samba',
+  'light samba percussion': 'world-traditional-latin-samba',
+  'marimba loop': 'world-traditional-marimba',
+
+  /* electronic textures */
+  'ethereal vocal chops': 'electronic-textures-vocal-chops',
+  'pitched-up vocal chops': 'electronic-textures-vocal-chops',
+  'sparse vocal chops': 'electronic-textures-vocal-chops',
+  'soulful vocal sample': 'electronic-textures-vocal-chops',
+  'chopped sample loop': 'electronic-textures-sample-chop',
+  'chopped disco samples': 'electronic-textures-sample-chop',
+  'turntable scratch': 'electronic-textures-turntable',
+  'analog delay throws': 'electronic-textures-delay-throws',
+  'granular drone': 'electronic-textures-granular-drone',
+  'field recording texture': 'electronic-textures-field-recording',
+  'harsh noise texture': 'electronic-textures-noise',
+  'psychedelic fx sweeps': 'electronic-textures-fx-sweep',
+  'tension riser fx': 'electronic-textures-fx-sweep',
+  'soft reverb wash': 'electronic-textures-reverb-wash',
+
+  /* orchestral */
+  'string section': 'orchestral-string-section',
+  'sweeping string section': 'orchestral-string-section',
+  'string swell': 'orchestral-string-section',
+  'french horn': 'orchestral-french-horn',
+  'french horn swell': 'orchestral-french-horn',
+  'woodwind ensemble': 'orchestral-woodwind-ensemble',
+  timpani: 'orchestral-timpani',
+  'epic choir': 'orchestral-choir',
+  'ominous choir pad': 'orchestral-choir',
+  'booming trailer percussion': 'orchestral-trailer-percussion',
+};
+
+/*
+ * The other half of the derivation record: MUSIC_KB instrument strings that
+ * are deliberately NOT instrument blocks, each with the reason.
+ *
+ * Two kinds, and both belong to a registry this app already ships:
+ *   - a VOICE is not an instrument here. Who is singing is the Vocal Persona
+ *     card's question (FDD #28 over the #65 registry), and duplicating a
+ *     screamed vocal into the instrument list would give the user two places
+ *     to add the same idea and two places to have to remove it. (Vocal CHOPS
+ *     are the exception and ARE a block: a chopped, pitched vocal is played
+ *     like a synth, not sung.)
+ *   - a RECORDING ARTEFACT is not an instrument either. Tape hiss, vinyl
+ *     crackle, gated reverb and a live room are what the recording was made
+ *     ON, which is exactly the Production Era & Signature card (FDD #66).
+ */
+var INSTRUMENT_KB_EXCLUDED = {
+  'auto-tuned vocal hook':
+    'a sung hook — the Vocal Persona card (#28/#65) owns vocal timbre',
+  'call and response vocals':
+    'a sung arrangement — the Vocal Persona card (#28/#65) owns vocal timbre',
+  'layered vocal harmonies':
+    'sung harmony — the Vocal Persona card (#28/#65) owns vocal timbre',
+  'reverb-drenched vocal':
+    'a sung part plus a reverb treatment — vocals to #28/#65, the space to #66',
+  'robotic vocal processing':
+    'a vocal effect — the Vocal Persona card (#28/#65) carries the vocoder personas',
+  'screamed vocal': 'a sung part — the Vocal Persona card (#28/#65) owns vocal timbre',
+  'soulful lead vocal': 'a sung part — the Vocal Persona card (#28/#65) owns vocal timbre',
+  'talkbox vocoder':
+    'a voice through a talkbox — the Vocal Persona card (#28/#65) carries it',
+  'tribal chant vocals':
+    'a sung chant — the Vocal Persona card (#28/#65) owns vocal timbre',
+  'dusty vinyl crackle':
+    'a playback artefact — ERA_REGISTRY sig-saturation-tape-vinyl-crackle owns it',
+  'vinyl crackle':
+    'a playback artefact — ERA_REGISTRY sig-saturation-tape-vinyl-crackle owns it',
+  'tape hiss texture': 'a tape artefact — ERA_REGISTRY’s Saturation & Tape family owns it',
+  'gated reverb drums':
+    'a treatment of a kit, not a kit — ERA_REGISTRY sig-reverb-space-gated-drums owns it',
+  'live room ambience': 'a recording space — ERA_REGISTRY’s Reverb & Space family owns it',
+};
+
+/** Lazily built once: family order/rank, search haystacks, KB lookup index. */
+var INSTRUMENT_FAMILY_INDEX = null;
+var INSTRUMENT_SEARCH_INDEX = null;
+var INSTRUMENT_KB_INDEX = null;
+
+/** The families in registry order, with the rank searchInstruments sorts by. */
+function instrumentFamilyIndex() {
+  if (INSTRUMENT_FAMILY_INDEX) return INSTRUMENT_FAMILY_INDEX;
+  var order = [];
+  var rank = {};
+  var counts = {};
+  for (var i = 0; i < INSTRUMENT_REGISTRY.length; i += 1) {
+    var entry = INSTRUMENT_REGISTRY[i];
+    if (!Object.prototype.hasOwnProperty.call(rank, entry.family)) {
+      rank[entry.family] = order.length;
+      order.push({ id: entry.family, label: entry.familyLabel, count: 0 });
+    }
+    counts[entry.family] = (counts[entry.family] || 0) + 1;
+  }
+  for (var f = 0; f < order.length; f += 1) order[f].count = counts[order[f].id];
+  INSTRUMENT_FAMILY_INDEX = { order: order, rank: rank };
+  return INSTRUMENT_FAMILY_INDEX;
+}
+
+/**
+ * The eight registry families, in the order the table declares them — which is
+ * the order the card's filter chips render in and the order the list groups
+ * by, so neither reshuffles under a search.
+ *
+ * @returns {Array<{id:string, label:string, count:number}>} fresh copies
+ */
+function instrumentFamilies() {
+  var source = instrumentFamilyIndex().order;
+  var out = [];
+  for (var i = 0; i < source.length; i += 1) {
+    out.push({ id: source[i].id, label: source[i].label, count: source[i].count });
+  }
+  return out;
+}
+
+/** The lowercased text one entry is searched over: label, tags, family names. */
+function instrumentSearchText(entry) {
+  return (
+    entry.label +
+    ' ' +
+    entry.tags.join(' ') +
+    ' ' +
+    entry.family +
+    ' ' +
+    entry.familyLabel
+  ).toLowerCase();
+}
+
+/**
+ * Case-insensitive substring search over label, tags and family, with the
+ * family chips applied as a SECOND, independent narrowing — the same contract
+ * searchEraRegistry() holds, for the same reasons (see that function).
+ *
+ * The order is deterministic and independent of both: family in registry
+ * order, then label A-Z.
+ *
+ * @param {string} query
+ * @param {string} [family] restrict to one family id
+ * @returns {Array<object>} the matching entries themselves (read-only by
+ *   contract, never mutated in place)
+ */
+function searchInstruments(query, family) {
+  if (!INSTRUMENT_SEARCH_INDEX) {
+    INSTRUMENT_SEARCH_INDEX = [];
+    for (var s = 0; s < INSTRUMENT_REGISTRY.length; s += 1) {
+      INSTRUMENT_SEARCH_INDEX.push(instrumentSearchText(INSTRUMENT_REGISTRY[s]));
+    }
+  }
+  var needle =
+    typeof query === 'string' ? query.toLowerCase().replace(/\s+/g, ' ').trim() : '';
+  var wantedFamily = typeof family === 'string' ? family.trim() : '';
+  var hits = [];
+  for (var i = 0; i < INSTRUMENT_REGISTRY.length; i += 1) {
+    if (wantedFamily && INSTRUMENT_REGISTRY[i].family !== wantedFamily) continue;
+    if (!needle || INSTRUMENT_SEARCH_INDEX[i].indexOf(needle) !== -1) {
+      hits.push(INSTRUMENT_REGISTRY[i]);
+    }
+  }
+  var rank = instrumentFamilyIndex().rank;
+  hits.sort(function (a, b) {
+    if (rank[a.family] !== rank[b.family]) return rank[a.family] - rank[b.family];
+    var left = a.label.toLowerCase();
+    var right = b.label.toLowerCase();
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+  });
+  return hits;
+}
+
+/** @param {string} id @returns {object|null} the block, or null if unknown */
+function instrumentBlockById(id) {
+  var wanted = typeof id === 'string' ? id : '';
+  for (var i = 0; i < INSTRUMENT_REGISTRY.length; i += 1) {
+    if (INSTRUMENT_REGISTRY[i].id === wanted) return INSTRUMENT_REGISTRY[i];
+  }
+  return null;
+}
+
+/**
+ * Resolve a MUSIC_KB instrument string to the block that covers it.
+ *
+ * Three roads, in order: the derivation table above (which is the authority),
+ * then an exact tag match, then a case/space-insensitive label match. The last
+ * two exist so a block ADDED without a matching KB string is still reachable
+ * from a KB-shaped name, not so the table can be skipped.
+ *
+ * Returns null for a string the table deliberately excludes and for anything
+ * it has never heard of — a resolver that guessed would put a vocal take in
+ * the instrument group.
+ *
+ * @param {string} name
+ * @returns {object|null}
+ */
+function resolveKbInstrument(name) {
+  var raw = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim() : '';
+  if (!raw) return null;
+  if (Object.prototype.hasOwnProperty.call(INSTRUMENT_KB_MAP, raw)) {
+    return instrumentBlockById(INSTRUMENT_KB_MAP[raw]);
+  }
+  if (Object.prototype.hasOwnProperty.call(INSTRUMENT_KB_EXCLUDED, raw)) return null;
+
+  if (!INSTRUMENT_KB_INDEX) {
+    INSTRUMENT_KB_INDEX = {};
+    for (var i = 0; i < INSTRUMENT_REGISTRY.length; i += 1) {
+      var entry = INSTRUMENT_REGISTRY[i];
+      INSTRUMENT_KB_INDEX[normalizePromptTag(entry.label)] = entry;
+      for (var t = 0; t < entry.tags.length; t += 1) {
+        var key = normalizePromptTag(entry.tags[t]);
+        if (!Object.prototype.hasOwnProperty.call(INSTRUMENT_KB_INDEX, key)) {
+          INSTRUMENT_KB_INDEX[key] = entry;
+        }
+      }
+    }
+  }
+  var norm = normalizePromptTag(raw);
+  return Object.prototype.hasOwnProperty.call(INSTRUMENT_KB_INDEX, norm)
+    ? INSTRUMENT_KB_INDEX[norm]
+    : null;
+}
+
+/**
+ * A block's tags as prompt-state seeds: section 'instrument', source
+ * 'instrument-block', weight from POSITION (INSTRUMENT_TAG_WEIGHTS).
+ *
+ * @param {object} block
+ * @returns {Array<{section:string, tag:string, weight:number, source:string}>}
+ */
+function instrumentBlockSeeds(block) {
+  var out = [];
+  if (!block || !isArrayLike(block.tags)) return out;
+  var last = INSTRUMENT_TAG_WEIGHTS.length - 1;
+  for (var i = 0; i < block.tags.length; i += 1) {
+    var raw = block.tags[i];
+    var tag = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+    if (!tag) continue;
+    out.push({
+      section: INSTRUMENT_SECTION,
+      tag: tag,
+      weight: INSTRUMENT_TAG_WEIGHTS[i < last ? i : last],
+      source: INSTRUMENT_BLOCK_SOURCE,
+    });
+  }
+  return out;
+}
+
+/**
+ * What a store is holding of one block right now — the same contract
+ * eraSignatureHold() defines, including its deliberate blindness to SOURCE: an
+ * instrument tag the dissector put in the group counts, because the group
+ * either says "log drums" or it does not.
+ *
+ * @param {object} store a createPromptState() instance
+ * @param {object} block
+ * @returns {{held:Array<{id:string, norm:string}>, missing:Array<object>,
+ *            complete:boolean}}
+ */
+function instrumentBlockHold(store, block) {
+  var seeds = instrumentBlockSeeds(block);
+  var held = [];
+  var missing = [];
+  var index = {};
+  var entries =
+    store && typeof store.list === 'function' ? store.list(INSTRUMENT_SECTION) : [];
+  for (var e = 0; e < entries.length; e += 1) {
+    index[normalizePromptTag(entries[e].tag)] = entries[e].id;
+  }
+  for (var i = 0; i < seeds.length; i += 1) {
+    var norm = normalizePromptTag(seeds[i].tag);
+    if (Object.prototype.hasOwnProperty.call(index, norm)) {
+      held.push({ id: index[norm], norm: norm });
+    } else {
+      missing.push(seeds[i]);
+    }
+  }
+  return { held: held, missing: missing, complete: seeds.length > 0 && missing.length === 0 };
+}
+
+/**
+ * Every block the store currently holds in full, in the card's reading order
+ * (family, then label) — so the badge row reads the way the list above it does.
+ *
+ * @param {object} store
+ * @returns {Array<object>}
+ */
+function selectedInstrumentBlocks(store) {
+  var ordered = searchInstruments('');
+  var out = [];
+  for (var i = 0; i < ordered.length; i += 1) {
+    if (instrumentBlockHold(store, ordered[i]).complete) out.push(ordered[i]);
+  }
+  return out;
+}
+
+/**
+ * Toggle one block, atomically, under the same shared-tag rule
+ * toggleVocalPersona and toggleEraSignature apply: removing a block skips any
+ * tag another CURRENTLY COMPLETE block still needs, so taking one layer out
+ * never quietly breaks the one beside it.
+ *
+ * @param {object} store a createPromptState() instance
+ * @param {object} block
+ * @returns {{state:'added'|'removed'|'noop', added:number, removed:number, kept:number}}
+ */
+function toggleInstrumentBlock(store, block) {
+  var result = { state: 'noop', added: 0, removed: 0, kept: 0 };
+  if (!store || typeof store.batch !== 'function') return result;
+  var hold = instrumentBlockHold(store, block);
+  if (!hold.held.length && !hold.missing.length) return result;
+
+  if (!hold.complete) {
+    result.state = 'added';
+    store.batch(function () {
+      for (var i = 0; i < hold.missing.length; i += 1) {
+        if (store.add(hold.missing[i]) !== null) result.added += 1;
+      }
+    });
+    return result;
+  }
+
+  var claimed = {};
+  var others = selectedInstrumentBlocks(store);
+  for (var o = 0; o < others.length; o += 1) {
+    if (others[o].id === block.id) continue;
+    for (var t = 0; t < others[o].tags.length; t += 1) {
+      claimed[normalizePromptTag(others[o].tags[t])] = true;
+    }
+  }
+
+  result.state = 'removed';
+  store.batch(function () {
+    for (var h = 0; h < hold.held.length; h += 1) {
+      if (Object.prototype.hasOwnProperty.call(claimed, hold.held[h].norm)) {
+        result.kept += 1;
+        continue;
+      }
+      if (store.remove(hold.held[h].id)) result.removed += 1;
+    }
+  });
+  return result;
+}
+
+/* ==========================================================================
+ * H. "INSPIRE ME" SLOT MACHINE — docs/FDD.md #71.
+ *
+ * WHAT "HIGH-SYNERGY" MEANS HERE, EXACTLY
+ * FDD #71 asks for "high-synergy descriptor combinations", and
+ * FEATURE-MECHANICS.md §5.1 defines a Prompt Synergy Score that this codebase
+ * has NOT built yet. So this feature does not pretend to score anything. It
+ * takes the one guarantee it can actually make and makes it structurally:
+ *
+ *   EVERY PIECE OF A SPIN COMES FROM ONE GENRE'S OWN VOCABULARY.
+ *
+ * The two or three descriptors, the instrument, the mood — all four are read
+ * off ONE MUSIC_KB genre entry, which is a hand-authored row where those
+ * values were chosen to describe the same music. Nothing is ever blended
+ * across genres, so the combination cannot be "amapiano log drums + black
+ * metal tremolo": the table it came from would have had to say that.
+ *
+ * The two optional extras (a production era and a scene) are the one place
+ * this reaches outside the genre row, and they do it through INSPIRE_AFFINITY
+ * below — a written-down table with one row per genre, naming the era GROUPS
+ * and the scene ids that fit. A table rather than a similarity heuristic
+ * because a heuristic here would be vibes with a confidence number on it
+ * (docs/ENGINEERING-STANDARD.md §1.1), and because a table can be checked: the
+ * suite asserts every group and scene it names really exists.
+ *
+ * AND THE RESULT IS RUN THROUGH THE REAL RESOLVER. resolveConflicts() (#68)
+ * sees the assembled tag list in the order the draft would emit it — and it
+ * catches REPEATS as well as contradictions, which matters here because a
+ * genre row can name the same phrase as both a descriptor and an instrument
+ * (disco's "handclap groove" is both). If anything fires, the spin is
+ * re-rolled — up to INSPIRE_MAX_ATTEMPTS times — and if the last attempt is
+ * still not clean the losing tags are DROPPED and reported rather than
+ * shipped. A spin therefore always hands back a set the resolver has nothing
+ * left to say about, and says when it had to cut one.
+ *
+ * PURITY. spinInspiration() reads MUSIC_KB, the two registries and an injected
+ * rng, and touches nothing else — no DOM, no prompt store, no clock. It is
+ * seedable (createSeededRng), which is what lets the suite assert the same
+ * seed produces the same combination 200 times over. NOTHING IS EVER ADDED TO
+ * THE DRAFT BY SPINNING: applyInspiration() is a separate function and the
+ * only caller is the "Add all to prompt" button.
+ *
+ * FORWARD NOTE FOR #80 (Granular "Surprise Me" Locks — NOT this task). Every
+ * spin is assembled from independent per-KIND picks and the whole input is one
+ * deps object, so a lock layer lands as a `deps.hold` map of kind -> already
+ * chosen picks that assembleInspiration() copies through instead of re-rolling.
+ * No other part of this needs to change for that, which is why the kinds are
+ * named data (INSPIRE_KINDS) rather than positions in an array.
+ * ========================================================================== */
+
+/** The five kinds a spin can produce, in the order they are shown and emitted. */
+var INSPIRE_KINDS = ['genre', 'mood', 'instrument', 'scene', 'era'];
+
+/** How many whole re-rolls a conflicting combination gets before tags are cut. */
+var INSPIRE_MAX_ATTEMPTS = 3;
+
+/** A mood is one word of feel: lighter than a genre token, heavier than a scene. */
+var INSPIRE_MOOD_WEIGHT = 0.6;
+
+/*
+ * THE AFFINITY TABLE — one row per MUSIC_KB genre, naming the production-era
+ * GROUPS (ids from ERA_GROUP_ORDER) and the SCENE ids (from MUSIC_KB.scenes)
+ * that suit it. Both lists are optional extras: a spin adds at most one era
+ * signature and at most one scene, and only ever from its genre's own row.
+ *
+ * The eras are chosen for the decade the sound was made in or the treatment it
+ * is built on — french-electro -> era-2000s / sig-saturation-tape is the blog
+ * house decade plus the saturated bus that defines it; lo-fi -> the tape family
+ * rather than a decade, because the texture IS the point. Groups, not single
+ * signatures, so the spin still has something to choose.
+ *
+ * tests/instruments-inspire.test.js checks every id here against the live
+ * ERA_REGISTRY and MUSIC_KB.scenes, and checks that every genre has a row — so
+ * a genre added to the KB without one fails a test rather than silently
+ * spinning without extras.
+ */
+var INSPIRE_AFFINITY = {
+  techno: { eraGroups: ['era-1990s', 'sig-reverb-space'], scenes: ['abandoned-warehouse', 'subway-platform'] },
+  'french-electro': { eraGroups: ['era-2000s', 'sig-saturation-tape'], scenes: ['neon-arcade', 'midnight-city'] },
+  'scandinavian-house': { eraGroups: ['era-2010s-2020s', 'sig-saturation-tape'], scenes: ['sunrise-rooftop', 'northern-lights'] },
+  'progressive-trance': { eraGroups: ['era-2010s-2020s', 'sig-reverb-space'], scenes: ['midnight-drive', 'northern-lights'] },
+  'afro-house': { eraGroups: ['era-2010s-2020s'], scenes: ['sunrise-beach', 'carnival-parade'] },
+  amapiano: { eraGroups: ['era-2010s-2020s', 'sig-mix-master'], scenes: ['sunrise-rooftop', 'sunrise-beach'] },
+  house: { eraGroups: ['era-1990s', 'sig-saturation-tape'], scenes: ['midnight-city', 'sunrise-rooftop'] },
+  'deep-house': { eraGroups: ['era-1990s', 'sig-reverb-space'], scenes: ['midnight-city', 'smoky-jazz-bar'] },
+  'tech-house': { eraGroups: ['era-2000s', 'sig-mix-master'], scenes: ['abandoned-warehouse', 'midnight-drive'] },
+  trance: { eraGroups: ['era-1990s', 'sig-reverb-space'], scenes: ['mountain-summit', 'northern-lights'] },
+  ambient: { eraGroups: ['sig-reverb-space', 'era-2010s-2020s'], scenes: ['underwater-cathedral', 'foggy-forest', 'northern-lights'] },
+  synthwave: { eraGroups: ['era-1980s', 'sig-reverb-space'], scenes: ['midnight-drive', 'neon-rain'] },
+  'hip-hop': { eraGroups: ['era-1990s', 'sig-saturation-tape'], scenes: ['subway-platform', 'midnight-city'] },
+  rock: { eraGroups: ['era-1970s', 'era-1990s'], scenes: ['desert-highway', 'thunderstorm'] },
+  jazz: { eraGroups: ['era-1950s-60s', 'sig-saturation-tape'], scenes: ['smoky-jazz-bar', 'candlelit-room'] },
+  classical: { eraGroups: ['era-1950s-60s', 'sig-reverb-space'], scenes: ['mountain-summit', 'foggy-forest'] },
+  'drum-and-bass': { eraGroups: ['era-1990s', 'sig-mix-master'], scenes: ['subway-platform', 'abandoned-warehouse'] },
+  dubstep: { eraGroups: ['era-2000s', 'sig-mix-master'], scenes: ['abandoned-warehouse', 'space-station'] },
+  disco: { eraGroups: ['era-1970s', 'sig-saturation-tape'], scenes: ['carnival-parade', 'midnight-city'] },
+  funk: { eraGroups: ['era-1970s', 'sig-saturation-tape'], scenes: ['carnival-parade', 'smoky-jazz-bar'] },
+  soul: { eraGroups: ['era-1970s', 'era-1950s-60s'], scenes: ['candlelit-room', 'smoky-jazz-bar'] },
+  pop: { eraGroups: ['era-2010s-2020s', 'sig-mix-master'], scenes: ['sunrise-rooftop', 'midnight-city'] },
+  metal: { eraGroups: ['era-1990s', 'sig-mix-master'], scenes: ['thunderstorm', 'haunted-house'] },
+  'lo-fi': { eraGroups: ['sig-saturation-tape'], scenes: ['winter-cabin', 'sunrise-rooftop'] },
+  'cinematic-score': { eraGroups: ['sig-reverb-space', 'era-2010s-2020s'], scenes: ['mountain-summit', 'thunderstorm', 'haunted-house'] },
+  reggaeton: { eraGroups: ['era-2010s-2020s', 'sig-mix-master'], scenes: ['carnival-parade', 'sunrise-beach'] },
+  afrobeats: { eraGroups: ['era-2010s-2020s', 'sig-saturation-tape'], scenes: ['sunrise-beach', 'carnival-parade'] },
+  'bossa-nova': { eraGroups: ['era-1950s-60s', 'sig-saturation-tape'], scenes: ['sunrise-beach', 'candlelit-room'] },
+  'uk-garage': { eraGroups: ['era-1990s', 'sig-mix-master'], scenes: ['midnight-city', 'subway-platform'] },
+  psytrance: { eraGroups: ['era-2000s', 'sig-reverb-space'], scenes: ['foggy-forest', 'space-station'] },
+  industrial: { eraGroups: ['era-1990s', 'sig-saturation-tape'], scenes: ['abandoned-warehouse', 'haunted-house'] },
+  trap: { eraGroups: ['era-2010s-2020s', 'sig-mix-master'], scenes: ['midnight-city', 'haunted-house'] },
+};
+
+/**
+ * A seedable uniform [0,1) generator — the mulberry32 construction.
+ *
+ * Math.random cannot be seeded, and an unseeded spin cannot be asserted. This
+ * exists so tests can drive the REAL spinInspiration deterministically instead
+ * of testing a stubbed copy of it; the app itself passes Math.random.
+ *
+ * @param {number} seed any finite number; the fractional part is kept
+ * @returns {() => number}
+ */
+function createSeededRng(seed) {
+  var state = 0;
+  var n = typeof seed === 'number' && isFinite(seed) ? seed : 0;
+  /* Fold the value into a 32-bit integer so 1, 1.5 and -1 are three different
+   * streams rather than one truncated one. */
+  state = (Math.floor(n) ^ Math.floor((n - Math.floor(n)) * 4294967296)) >>> 0;
+  return function () {
+    state = (state + 0x6d2b79f5) >>> 0;
+    var t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A uniform integer in [0, count). Returns 0 for a nonsense count. */
+function rngInt(rng, count) {
+  var n = typeof count === 'number' && isFinite(count) ? Math.floor(count) : 0;
+  if (n <= 1) return 0;
+  var value = rng();
+  if (typeof value !== 'number' || !isFinite(value) || value < 0 || value >= 1) return 0;
+  return Math.floor(value * n);
+}
+
+/**
+ * `count` distinct members of `list`, chosen without replacement.
+ *
+ * A partial Fisher-Yates over a COPY: the source list is never reordered (it
+ * is a MUSIC_KB row and the dissector reads it), and drawing without
+ * replacement is what stops a spin showing the same token twice.
+ */
+function rngSample(rng, list, count) {
+  var pool = [];
+  var i;
+  for (i = 0; i < list.length; i += 1) pool.push(list[i]);
+  var wanted = Math.min(count, pool.length);
+  var out = [];
+  for (i = 0; i < wanted; i += 1) {
+    var pick = i + rngInt(rng, pool.length - i);
+    var swap = pool[i];
+    pool[i] = pool[pick];
+    pool[pick] = swap;
+    out.push(pool[i]);
+  }
+  return out;
+}
+
+/** One pick: what it is, what it is called, and the seeds it would add. */
+function inspirePick(kind, label, detail, seeds) {
+  return { kind: kind, label: label, detail: detail, seeds: seeds };
+}
+
+/**
+ * Re-stamp seeds borrowed from another card's helper with this source.
+ *
+ * An instrument pick reuses instrumentBlockSeeds() and an era pick reuses
+ * eraSignatureSeeds(), because the SECTION and the position WEIGHTS those
+ * helpers assign are the contract those cards already own and duplicating them
+ * here would be two numbers to keep in step. What must not be borrowed is the
+ * SOURCE: a tag the slot machine put in the draft was put there by the slot
+ * machine, and counts().sources has to say so. The cards still show the pick as
+ * "Added" afterwards — instrumentBlockHold() and eraSignatureHold() both read
+ * the tags and deliberately ignore who added them.
+ *
+ * @param {Array<object>} seeds
+ * @returns {Array<object>} copies, never the originals
+ */
+function inspireReseed(seeds) {
+  var out = [];
+  if (!isArrayLike(seeds)) return out;
+  for (var i = 0; i < seeds.length; i += 1) {
+    out.push({
+      section: seeds[i].section,
+      tag: seeds[i].tag,
+      weight: seeds[i].weight,
+      source: INSPIRE_SOURCE,
+    });
+  }
+  return out;
+}
+
+/**
+ * Assemble ONE candidate combination from one genre row. Pure apart from rng.
+ *
+ * The rng is consumed in a fixed order — token count, tokens, instrument
+ * count, instruments, mood, era coin, era, scene coin, scene — so a seed
+ * always produces the same combination.
+ *
+ * @param {object} genre a MUSIC_KB genre entry
+ * @param {() => number} rng
+ * @param {object} kb the knowledge base the genre came from
+ * @returns {Array<object>} picks, in INSPIRE_KINDS order
+ */
+function assembleInspiration(genre, rng, kb) {
+  var picks = [];
+  var i;
+
+  /* 1. TWO OR THREE of the genre's own descriptors. tokens[0] always comes —
+   *    it is the tag that names the genre, and a spin that could omit it would
+   *    be describing the music without saying what it is. */
+  var tokens = isArrayLike(genre.tokens) ? genre.tokens : [];
+  var wantTokens = 2 + rngInt(rng, 2);
+  var rest = [];
+  for (i = 1; i < tokens.length; i += 1) rest.push(tokens[i]);
+  var chosenTokens = [tokens[0]].concat(rngSample(rng, rest, wantTokens - 1));
+  for (i = 0; i < chosenTokens.length; i += 1) {
+    var token = chosenTokens[i];
+    if (!token || typeof token.tag !== 'string') continue;
+    picks.push(
+      inspirePick('genre', token.tag, genre.label, [
+        {
+          section: 'genre',
+          tag: token.tag,
+          weight: typeof token.weight === 'number' ? token.weight : 0.8,
+          source: INSPIRE_SOURCE,
+        },
+      ])
+    );
+  }
+
+  /* 2. ONE OR TWO instruments from the genre's own list, resolved to a Lego
+   *    block where one covers it so the Instruments card shows the same pick
+   *    as "Added". A KB string with no block (a vocal take, a tape artefact —
+   *    see INSTRUMENT_KB_EXCLUDED) is still perfectly good prompt text, so it
+   *    is emitted as-is rather than skipped. */
+  var instruments = isArrayLike(genre.instruments) ? genre.instruments : [];
+  var wantInstruments = 1 + rngInt(rng, 2);
+  var chosenInstruments = rngSample(rng, instruments, wantInstruments);
+  for (i = 0; i < chosenInstruments.length; i += 1) {
+    var name = chosenInstruments[i];
+    if (typeof name !== 'string' || !name.trim()) continue;
+    var block = resolveKbInstrument(name);
+    if (block) {
+      picks.push(
+        inspirePick(
+          'instrument',
+          block.label,
+          block.familyLabel,
+          inspireReseed(instrumentBlockSeeds(block))
+        )
+      );
+    } else {
+      picks.push(
+        inspirePick('instrument', name, 'from ' + genre.label, [
+          {
+            section: INSTRUMENT_SECTION,
+            tag: name,
+            weight: INSTRUMENT_TAG_WEIGHTS[0],
+            source: INSPIRE_SOURCE,
+          },
+        ])
+      );
+    }
+  }
+
+  /* 3. ONE mood, from the genre's own moods. */
+  var moods = isArrayLike(genre.moods) ? genre.moods : [];
+  var chosenMood = rngSample(rng, moods, 1)[0];
+  if (typeof chosenMood === 'string' && chosenMood.trim()) {
+    picks.push(
+      inspirePick('mood', chosenMood, genre.label, [
+        {
+          section: 'mood',
+          tag: chosenMood,
+          weight: INSPIRE_MOOD_WEIGHT,
+          source: INSPIRE_SOURCE,
+        },
+      ])
+    );
+  }
+
+  var affinity = Object.prototype.hasOwnProperty.call(INSPIRE_AFFINITY, genre.id)
+    ? INSPIRE_AFFINITY[genre.id]
+    : null;
+
+  /* 4. OPTIONALLY one production-era signature, from a group this genre's
+   *    affinity row names. The coin is drawn whether or not there is a row, so
+   *    the rng stream stays aligned across genres. */
+  var eraCoin = rng();
+  var eraGroups = affinity && isArrayLike(affinity.eraGroups) ? affinity.eraGroups : [];
+  if (eraCoin < 0.7 && eraGroups.length) {
+    var group = rngSample(rng, eraGroups, 1)[0];
+    var candidates = searchEraRegistry('', group);
+    var signature = rngSample(rng, candidates, 1)[0];
+    if (signature) {
+      picks.push(
+        inspirePick(
+          'era',
+          signature.label,
+          signature.groupLabel,
+          inspireReseed(eraSignatureSeeds(signature))
+        )
+      );
+    }
+  }
+
+  /* 5. OPTIONALLY one scene, likewise from the affinity row. Its top two
+   *    tokens rather than all four: a scene is the last thing added and the
+   *    #67 budget is 1,000 characters, not a novel. */
+  var sceneCoin = rng();
+  var sceneIds = affinity && isArrayLike(affinity.scenes) ? affinity.scenes : [];
+  if (sceneCoin < 0.5 && sceneIds.length) {
+    var sceneId = rngSample(rng, sceneIds, 1)[0];
+    var scene = null;
+    var scenes = kb && isArrayLike(kb.scenes) ? kb.scenes : [];
+    for (i = 0; i < scenes.length; i += 1) {
+      if (scenes[i].id === sceneId) scene = scenes[i];
+    }
+    if (scene && isArrayLike(scene.tokens) && scene.tokens.length) {
+      var sceneSeeds = [];
+      for (i = 0; i < scene.tokens.length && i < 2; i += 1) {
+        sceneSeeds.push({
+          section: 'scene',
+          tag: scene.tokens[i].tag,
+          weight: scene.tokens[i].weight,
+          source: INSPIRE_SOURCE,
+        });
+      }
+      picks.push(inspirePick('scene', scene.label, 'scene', sceneSeeds));
+    }
+  }
+
+  /* INSPIRE_KINDS order, which is PROMPT_SECTION_ORDER's order for the five
+   * sections a spin can touch — so the list handed to resolveConflicts below
+   * is in the same order the draft would emit it, and the resolver's
+   * earlier-wins policy makes the same decision here that it will there. */
+  var ordered = [];
+  for (i = 0; i < INSPIRE_KINDS.length; i += 1) {
+    for (var p = 0; p < picks.length; p += 1) {
+      if (picks[p].kind === INSPIRE_KINDS[i]) ordered.push(picks[p]);
+    }
+  }
+  return ordered;
+}
+
+/** Every seed of every pick, flattened, in pick order. */
+function inspirationSeeds(result) {
+  var out = [];
+  if (!result || !isArrayLike(result.picks)) return out;
+  for (var i = 0; i < result.picks.length; i += 1) {
+    var seeds = result.picks[i].seeds;
+    if (!isArrayLike(seeds)) continue;
+    for (var s = 0; s < seeds.length; s += 1) out.push(seeds[s]);
+  }
+  return out;
+}
+
+/**
+ * Spin the slot machine.
+ *
+ * @param {{rng?: () => number, kb?: object, genreId?: string,
+ *          maxAttempts?: number}} [deps]
+ *   rng       — injected uniform [0,1); defaults to Math.random. Pass
+ *               createSeededRng(n) for a reproducible spin.
+ *   kb        — the knowledge base; defaults to MUSIC_KB.
+ *   genreId   — pin the genre instead of drawing one (the re-roll then keeps
+ *               it, so "give me another amapiano idea" is one argument).
+ *   maxAttempts — override INSPIRE_MAX_ATTEMPTS; clamped to 1..10.
+ *
+ * @returns {{genreId:string, genreLabel:string, picks:Array<object>,
+ *            tags:string[], attempts:number, trimmed:Array<object>}|null}
+ *   null only when the knowledge base holds no usable genre at all.
+ */
+function spinInspiration(deps) {
+  var d = deps || {};
+  var rng = typeof d.rng === 'function' ? d.rng : Math.random;
+  var kb = d.kb && isArrayLike(d.kb.genres) ? d.kb : MUSIC_KB;
+  var genres = [];
+  var i;
+  for (i = 0; i < kb.genres.length; i += 1) {
+    var candidate = kb.genres[i];
+    if (!candidate || !isArrayLike(candidate.tokens) || !candidate.tokens.length) continue;
+    if (typeof d.genreId === 'string' && d.genreId && candidate.id !== d.genreId) continue;
+    genres.push(candidate);
+  }
+  if (!genres.length) return null;
+
+  var attempts =
+    typeof d.maxAttempts === 'number' && isFinite(d.maxAttempts)
+      ? Math.max(1, Math.min(10, Math.floor(d.maxAttempts)))
+      : INSPIRE_MAX_ATTEMPTS;
+
+  var genre = null;
+  var picks = [];
+  var resolved = null;
+  for (var attempt = 1; attempt <= attempts; attempt += 1) {
+    genre = genres[rngInt(rng, genres.length)];
+    picks = assembleInspiration(genre, rng, kb);
+    resolved = resolveConflicts(inspirationSeeds({ picks: picks }));
+    if (!resolved.conflicts.length) {
+      return {
+        genreId: genre.id,
+        genreLabel: genre.label,
+        picks: picks,
+        tags: resolved.tags,
+        attempts: attempt,
+        trimmed: [],
+      };
+    }
+  }
+
+  /* Every re-roll still lost tags, so the LAST one is kept and the losing tags
+   * are cut out of it — the resolver has already decided which ones, and its
+   * verdict is carried out rather than re-litigated. A pick that loses every
+   * tag disappears with them; one that loses a texture word keeps the rest.
+   *
+   * THE BUDGET IS CONSUMED, not merely consulted. #68 drops REPEATS as well as
+   * contradictions, and a repeat is the one case where the surviving tag and
+   * the dropped tag are the same string: MUSIC_KB's disco row, for instance,
+   * carries "handclap groove" as both a descriptor and an instrument, so a
+   * spin can legitimately reach for it twice. A membership test would keep
+   * both copies and the picks would then promise a tag the result does not
+   * hold. Counting how many times the resolver kept each tag and spending that
+   * budget in order is what makes the picks and `tags` agree exactly. */
+  var budget = {};
+  for (i = 0; i < resolved.tags.length; i += 1) {
+    var keptNorm = normalizePromptTag(resolved.tags[i]);
+    budget[keptNorm] = (budget[keptNorm] || 0) + 1;
+  }
+  var kept = [];
+  for (i = 0; i < picks.length; i += 1) {
+    var seeds = [];
+    for (var s = 0; s < picks[i].seeds.length; s += 1) {
+      var norm = normalizePromptTag(picks[i].seeds[s].tag);
+      if (!budget[norm]) continue;
+      budget[norm] -= 1;
+      seeds.push(picks[i].seeds[s]);
+    }
+    if (!seeds.length) continue;
+    kept.push(inspirePick(picks[i].kind, picks[i].label, picks[i].detail, seeds));
+  }
+  return {
+    genreId: genre.id,
+    genreLabel: genre.label,
+    picks: kept,
+    tags: resolved.tags,
+    attempts: attempts,
+    trimmed: resolved.conflicts,
+  };
+}
+
+/**
+ * Put a spin in the draft. THE ONLY function in this feature that writes to the
+ * prompt store, and it is called from exactly one place: the "Add all to
+ * prompt" button. Spinning never adds anything (FDD #71 is a suggestion
+ * engine, not an editor).
+ *
+ * One batch, so a whole combination is one repaint and one undoable action.
+ *
+ * @param {object} store a createPromptState() instance
+ * @param {object} result whatever spinInspiration() handed back
+ * @returns {{added:number, skipped:number}} skipped = already in the draft
+ */
+function applyInspiration(store, result) {
+  var outcome = { added: 0, skipped: 0 };
+  if (!store || typeof store.batch !== 'function') return outcome;
+  var seeds = inspirationSeeds(result);
+  if (!seeds.length) return outcome;
+  store.batch(function () {
+    for (var i = 0; i < seeds.length; i += 1) {
+      if (store.add(seeds[i]) !== null) outcome.added += 1;
+      else outcome.skipped += 1;
+    }
+  });
+  return outcome;
 }
 
 /* ==========================================================================
@@ -23966,7 +26022,252 @@ function createInstallCapability(deps) {
     promptState.subscribe(renderVocalCard);
     renderVocalCard();
 
-    /* -- I. the Production Era & Signature card (FDD #66) over ERA_REGISTRY -- */
+    /* -- I. the Modular Instrument "Lego Blocks" card (FDD #27) ------------- */
+
+    const instrumentSearch = $('instrument-search');
+    const instrumentListEl = $('instrument-list');
+    const instrumentFamiliesEl = $('instrument-families');
+    const instrumentBadges = $('instrument-badges');
+    const instrumentSelectedEmpty = $('instrument-selected-empty');
+    const instrumentEmpty = $('instrument-empty');
+    const instrumentCountOut = $('instrument-count');
+    const instrumentStatus = $('instrument-status');
+
+    /* The active family chip, or '' for "all families". VIEW state only — no
+     * tag, no draft entry and no saved workspace field depends on it, which is
+     * why it lives in a local rather than in the prompt store. */
+    let instrumentFamilyFilter = '';
+
+    function setInstrumentStatus(text, tone) {
+      instrumentStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      instrumentStatus.textContent = text;
+    }
+
+    /**
+     * Add or remove one block and say plainly which of the three things
+     * happened — added, removed, or removed-but-one-tag-stayed because another
+     * stacked block still claims it (see toggleInstrumentBlock).
+     */
+    function toggleInstrumentBlockFromUi(block) {
+      const outcome = toggleInstrumentBlock(promptState, block);
+      if (outcome.state === 'removed') {
+        setInstrumentStatus(
+          '“' +
+            block.label +
+            '” removed — ' +
+            plural(outcome.removed, 'tag') +
+            ' dropped' +
+            (outcome.kept
+              ? ', ' + plural(outcome.kept, 'tag') + ' kept for another stacked block.'
+              : '.')
+        );
+        return;
+      }
+      if (outcome.added > 0) {
+        setInstrumentStatus(
+          '“' +
+            block.label +
+            '” added — ' +
+            plural(outcome.added, 'tag') +
+            ' in the Instruments group.'
+        );
+        return;
+      }
+      setInstrumentStatus('“' + block.label + '” had nothing new to add.', 'warn');
+    }
+
+    /** One block row. Fixed height by contract — see VIRTUAL_ROW_HEIGHT. */
+    function buildInstrumentRow(block) {
+      const row = document.createElement('div');
+      row.className = 'vrow';
+
+      const main = document.createElement('div');
+      main.className = 'vrow-main';
+      const name = document.createElement('div');
+      name.className = 'vrow-name';
+      name.textContent = block.label;
+      // The family travels on the ROW rather than in a sticky group header, for
+      // the same reason the two cards beside it do it: a windowed list unmounts
+      // whatever scrolls away, headers included.
+      const meta = document.createElement('div');
+      meta.className = 'vrow-meta';
+      meta.textContent = block.familyLabel + ' · ' + block.tags.join(', ');
+      main.appendChild(name);
+      main.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'vrow-actions';
+      const added = instrumentBlockHold(promptState, block).complete;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'btn-mini btn-instrument';
+      toggle.setAttribute('data-focus-key', 'instrument-toggle');
+      // aria-pressed IS the state: the styling reads it too, so the picture and
+      // the accessibility tree cannot drift apart.
+      toggle.setAttribute('aria-pressed', added ? 'true' : 'false');
+      toggle.textContent = added ? 'Added' : 'Add';
+      toggle.title = added
+        ? 'Remove the “' + block.label + '” tags from the draft'
+        : 'Add ' + plural(block.tags.length, 'tag') + ': ' + block.tags.join(', ');
+      toggle.setAttribute('aria-label', toggle.title);
+      toggle.addEventListener('click', function () {
+        toggleInstrumentBlockFromUi(block);
+      });
+
+      actions.appendChild(toggle);
+      row.appendChild(main);
+      row.appendChild(actions);
+      return row;
+    }
+
+    const instrumentView = createVirtualList({
+      container: instrumentListEl,
+      rowHeight: VIRTUAL_ROW_HEIGHT,
+      overscan: VIRTUAL_OVERSCAN_DEFAULT,
+      label: 'Instrument blocks',
+      renderRow: buildInstrumentRow,
+      keyOf: function (block) {
+        return block.id;
+      },
+    });
+
+    /*
+     * The quick family filters. Built ONCE — the registry is static, so the
+     * chips are too — and only their pressed state is repainted afterwards.
+     * The "All" chip is a real chip rather than a cleared search box, so the
+     * way out of a filter is the same shape as the way in.
+     */
+    const instrumentFamilyButtons = [];
+    (function buildInstrumentFamilyChips() {
+      const families = [{ id: '', label: 'All', count: INSTRUMENT_REGISTRY.length }].concat(
+        instrumentFamilies()
+      );
+      for (let i = 0; i < families.length; i += 1) {
+        const family = families[i];
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip instrument-family-chip';
+        chip.setAttribute('data-family', family.id);
+        chip.textContent = family.label + ' (' + family.count + ')';
+        chip.addEventListener('click', function () {
+          // Pressing the active chip again is the way back to "All": a filter
+          // you cannot undo with the control that set it is a trap.
+          instrumentFamilyFilter = instrumentFamilyFilter === family.id ? '' : family.id;
+          renderInstrumentCard();
+        });
+        instrumentFamiliesEl.appendChild(chip);
+        instrumentFamilyButtons.push({ id: family.id, label: family.label, el: chip });
+      }
+    })();
+
+    /**
+     * The single render path for the card, subscribed to the prompt store — so
+     * removing an instrument chip from the draft turns the matching row back to
+     * "Add" and drops its badge without this card having to be told.
+     */
+    function renderInstrumentCard() {
+      const query = instrumentSearch.value;
+      const visible = searchInstruments(query, instrumentFamilyFilter);
+      instrumentView.setItems(visible);
+      instrumentListEl.hidden = visible.length === 0;
+
+      let activeFamilyLabel = '';
+      for (let f = 0; f < instrumentFamilyButtons.length; f += 1) {
+        const button = instrumentFamilyButtons[f];
+        const on = button.id === instrumentFamilyFilter;
+        button.el.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (on && button.id) activeFamilyLabel = button.label;
+      }
+
+      // The honest empty state: it names BOTH narrowings, because a search that
+      // looks broken is usually a forgotten family chip.
+      const typed = query.replace(/\s+/g, ' ').trim();
+      instrumentEmpty.hidden = visible.length > 0;
+      if (!visible.length) {
+        const scope = activeFamilyLabel ? ' within ' + activeFamilyLabel : '';
+        instrumentEmpty.textContent = typed
+          ? 'No block matches “' +
+            typed +
+            '”' +
+            scope +
+            ' — try a family (drums, bass, keys), a name (marimba, koto, rhodes), ' +
+            (activeFamilyLabel ? 'the All chip, ' : '') +
+            'or clear the box for all ' +
+            INSTRUMENT_REGISTRY.length +
+            '.'
+          : 'No block in ' + activeFamilyLabel + ' — pick the All chip to see the whole table.';
+      } else {
+        instrumentEmpty.textContent = '';
+      }
+
+      const selected = selectedInstrumentBlocks(promptState);
+      // Same focus rescue as the vocal and era chip rows: this runs FROM the
+      // click handler of a badge inside it, so the badge being clicked is
+      // destroyed mid-click and focus would otherwise fall back to <body>.
+      const before = Array.prototype.slice.call(instrumentBadges.children);
+      const focusedIndex = before.indexOf(document.activeElement);
+
+      instrumentBadges.textContent = '';
+      for (let i = 0; i < selected.length; i += 1) {
+        const block = selected[i];
+        // FDD #27's "visual badge": family over name, in a block with a
+        // weighted accent edge, rather than the one-line pill the sibling
+        // cards use — a layered arrangement should look layered.
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'instrument-badge';
+        badge.setAttribute('aria-pressed', 'true');
+        badge.title = 'Remove the “' + block.label + '” tags from the draft';
+        badge.setAttribute('aria-label', badge.title);
+        const family = document.createElement('span');
+        family.className = 'instrument-badge-family';
+        family.textContent = block.familyLabel;
+        const name = document.createElement('span');
+        name.className = 'instrument-badge-name';
+        const nameText = document.createElement('span');
+        nameText.textContent = block.label;
+        const cross = document.createElement('span');
+        cross.className = 'tag-chip-x';
+        cross.setAttribute('aria-hidden', 'true');
+        cross.textContent = '×';
+        name.appendChild(nameText);
+        name.appendChild(cross);
+        badge.appendChild(family);
+        badge.appendChild(name);
+        badge.addEventListener('click', function () {
+          toggleInstrumentBlockFromUi(block);
+        });
+        instrumentBadges.appendChild(badge);
+      }
+      instrumentSelectedEmpty.hidden = selected.length > 0;
+
+      if (focusedIndex !== -1) {
+        const rebuilt = instrumentBadges.children;
+        const target = rebuilt.length
+          ? rebuilt[Math.min(focusedIndex, rebuilt.length - 1)]
+          : instrumentSearch;
+        if (target && typeof target.focus === 'function') target.focus();
+      }
+
+      instrumentCountOut.textContent =
+        'showing ' +
+        visible.length +
+        ' of ' +
+        INSTRUMENT_REGISTRY.length +
+        ' · ' +
+        // plural() cannot spell "families", and a table with one family would
+        // be a different card; the count is written out rather than inflected.
+        (activeFamilyLabel || instrumentFamilies().length + ' families') +
+        ' · ' +
+        selected.length +
+        ' stacked';
+    }
+
+    instrumentSearch.addEventListener('input', renderInstrumentCard);
+    promptState.subscribe(renderInstrumentCard);
+    renderInstrumentCard();
+
+    /* -- J. the Production Era & Signature card (FDD #66) over ERA_REGISTRY -- */
 
     const eraSearch = $('era-search');
     const eraListEl = $('era-list');
@@ -24195,6 +26496,160 @@ function createInstallCapability(deps) {
     eraSearch.addEventListener('input', renderEraCard);
     promptState.subscribe(renderEraCard);
     renderEraCard();
+
+    /* -- K. the "Inspire Me" slot machine (FDD #71) -------------------------- */
+
+    const inspireSpinBtn = $('btn-inspire');
+    const inspireSpinLabel = $('btn-inspire-label');
+    const inspireSeeded = $('inspire-seeded');
+    const inspireStrip = $('inspire-strip');
+    const inspireEmpty = $('inspire-empty');
+    const inspireActions = $('inspire-actions');
+    const inspireAddBtn = $('btn-inspire-add');
+    const inspireAgainBtn = $('btn-inspire-again');
+    const inspireStatus = $('inspire-status');
+
+    /** The combination currently on the strip, or null before the first spin. */
+    let inspiration = null;
+    /** Pending strip-animation timer, so a fast second spin cannot stack two. */
+    let inspireTumbleTimer = 0;
+
+    /* One live query rather than a boot-time boolean, exactly as the ribbon
+     * does it: turning the OS setting on takes effect without a reload. */
+    const inspireMotionQuery =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+
+    function inspireReducedMotion() {
+      return !!(inspireMotionQuery && inspireMotionQuery.matches);
+    }
+
+    function setInspireStatus(text, tone) {
+      inspireStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      inspireStatus.textContent = text;
+    }
+
+    /** How one pick is announced on its chip — the section it would land in. */
+    const INSPIRE_KIND_LABELS = {
+      genre: 'genre',
+      mood: 'mood',
+      instrument: 'instrument',
+      scene: 'scene',
+      era: 'era',
+    };
+
+    /**
+     * Paint the strip from `inspiration`. Pure DOM — it reads the result and
+     * nothing else, and it NEVER touches the prompt store.
+     */
+    function renderInspireStrip() {
+      inspireStrip.textContent = '';
+      const has = !!(inspiration && inspiration.picks.length);
+      inspireEmpty.hidden = has;
+      inspireActions.hidden = !has;
+      if (!has) {
+        inspireSeeded.textContent = '';
+        return;
+      }
+
+      // The honesty line. It names the genre the whole combination was read
+      // off, because "why these tags together?" has exactly one answer and the
+      // user is entitled to it.
+      inspireSeeded.textContent = 'seeded by ' + inspiration.genreLabel;
+
+      for (let i = 0; i < inspiration.picks.length; i += 1) {
+        const pick = inspiration.picks[i];
+        const chip = document.createElement('span');
+        chip.className = 'inspire-chip';
+        const kind = document.createElement('span');
+        kind.className = 'inspire-chip-kind';
+        kind.textContent = INSPIRE_KIND_LABELS[pick.kind] || pick.kind;
+        const label = document.createElement('span');
+        label.textContent = pick.label;
+        chip.appendChild(kind);
+        chip.appendChild(label);
+        // The tags a chip stands for are on the chip itself, so "Add all" is
+        // never a surprise: an era or instrument pick carries two of them.
+        chip.title =
+          pick.detail + ' — ' + pick.seeds.map(function (seed) {
+            return seed.tag;
+          }).join(', ');
+        inspireStrip.appendChild(chip);
+      }
+
+      // Motion off means motion off: the class is the ONLY thing that animates
+      // the chips, and it is not added at all when the OS asks for stillness.
+      // (The stylesheet also zeroes the animation under the same query, so a
+      // stale class from before the setting changed cannot animate either.)
+      inspireStrip.classList.remove('is-spinning');
+      if (inspireTumbleTimer) {
+        clearTimeout(inspireTumbleTimer);
+        inspireTumbleTimer = 0;
+      }
+      if (!inspireReducedMotion()) {
+        // Force a reflow so re-adding the class restarts the animation rather
+        // than being coalesced into a no-op by the style engine.
+        void inspireStrip.offsetWidth;
+        inspireStrip.classList.add('is-spinning');
+        inspireTumbleTimer = setTimeout(function () {
+          inspireStrip.classList.remove('is-spinning');
+          inspireTumbleTimer = 0;
+        }, 400);
+      }
+    }
+
+    /**
+     * Pull the handle.
+     *
+     * NOTHING IN THIS FUNCTION WRITES TO THE PROMPT STORE, and that is the
+     * feature's central promise (FDD #71 is a suggestion engine, not an
+     * editor): a spin proposes, "Add all to prompt" disposes. The suite
+     * asserts this body never mentions promptState or applyInspiration.
+     */
+    function runInspireSpin() {
+      const result = spinInspiration({ rng: Math.random });
+      if (!result) {
+        setInspireStatus('nothing to spin — the taxonomy holds no genres.', 'warn');
+        return;
+      }
+      inspiration = result;
+      renderInspireStrip();
+      inspireSpinLabel.textContent = 'Spin';
+      setInspireStatus(
+        plural(result.tags.length, 'tag') +
+          ' drawn from ' +
+          result.genreLabel +
+          (result.trimmed.length
+            ? ' · ' +
+              plural(result.trimmed.length, 'redundant or contradictory tag') +
+              ' dropped by the conflict resolver.'
+            : ' · conflict-free.'),
+        result.trimmed.length ? 'warn' : ''
+      );
+    }
+
+    inspireSpinBtn.addEventListener('click', runInspireSpin);
+    inspireAgainBtn.addEventListener('click', runInspireSpin);
+
+    // The ONE place a spin reaches the draft. Everything above only paints.
+    inspireAddBtn.addEventListener('click', function () {
+      if (!inspiration) return;
+      const outcome = applyInspiration(promptState, inspiration);
+      setInspireStatus(
+        outcome.added
+          ? plural(outcome.added, 'tag') +
+              ' added from ' +
+              inspiration.genreLabel +
+              (outcome.skipped
+                ? ' · ' + plural(outcome.skipped, 'tag') + ' already in the draft.'
+                : '.')
+          : 'every tag in this combination is already in the draft.',
+        outcome.added ? '' : 'warn'
+      );
+    });
+
+    renderInspireStrip();
 
     /* ---------------- song structure builder (FDD Domain D) ---------------- */
 
@@ -25967,14 +28422,16 @@ function createInstallCapability(deps) {
      * first moment a scroller has a height to measure. Cheap enough to be
      * unconditional: it is one windowed repaint of at most ~20 rows.
      *
-     * The Vocal Persona and Era Signature lists join them here rather than
-     * growing their own hooks: both are populated at boot (their registries
-     * are static), so they are the lists guaranteed to have painted blind.
+     * The Vocal Persona, Instrument Block and Era Signature lists join them
+     * here rather than growing their own hooks: all three are populated at
+     * boot (their registries are static), so they are the lists guaranteed to
+     * have painted blind.
      */
     function refreshPersistenceLists() {
       historyView.refresh();
       presetsView.refresh();
       vocalView.refresh();
+      instrumentView.refresh();
       eraView.refresh();
     }
 

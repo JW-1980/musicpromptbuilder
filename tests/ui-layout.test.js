@@ -58,27 +58,28 @@ const TOKEN_BLOCK_SELECTORS = [
   '.theme-abyssal-bloom {',
   '.high-contrast {',
 ];
-/* CONSCIOUSLY UPDATED IN 0.19.0: was '0.18.0' (the expanded-production-eras
- * release). This constant and the title of the test that reads it are the only
- * two things in this file that a version bump is allowed to touch, and both
- * moved together — the assertion itself is unchanged. The bump follows the
- * one-release-per-task cadence PROGRESS.md records for 0.10.0 through 0.18.0;
- * 0.19.0 is the PWA release (FDD #89/#92): var PWA_MANIFEST encoded into the
- * data: URI on <link rel="manifest">, the FEATURE-MECHANICS §6.6 share reader
- * parseSharedLyrics, and an install control that appears only when the engine
- * fires beforeinstallprompt. If the owner prefers it held back,
+/* CONSCIOUSLY UPDATED IN 0.20.0: was '0.19.0' (the PWA release). This constant
+ * and the title of the test that reads it are the only two things in this file
+ * that a version bump is allowed to touch, and both moved together — the
+ * assertion itself is unchanged. The bump follows the one-release-per-task
+ * cadence PROGRESS.md records for 0.10.0 through 0.19.0; 0.20.0 is the paired
+ * selector/generator release: FDD #27's var INSTRUMENT_REGISTRY and its
+ * Instrument blocks card, and FDD #71's "Inspire me" slot machine over the
+ * pure, seedable spinInspiration(). If the owner prefers it held back,
  * index.html:APP_VERSION and this line revert together and nothing else in the
  * suite moves. */
-const EXPECTED_VERSION = '0.19.0';
+const EXPECTED_VERSION = '0.20.0';
 /* The Prompt Editor's four workflow zones, in the order they must be read. */
 const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
 /* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
  * the "outline" test below for why the level matters. */
 const EDITOR_CARD_HEADINGS = [
   'dissect-heading',
+  'inspire-heading',
   'scene-heading',
   'sliders-heading',
   'vocal-heading',
+  'instrument-heading',
   'era-heading',
   'structure-heading',
   'draft-heading',
@@ -96,6 +97,10 @@ const EDITOR_SHAPE_CARDS = [
   'scene-panel',
   'slider-panel',
   'vocal-panel',
+  /* FDD #27's Modular Instrument "Lego Blocks" card, between the voice and the
+   * room it was recorded in — which is also where its section sits in
+   * PROMPT_SECTION_ORDER (genre > mood > vocal > instrument > scene > era). */
+  'instrument-panel',
   /* FDD #66's Production Era & Signature card. It FEEDS the prompt, so it
    * belongs on this side of the split — parked in the sticky rail it would pin
    * a search box to the viewport. */
@@ -104,8 +109,11 @@ const EDITOR_SHAPE_CARDS = [
 ];
 const EDITOR_RAIL_CARDS = ['draft-panel', 'exclude-panel', 'style-panel'];
 /* Every card in the view, in the order the single-column stack reads them. The
- * split must not reorder the document: below 1080px it IS that stack. */
-const EDITOR_CARD_ORDER = ['dissector-panel']
+ * split must not reorder the document: below 1080px it IS that stack.
+ * FDD #71's "Inspire me" card closes the DESCRIBE zone — it is neither a shape
+ * card nor a rail card, because it sits outside the split entirely, beside the
+ * dissector whose question it answers from the other end. */
+const EDITOR_CARD_ORDER = ['dissector-panel', 'inspire-panel']
   .concat(EDITOR_SHAPE_CARDS, EDITOR_RAIL_CARDS, ['history-panel', 'presets-panel']);
 const PREFS_KEY = 'suno_ui_prefs';
 
@@ -916,7 +924,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the PWA release (var PWA_MANIFEST as an inline data: manifest, the §6.6 share-target reader, an install control gated on a real beforeinstallprompt)`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the instrument-blocks + inspire release (var INSTRUMENT_REGISTRY with its MUSIC_KB derivation record and the Instrument blocks card, plus FDD #71's seedable spinInspiration behind an "Inspire me" card that never auto-adds)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });

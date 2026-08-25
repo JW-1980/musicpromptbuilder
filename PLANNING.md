@@ -2,19 +2,17 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] #71 "Inspire Me" Slot Machine + #27 Modular Instrument "Lego Blocks" — paired iteration (both are selector/generator features over the existing KB + prompt state).
+- [ ] #69 Suno Model Selector + #75 URL-Hash Deep Linking — paired iteration (compiler syntax switch + serialization-over-URL; contained and independent). *(#28 removed from this list — shipped with #65 in Task 14.)*
 
 ## NEXT
 *Post-1.0 recommendations from the release audit, in order:*
-- [ ] #28 Vocal Persona Selector (UI over #65's registry).
-- [ ] #69 Suno Model Selector (v5.5/v4/v3.5 syntax switch in the centralized compiler).
-- [ ] #75 Base64/URL-Hash Deep Linking (serializeWorkspace already exists).
 - [ ] #90 Studio Shortcut Keybinds (guard infrastructure already in place).
 - [ ] #16 Command Palette (after #90's keybind layer).
 - [ ] Fix: CSS transitions freeze paint on runtime theme swap in Chrome — affects `.btn-record` (Task 11) AND `.btn-mini` (re-confirmed in Task 14's persona toggle, nonsense 1.16:1 contrast mid-transition). Fix the pattern, not one button.
 - [ ] Consider: Code Mode violet accent at 3.52:1 on black (noted in Task 7).
 
 ## DONE
+- [x] #71 "Inspire Me" (single-genre synergy guarantee, seeded RNG, never auto-adds) + #27 Instrument Lego Blocks (87-block registry derived from MUSIC_KB + curated staples).
 - [x] #89 PWA Offline Manifest + #92 Share Target parsing (honest single-file scope: data-URI manifest with theme-tracking colors, share-intent lyrics import, event-gated install affordance).
 - [x] #66 Expanded Production Eras: 124-signature registry (9 groups) with searchable, group-filtered selector card.
 - [x] Local AI as default + API key persistence + provider focus (owner requests, incl. Gemini-stays correction): local-llm default mode with hash-pinned opt-in Qwen2.5-0.5B/SmolLM2 engine, AES-GCM key vault with epoch-guarded arming, OpenRouter/OpenAI-compatible/Gemini presets.

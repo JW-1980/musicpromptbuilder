@@ -36,6 +36,7 @@ const SUITES = [
   { id: 'vocal-registry', script: path.join(TESTS_DIR, 'vocal-registry.test.js') },
   { id: 'era-registry', script: path.join(TESTS_DIR, 'era-registry.test.js') },
   { id: 'pwa', script: path.join(TESTS_DIR, 'pwa.test.js') },
+  { id: 'instruments-inspire', script: path.join(TESTS_DIR, 'instruments-inspire.test.js') },
   { id: 'limiter-eval', script: path.join(TESTS_DIR, 'limiter-eval.js') },
 ];
 
