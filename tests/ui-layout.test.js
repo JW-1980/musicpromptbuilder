@@ -58,17 +58,16 @@ const TOKEN_BLOCK_SELECTORS = [
   '.theme-abyssal-bloom {',
   '.high-contrast {',
 ];
-/* CONSCIOUSLY UPDATED IN 0.17.0: was '0.16.0' (the theme suite). This constant
- * and the title of the test that reads it are the only two things in this file
- * that a version bump is allowed to touch, and both moved together — the
- * assertion itself is unchanged. The bump follows the one-release-per-task
- * cadence PROGRESS.md records for 0.10.0 through 0.16.0; 0.17.0 is the
- * on-device-model release: a real in-browser LLM behind an explicit consent
- * click, a hash-pinned runtime, an OpenRouter/OpenAI-compatible provider
- * roster and the opt-in device-tier key vault. If the owner prefers it held
- * back, index.html:APP_VERSION and this line revert together and nothing else
- * in the suite moves. */
-const EXPECTED_VERSION = '0.17.0';
+/* CONSCIOUSLY UPDATED IN 0.18.0: was '0.17.0' (the on-device-model release).
+ * This constant and the title of the test that reads it are the only two
+ * things in this file that a version bump is allowed to touch, and both moved
+ * together — the assertion itself is unchanged. The bump follows the
+ * one-release-per-task cadence PROGRESS.md records for 0.10.0 through 0.17.0;
+ * 0.18.0 is the expanded-production-eras release (FDD #66): the 124-signature
+ * var ERA_REGISTRY and the Production Era & Signature card built over it. If
+ * the owner prefers it held back, index.html:APP_VERSION and this line revert
+ * together and nothing else in the suite moves. */
+const EXPECTED_VERSION = '0.18.0';
 /* The Prompt Editor's four workflow zones, in the order they must be read. */
 const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
 /* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
@@ -78,6 +77,7 @@ const EDITOR_CARD_HEADINGS = [
   'scene-heading',
   'sliders-heading',
   'vocal-heading',
+  'era-heading',
   'structure-heading',
   'draft-heading',
   'exclude-heading',
@@ -90,7 +90,16 @@ const EDITOR_CARD_HEADINGS = [
  * and carry the string that is actually pasted into Suno. Which card sits in
  * which wrapper is the whole point of the split — a card in the wrong one is
  * either a sticky input or a compiled output that scrolls away. */
-const EDITOR_SHAPE_CARDS = ['scene-panel', 'slider-panel', 'vocal-panel', 'structure-panel'];
+const EDITOR_SHAPE_CARDS = [
+  'scene-panel',
+  'slider-panel',
+  'vocal-panel',
+  /* FDD #66's Production Era & Signature card. It FEEDS the prompt, so it
+   * belongs on this side of the split — parked in the sticky rail it would pin
+   * a search box to the viewport. */
+  'era-panel',
+  'structure-panel',
+];
 const EDITOR_RAIL_CARDS = ['draft-panel', 'exclude-panel', 'style-panel'];
 /* Every card in the view, in the order the single-column stack reads them. The
  * split must not reorder the document: below 1080px it IS that stack. */
@@ -905,7 +914,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the on-device-model release (opt-in in-browser LLM, hash-pinned runtime, OpenRouter roster, device-tier key vault)`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the expanded-production-eras release (124-signature ERA_REGISTRY, the Production Era & Signature card, era tags weighted into the existing era group)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });

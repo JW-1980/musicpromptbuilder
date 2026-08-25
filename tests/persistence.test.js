@@ -2316,20 +2316,39 @@ s.test('every IndexedDB call in the boot code handles its own rejection', () => 
   assert.ok(promiseAll.length >= 2, 'the batched writes must be joined and their rejection handled');
 });
 
-s.test('both windowed lists are repainted when the editor view becomes visible', () => {
+s.test('ALL windowed lists are repainted when the editor view becomes visible', () => {
   const source = app.source;
   // A [hidden] element has no layout, so a list painted at boot measured a
   // clientHeight of 0 and rendered only its overscan. The view manager has to
   // repaint it the moment the scroller actually has a height.
+  // CONSCIOUSLY UPDATED IN 0.18.0: the original regex covered only history +
+  // presets, which let the vocal list (0.13.0) sneak in covered and the era
+  // list (0.18.0) sneak in UNcovered — a reviewer reproduced the era card
+  // under-rendering on first navigation. The assertion now enumerates every
+  // boot-painted windowed list so the next one added fails this test until it
+  // joins the hook.
   assert.ok(/function refreshPersistenceLists\(\)/.test(source), 'no repaint hook exists');
   assert.ok(
     /if \(id === 'editor'\) refreshPersistenceLists\(\);/.test(source),
     'the editor view switch must repaint the windowed lists'
   );
-  assert.ok(
-    /historyView\.refresh\(\);\s*\n\s*presetsView\.refresh\(\);/.test(source),
-    'the repaint must cover BOTH lists'
-  );
+  const hook = /function refreshPersistenceLists\(\)\s*\{([\s\S]*?)\}/.exec(source);
+  assert.ok(hook, 'refreshPersistenceLists body not found');
+  for (const view of ['historyView', 'presetsView', 'vocalView', 'eraView']) {
+    assert.ok(
+      new RegExp(view + '\\.refresh\\(\\);').test(hook[1]),
+      `the repaint hook must cover ${view}`
+    );
+  }
+  // Completeness guard: every *View built over createVirtualList must appear
+  // in the hook (so a future list cannot be forgotten silently).
+  const built = [...source.matchAll(/(?:const|var)\s+(\w+View)\s*=\s*createVirtualList\(/g)].map((m) => m[1]);
+  for (const view of built) {
+    assert.ok(
+      new RegExp(view + '\\.refresh\\(\\);').test(hook[1]),
+      `windowed list ${view} is built but missing from refreshPersistenceLists — it will under-render on first editor entry`
+    );
+  }
 });
 
 s.test('the storage status line reports BOTH stores, honestly', () => {

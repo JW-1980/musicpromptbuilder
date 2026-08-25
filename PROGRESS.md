@@ -127,3 +127,9 @@
 - **Process note:** an orchestrator message to a workflow-owned agent forked its sequencing (two agents co-authored mid-flight; converged safely, deduped, verified). Lesson recorded: never SendMessage an agent a running workflow still owns.
 - **Tests:** 16 suites, 772 passed / 0 failed / 15 todo (ai-dissector 101, local-llm 34, key-vault 26); run-all + nightly + verify-single-file GREEN (independently re-run). APP_VERSION 0.17.0.
 - **Next:** #66 Production Eras integration (124 banked entries; moved to `## NOW`).
+
+### [2026-08-25] Task 19 — FDD #66: Production era/signature registry (7 → 124 signatures)
+- **Shipped (Opus implementer + adversarial review):** `ERA_REGISTRY` embedded verbatim from the banked generation (byte-equal proven), 124 entries / 9 groups (6 decades + Saturation & Tape, Reverb & Space, Mix & Master). "Production era & signature" card in the Shape zone: search + 10 group-filter chips + virtualized rows, toggle add/remove into the era section with position weights and vocal-style shared-tag protection. MUSIC_KB's 7 era triggers coexist (text matching vs direct selection, cross-referenced). Serialization round-trip + lo-fi-vs-hyper-clean conflict proof tested. APP_VERSION 0.18.0.
+- **Review found 1 blocking defect; fixed by orchestrator:** the era list was missing from `refreshPersistenceLists()` — under-rendered on first editor entry (live-reproduced: 5 rows vs the sibling's 10). Added the refresh call AND upgraded the regression test with a completeness guard: every `*View = createVirtualList(...)` in the bundle must appear in the hook, so the next list added cannot be forgotten silently.
+- **Tests:** era-registry 53/53 new. Total 825 passed / 0 failed / 15 todo; run-all + nightly GREEN (independently re-run after the fix).
+- **Next:** #89 PWA Offline Manifest (moved to `## NOW`).

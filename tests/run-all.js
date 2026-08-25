@@ -34,6 +34,7 @@ const SUITES = [
   { id: 'midi-export', script: path.join(TESTS_DIR, 'midi-export.test.js') },
   { id: 'persistence', script: path.join(TESTS_DIR, 'persistence.test.js') },
   { id: 'vocal-registry', script: path.join(TESTS_DIR, 'vocal-registry.test.js') },
+  { id: 'era-registry', script: path.join(TESTS_DIR, 'era-registry.test.js') },
   { id: 'limiter-eval', script: path.join(TESTS_DIR, 'limiter-eval.js') },
 ];
 

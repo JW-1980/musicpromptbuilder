@@ -39,7 +39,9 @@
        sliderTags / sliderValueText (FEATURE-MECHANICS §4), matchScenes, the
        Safe-Mode sanitizer (sanitizeSafeMode and its vocabulary helpers) and
        the single var VOCAL_REGISTRY (FDD #65) with the pure selector helpers
-       the Vocal Persona card (FDD #28) is built on
+       the Vocal Persona card (FDD #28) is built on, and beside it the single
+       var ERA_REGISTRY (FDD #66) with the matching helpers the Production
+       Era & Signature card is built on
     5. the Song Structure Builder (FDD Domain D) — the SUNO_METATAGS taxonomy
        and its sanitiser/compiler (validateMetatag, sanitizeStructureTag,
        formatStructureTag), createStructureState with the §2.3 auto-chorus
@@ -1612,6 +1614,7 @@
   .scene-panel,
   .slider-panel,
   .vocal-panel,
+  .era-panel,
   .structure-panel,
   .exclude-panel,
   .style-panel,
@@ -1910,6 +1913,78 @@
      history star already use. Cyan rather than crimson because a persona ADDS
      tags; the shield's chips are the ones that take them away. */
   .btn-persona[aria-pressed="true"] {
+    color: var(--accent-cyan);
+    background: var(--tint-cyan);
+    border-color: var(--tint-cyan-border);
+  }
+
+  /* --- Production Era & Signature (FDD #66) over the era registry --------- */
+
+  /* The vocal card's sibling, and deliberately built from the same parts: the
+     shared .vlist scroller, the shared .chip, the same search row shape. 124
+     signatures is the DOM-virtualization case twice over
+     (ENGINEERING-STANDARD.md §2.2), so only what this card ADDS is below. */
+  .era-panel { margin-top: 24px; }
+
+  .era-row {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .era-count {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .era-groups {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .era-chips {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .era-chips:empty { display: none; }
+
+  /* A GROUP CHIP IS A FILTER, NOT AN INGREDIENT. It narrows the list and
+     touches the prompt not at all, so it must not wear the cyan the additive
+     toggles wear — a user who has learned "cyan means it is in my prompt"
+     would read a pressed filter as nine tags they never asked for. Violet is
+     the shell's other accent and is already the "view state" colour. The TEXT
+     rides --ink-violet rather than the raw accent because a chip label is
+     ~12.5px, which is exactly the case that token exists for.
+
+     AND NO WASH BEHIND IT. The obvious version of this rule also set
+     `background: var(--tint-violet)`, and measured in Chrome that wash lifts
+     the backdrop far enough to drag --ink-violet DOWN to 4.36:1 in Studio
+     Obsidian and 4.51:1 in Tape Deck — under, and a hair over, AA. Keeping the
+     base .chip's --field-bg instead holds the label at 5.09:1 in the worst
+     theme (Obsidian; Tape Deck 6.16, Null Signal 6.50, Daylight 9.95, Studio
+     Code 10.12, ColorSafe 14.61, Abyssal 16.41). The pressed state is still
+     TWO changes — dim grey text to violet ink, hairline border to the full
+     violet accent — which is the same two-signal story Code Mode falls back on
+     below, so nothing is lost but the contrast problem. */
+  .era-group-chip[aria-pressed="true"] {
+    color: var(--ink-violet);
+    border-color: var(--accent-violet);
+  }
+
+  /* Added / not added, same pressed-toggle contract and the same cyan as the
+     persona rows: both buttons ADD tags to the draft, so they say so the same
+     way. Declared separately from .btn-persona rather than sharing a selector
+     list, so either card can diverge without silently repainting the other. */
+  .btn-era[aria-pressed="true"] {
     color: var(--accent-cyan);
     background: var(--tint-cyan);
     border-color: var(--tint-cyan-border);
@@ -2584,6 +2659,8 @@
     .exclude-row .field { width: 100%; }
     .vocal-row { flex-direction: column; align-items: stretch; }
     .vocal-row .field { width: 100%; }
+    .era-row { flex-direction: column; align-items: stretch; }
+    .era-row .field { width: 100%; }
     .draft-foot { align-items: stretch; flex-direction: column; }
     /* A narrow structure card stacks the block toolbar rather than letting the
        tag line, the handle and four buttons fight over one line. */
@@ -2823,6 +2900,19 @@
      border becomes the whole "this one is in the draft" signal. */
   .high-contrast .btn-persona[aria-pressed="true"] {
     border: 1px solid var(--accent-cyan);
+  }
+
+  /* An added era signature is the same story, and its GROUP FILTER chip is the
+     third: Code Mode removes the violet wash, so the violet border has to
+     carry "this filter is on" by itself — and it must stay a different colour
+     from the cyan beside it, or the mode that flattens the washes would also
+     flatten the difference between filtering the list and changing the draft. */
+  .high-contrast .btn-era[aria-pressed="true"] {
+    border: 1px solid var(--accent-cyan);
+  }
+
+  .high-contrast .era-group-chip[aria-pressed="true"] {
+    border: 1px solid var(--accent-violet);
   }
 
   /* A warning panel must survive the mode that removes washes: the accent
@@ -3424,6 +3514,45 @@
       <p id="vocal-empty" class="draft-empty" hidden></p>
       <div id="vocal-list" class="vlist" tabindex="0" aria-label="Vocal personas"></div>
       <p id="vocal-status" class="dissect-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <!-- Expanded Production Eras (docs/FDD.md #66) over var ERA_REGISTRY. The
+         vocal card's sibling in every respect — same virtualized .vlist, same
+         search box, same pressed-toggle rows, same prompt store — answering
+         "what does it sound like it was RECORDED on?" where that one answers
+         "who is singing?". It writes into the 'era' group, which the seven
+         MUSIC_KB decade triggers also fill from the dissector side; the store
+         holds one entry per tag, so the two roads cannot double up.
+         The group chips FILTER the list; they never touch the draft. -->
+    <section class="view-col vibe-card era-panel" aria-labelledby="era-heading">
+      <h4 id="era-heading" class="panel-heading">Production era &amp; signature</h4>
+      <p class="panel-note">
+        Pick the studio, not the song. Every signature is a generic, copyright-safe
+        production description — search by decade (1970s, 1990s), by texture (tape,
+        plate, crackle, sidechain) or by name, and narrow to one group with the chips.
+        Adding one puts <em>all</em> of its tags in the Era group, weighted so the
+        texture that names it leads; clicking it again takes them straight back out.
+      </p>
+
+      <div class="era-row">
+        <span class="field field-grow">
+          <label class="field-label" for="era-search">Search signatures</label>
+          <input type="search" id="era-search" class="field-input" autocomplete="off"
+                 spellcheck="false" placeholder="e.g. tape, gated reverb, 1980s, mono">
+        </span>
+        <span id="era-count" class="era-count"></span>
+      </div>
+
+      <div id="era-groups" class="era-groups" role="group" aria-label="Filter by era group"></div>
+
+      <p id="era-selected-empty" class="draft-empty">
+        No signature picked yet — the prompt carries no production era.
+      </p>
+      <div id="era-chips" class="era-chips"></div>
+
+      <p id="era-empty" class="draft-empty" hidden></p>
+      <div id="era-list" class="vlist" tabindex="0" aria-label="Production era signatures"></div>
+      <p id="era-status" class="dissect-status" role="status" aria-live="polite"></p>
     </section>
 
     <!-- Song structure (docs/FDD.md Domain D #39/#40/#42/#50, over
@@ -5525,7 +5654,7 @@ if (typeof self !== 'undefined') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.17.0';
+const APP_VERSION = '0.18.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -9648,6 +9777,20 @@ var VOCAL_SECTION = 'vocal';
 var VOCAL_PERSONA_SOURCE = 'vocal-persona';
 
 /*
+ * The Production Era & Signature section (FDD #66, section F below), named
+ * here for exactly the same reason.
+ *
+ * The SECTION is not new — 'era' has been in the order below since the first
+ * release, filled by the dissector's MUSIC_KB era triggers. What #66 adds is a
+ * second SOURCE writing into it: 'era-signature', the direct-selection card.
+ * Two sources, one section, one de-duplication index — so picking "Cassette
+ * Tape Saturation" by hand and dissecting a track that reads as 1980s cannot
+ * put the same tag in the group twice.
+ */
+var ERA_SECTION = 'era';
+var ERA_SIGNATURE_SOURCE = 'era-signature';
+
+/*
  * Emission order. Suno reads a style prompt front-to-back and weights what it
  * sees first, so the genre leads, the feel follows, and the physical-slider
  * tags (which colour everything before them) are appended last.
@@ -9667,7 +9810,15 @@ var VOCAL_PERSONA_SOURCE = 'vocal-persona';
  * and the ordering assertions in tests/vibe-translators.test.js and
  * tests/compiler.test.js pin the new order from both ends.
  */
-var PROMPT_SECTION_ORDER = ['genre', 'mood', VOCAL_SECTION, 'instrument', 'scene', 'era', 'custom'];
+var PROMPT_SECTION_ORDER = [
+  'genre',
+  'mood',
+  VOCAL_SECTION,
+  'instrument',
+  'scene',
+  ERA_SECTION,
+  'custom',
+];
 
 /* The sliders share one section but NOT one source: 'slider' is the bucket the
  * draft appends last, and the per-axis source is what makes a slider move a
@@ -9677,9 +9828,13 @@ var PROMPT_SLIDER_SOURCES = ['slider-energy', 'slider-warmth', 'slider-density']
 
 var PROMPT_SECTIONS = PROMPT_SECTION_ORDER.concat([PROMPT_SLIDER_SECTION]);
 
-var PROMPT_SOURCES = ['dissector', 'scene', 'manual', VOCAL_PERSONA_SOURCE].concat(
-  PROMPT_SLIDER_SOURCES
-);
+var PROMPT_SOURCES = [
+  'dissector',
+  'scene',
+  'manual',
+  VOCAL_PERSONA_SOURCE,
+  ERA_SIGNATURE_SOURCE,
+].concat(PROMPT_SLIDER_SOURCES);
 
 /** Section a source writes to when an entry does not name one itself. */
 var PROMPT_SOURCE_SECTION = {
@@ -9687,6 +9842,7 @@ var PROMPT_SOURCE_SECTION = {
   scene: 'scene',
   manual: 'custom',
   'vocal-persona': VOCAL_SECTION,
+  'era-signature': ERA_SECTION,
   'slider-energy': PROMPT_SLIDER_SECTION,
   'slider-warmth': PROMPT_SLIDER_SECTION,
   'slider-density': PROMPT_SLIDER_SECTION,
@@ -11854,6 +12010,1679 @@ function vocalPersonaConflictPhrases() {
     if (typeof tag === 'string' && tag) out.push(tag);
   }
   return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* F. PRODUCTION ERA REGISTRY (FDD #66) AND ITS SELECTOR                      */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * EXPANDED PRODUCTION ERAS — docs/FDD.md #66, the sibling of the #65/#28 pair
+ * directly above and built on exactly the same three pieces: one static table,
+ * pure selector helpers over it, and one virtualized card in the boot IIFE.
+ *
+ * TWO PATHS INTO ONE SECTION — and why both exist.
+ * The 'era' prompt section is NOT new here. MUSIC_KB.eras (seven decade
+ * entries: 1960s through 2020s) has filled it since the first release, and
+ * those seven STAY exactly as they are. They are TRIGGERS: dissectLocal()
+ * matches the words a user typed ("90s", "seventies", "rave era") against
+ * their `phrases` and emits their `tokens`. They answer "the text says 1970s —
+ * what does that sound like?".
+ *
+ * This table answers the opposite question: "I want a specific production
+ * signature — give me the tags for it", with no text to match against. So it
+ * carries no `phrases` and no `bpm`, is never consulted by the dissector, and
+ * the two never compete: a MUSIC_KB era token arrives with source 'dissector',
+ * an entry here arrives with source 'era-signature', and the store's one-entry-
+ * per-(section, tag) index means the same phrase reaching the group by both
+ * roads is held once, not twice.
+ *
+ * WHAT AN ENTRY IS — the #65 shape, with `group` where that table has `family`:
+ *   id           kebab-case, ALWAYS prefixed with its own group id, so two
+ *                groups can both hold a "tape saturation" without colliding;
+ *   group /
+ *   groupLabel   the nine registry groups and the words a person reads;
+ *   label        the signature's name, unique across the registry;
+ *   tags         2-4 lowercase, comma-free Suno descriptors, MOST SPECIFIC
+ *                FIRST. Order is load-bearing: eraSignatureSeeds() weights by
+ *                position (ERA_TAG_WEIGHTS), so tags[0] — the phrase that
+ *                names the signature — is what the #73 weighting engine and
+ *                the #67 limiter treat as its identity;
+ *   description  one plain sentence for a human, never emitted into a prompt.
+ *
+ * WHY THE WEIGHTS SIT BELOW THE VOCAL ONES. A production signature colours a
+ * recording; a named voice decides who is singing. When a prompt carries both,
+ * the voice is the more load-bearing instruction, so ERA_TAG_WEIGHTS opens at
+ * 0.85 where VOCAL_TAG_WEIGHTS opens at 0.9 — and the #67 limiter, which trims
+ * from the light end, sheds a reverb texture before it sheds the singer.
+ *
+ * COPYRIGHT SAFETY (FDD #24's rule, applied to a static table)
+ * Not one entry names a real artist, band, producer, studio or plugin product.
+ * Every label describes a TECHNIQUE or a TRADITION ("Gated Reverb Drums",
+ * "Cassette Tape Saturation") — the same standard sanitizeSafeMode() enforces
+ * on dissector output, and tests/era-registry.test.js re-checks it against a
+ * blocklist rather than taking this comment's word for it.
+ *
+ * NO COMMAS, EVER. A tag carrying a comma would split into two tags the moment
+ * the draft is joined for the style prompt; the suite pins that too.
+ */
+var ERA_REGISTRY = [
+  /* --- Reverb & Space --- */
+  {
+    id: 'sig-reverb-space-plate-shimmer',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Plate Shimmer Reverb',
+    tags: ['plate reverb shimmer', 'bright metallic decay', 'silky high-frequency tail'],
+    description:
+      'A bright, metallic plate reverb with a silky, shimmering high-frequency decay tail.',
+  },
+  {
+    id: 'sig-reverb-space-spring-boing',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Spring Tank Boing',
+    tags: ['spring reverb boing', 'surf tank drip', 'twangy splash decay'],
+    description: 'A twangy spring-tank reverb that drips and boings on sharp transient hits.',
+  },
+  {
+    id: 'sig-reverb-space-cathedral-convolution',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Cathedral Convolution Wash',
+    tags: ['cathedral convolution reverb', 'stone hall decay', 'sacred long tail'],
+    description: 'A convolution reverb modeling a vast stone cathedral with a towering decay tail.',
+  },
+  {
+    id: 'sig-reverb-space-gated-drums',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Gated Reverb Drums',
+    tags: ['gated reverb drums', 'big 80s drum room', 'abrupt cutoff tail'],
+    description: 'A huge roomy drum reverb that slams shut with an abrupt, punchy gated cutoff.',
+  },
+  {
+    id: 'sig-reverb-space-chamber-intimacy',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Chamber Room Intimacy',
+    tags: ['chamber reverb', 'close intimate room tone', 'short natural decay'],
+    description: 'A small chamber reverb giving vocals a close, intimate, naturally short decay.',
+  },
+  {
+    id: 'sig-reverb-space-infinite-wash',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Infinite Ambient Wash',
+    tags: ['infinite reverb wash', 'frozen shimmer pad', 'endless sustain texture'],
+    description: 'An infinite-decay reverb that freezes notes into an endless ambient wash.',
+  },
+  {
+    id: 'sig-reverb-space-bone-dry',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Bone-Dry Vocal Closeness',
+    tags: ['dry close vocal', 'no reverb intimacy', 'tight upfront presence'],
+    description: 'A completely dry, reverb-free vocal sitting tight and upfront in the mix.',
+  },
+  {
+    id: 'sig-reverb-space-stairwell-slapback',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Stairwell Slapback Echo',
+    tags: ['stairwell slapback echo', 'single hard repeat', 'concrete reflection'],
+    description: 'A single hard slapback echo mimicking a bare concrete stairwell reflection.',
+  },
+  {
+    id: 'sig-reverb-space-canyon-delay',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Canyon Delay Sweep',
+    tags: ['canyon delay sweep', 'wide stereo echo trails', 'vast outdoor space'],
+    description: 'Wide, sweeping stereo delay trails that evoke a vast open canyon space.',
+  },
+  {
+    id: 'sig-reverb-space-live-room',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Live Room Ambience',
+    tags: ['live room ambience', 'natural mic bleed', 'organic open space'],
+    description: 'Natural live-room mic bleed capturing organic, unprocessed ambient space.',
+  },
+  {
+    id: 'sig-reverb-space-reverse-swell',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Reverse Reverb Swell',
+    tags: ['reverse reverb swell', 'backwards decay build', 'rising wash into hit'],
+    description: 'A reversed reverb tail that swells backward into each downbeat hit.',
+  },
+  {
+    id: 'sig-reverb-space-modulated-chorus',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Modulated Chorus Reverb',
+    tags: ['modulated reverb tail', 'chorused decay wobble', 'lush detuned space'],
+    description: 'A chorused, pitch-wobbling reverb tail that adds lush, detuned motion to a mix.',
+  },
+  {
+    id: 'sig-reverb-space-ducked-tail',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Ducked Reverb Tail',
+    tags: ['ducking reverb', 'sidechained decay', 'reverb blooms between lines'],
+    description: 'A sidechained reverb tail that ducks under the vocal then blooms between lines.',
+  },
+  {
+    id: 'sig-reverb-space-basement-room',
+    group: 'sig-reverb-space',
+    groupLabel: 'Reverb & Space',
+    label: 'Low Ceiling Basement Room',
+    tags: ['low ceiling room tone', 'boxy boomy space', 'tight reflective ambience'],
+    description: 'A boxy, boomy low-ceiling room tone with tight, reflective close ambience.',
+  },
+  /* --- Saturation & Tape --- */
+  {
+    id: 'sig-saturation-tape-console-drive',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Console Channel Drive',
+    tags: ['console channel drive', 'tube preamp warmth', 'analog console grit'],
+    description: 'Signal pushed hard into a tube console channel for rounded harmonic saturation.',
+  },
+  {
+    id: 'sig-saturation-tape-tube-warmth',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Tube Warmth Glow',
+    tags: ['tube warmth glow', 'valve saturation', 'warm even harmonics'],
+    description: 'A gentle valve-stage glow that rounds transients and adds warm even harmonics.',
+  },
+  {
+    id: 'sig-saturation-tape-wow-flutter',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Tape Wow and Flutter',
+    tags: ['tape wow and flutter', 'pitch wobble', 'analog tape drift'],
+    description: 'Slow pitch wobble and flutter from an imperfect analog tape transport speed.',
+  },
+  {
+    id: 'sig-saturation-tape-cassette-compression',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Cassette Compression',
+    tags: ['cassette compression', 'lo-fi cassette warmth', 'squashed dynamics'],
+    description: 'Natural compression and treble roll-off from magnetic cassette tape saturation.',
+  },
+  {
+    id: 'sig-saturation-tape-vinyl-crackle',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Vinyl Crackle Patina',
+    tags: ['vinyl crackle patina', 'dust and pop texture', 'needle surface noise'],
+    description: 'Surface noise, dust pops, and crackle layered like an old vinyl pressing.',
+  },
+  {
+    id: 'sig-saturation-tape-transformer-thickness',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Transformer Thickness',
+    tags: ['transformer thickness', 'iron core density', 'low-mid weight'],
+    description: 'Low-end density and harmonic thickening from driving an audio transformer.',
+  },
+  {
+    id: 'sig-saturation-tape-varispeed-smear',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Varispeed Smear',
+    tags: ['varispeed smear', 'pitch-bent tape drag', 'slowed tape haze'],
+    description: 'Pitch and tempo dragging as if tape speed is manually bent up or down.',
+  },
+  {
+    id: 'sig-saturation-tape-bitcrush-grit',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Bitcrushed Digital Grit',
+    tags: ['bitcrushed digital grit', 'low bitrate crunch', 'digital aliasing noise'],
+    description: 'Harsh quantization noise and aliasing from reduced bit depth and sample rate.',
+  },
+  {
+    id: 'sig-saturation-tape-reel-hiss',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Reel-to-Reel Hiss Bed',
+    tags: ['reel-to-reel hiss bed', 'tape noise floor', 'analog hiss wash'],
+    description: 'A soft continuous hiss floor characteristic of open-reel tape machines.',
+  },
+  {
+    id: 'sig-saturation-tape-mixbus-glue',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Saturated Mixbus Glue',
+    tags: ['saturated mixbus glue', 'cohesive bus compression', 'subtle harmonic blend'],
+    description: 'Broadband harmonic saturation gluing the full mix into one cohesive whole.',
+  },
+  {
+    id: 'sig-saturation-tape-stop-drop',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Tape Stop Pitch Drop',
+    tags: ['tape stop pitch drop', 'decelerating pitch dive', 'mechanical brake slur'],
+    description: 'A decelerating pitch dive mimicking tape playback grinding to a halt.',
+  },
+  {
+    id: 'sig-saturation-tape-overdriven-preamp',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Overdriven Preamp Crunch',
+    tags: ['overdriven preamp crunch', 'driven gain stage', 'gritty input clip'],
+    description: 'Aggressive gain-stage clipping that adds crunchy edge to the input signal.',
+  },
+  {
+    id: 'sig-saturation-tape-radio-crush',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Crushed AM Radio Tone',
+    tags: ['crushed am radio tone', 'narrowband saturation', 'telephone-band grit'],
+    description: 'Narrowband, saturated tone mimicking a distorted AM radio broadcast.',
+  },
+  {
+    id: 'sig-saturation-tape-double-speed-shimmer',
+    group: 'sig-saturation-tape',
+    groupLabel: 'Saturation & Tape',
+    label: 'Double-Speed Tape Shimmer',
+    tags: ['double-speed tape shimmer', 'sped-up tape sparkle', 'high-frequency tape lift'],
+    description: 'Bright shimmering harmonics from tape run faster than its recorded speed.',
+  },
+  /* --- 2010s & 2020s --- */
+  {
+    id: 'era-2010s-2020s-sidechain-pump',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'EDM Sidechain Pump',
+    tags: ['sidechain pumping compression', 'ducked pad swells', 'four-on-the-floor pulse'],
+    description:
+      'Kick-triggered compression makes pads and bass audibly breathe in time with the beat.',
+  },
+  {
+    id: 'era-2010s-2020s-trap-hihat-rolls',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Trap Hi-Hat Rolls',
+    tags: ['rapid hi-hat rolls', 'triplet hi-hat stutters', 'crisp closed hats'],
+    description:
+      'Fast subdivided hi-hat rolls and triplet stutters drive trap-style rhythmic tension.',
+  },
+  {
+    id: 'era-2010s-2020s-sliding-drill-808s',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Sliding Drill 808s',
+    tags: ['pitch-sliding 808 bass', 'glide sub bass', 'drill bass portamento'],
+    description: '808 sub bass glides and slides between notes for a menacing drill-style low end.',
+  },
+  {
+    id: 'era-2010s-2020s-hyperpop-clip-distortion',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Hyperpop Clip Distortion',
+    tags: ['digital clipping distortion', 'pitched-up vocal chops', 'maximalist saturation'],
+    description:
+      'Deliberately overdriven digital clipping and pitched vocals create abrasive hyperpop intensity.',
+  },
+  {
+    id: 'era-2010s-2020s-bedroom-pop-intimacy',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Bedroom Pop Intimacy',
+    tags: ['close-mic vocal intimacy', 'hushed breathy vocals', 'lo-fi bedroom warmth'],
+    description:
+      'Tight close-mic vocals and soft room tone create an intimate, homemade closeness.',
+  },
+  {
+    id: 'era-2010s-2020s-streaming-loudness-master',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Streaming Loudness Master',
+    tags: ['limited peak loudness', 'tight dynamic range', 'streaming-ready master'],
+    description:
+      'A heavily limited master maximizes perceived loudness within streaming platform targets.',
+  },
+  {
+    id: 'era-2010s-2020s-immersive-spatial-mix',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Immersive Spatial Mix',
+    tags: ['object-based spatial mix', 'wide immersive field', 'overhead height ambience'],
+    description:
+      'Sounds are placed and moved through a 3D field for headphone and surround immersion.',
+  },
+  {
+    id: 'era-2010s-2020s-future-bass-vocal-chops',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Future Bass Vocal Chops',
+    tags: ['chopped vocal stutters', 'supersaw pad stacks', 'pitched vocal snippets'],
+    description: 'Rhythmically chopped vocal snippets ride over lush layered supersaw pad stacks.',
+  },
+  {
+    id: 'era-2010s-2020s-lofi-chillhop-wobble',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Lo-fi Chillhop Wobble',
+    tags: ['tape-warped lo-fi wobble', 'vinyl crackle texture', 'dusty swung drums'],
+    description:
+      'Warped tape pitch wobble and vinyl crackle give chillhop drums a dusty, relaxed feel.',
+  },
+  {
+    id: 'era-2010s-2020s-hard-tuned-vocal-snap',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Hard-Tuned Vocal Snap',
+    tags: ['hard-tuned vocal snap', 'robotic pitch correction', 'quantized vocal glide'],
+    description:
+      'Aggressively quantized pitch correction snaps vocals into a stylized robotic glide.',
+  },
+  {
+    id: 'era-2010s-2020s-dubstep-growl-bass',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Melodic Dubstep Growl Bass',
+    tags: ['growling wobble bass', 'formant bass modulation', 'aggressive bass distortion'],
+    description: 'Modulated formant filtering turns the bass into a snarling, vowel-like growl.',
+  },
+  {
+    id: 'era-2010s-2020s-phonk-cowbell-distortion',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Phonk Cowbell Distortion',
+    tags: ['distorted cowbell hits', 'memphis-style vocal chops', 'saturated drum bus'],
+    description:
+      'Overdriven cowbell hits and chopped vocal samples ride a heavily saturated drum bus.',
+  },
+  {
+    id: 'era-2010s-2020s-amapiano-log-drum',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Amapiano Log Drum',
+    tags: ['deep log drum bass', 'shaker groove pulse', 'airy piano stabs'],
+    description:
+      'Deep pitched log drum bass anchors a shaker-driven groove beneath airy piano stabs.',
+  },
+  {
+    id: 'era-2010s-2020s-glitch-hop-stutter-edit',
+    group: 'era-2010s-2020s',
+    groupLabel: '2010s & 2020s',
+    label: 'Glitch-Hop Stutter Edit',
+    tags: ['stutter-edited glitch drums', 'granular chopped percussion', 'digital micro-edits'],
+    description: 'Granular stutter edits chop drum hits into rapid, glitchy micro-fragments.',
+  },
+  /* --- 1980s --- */
+  {
+    id: 'era-1980s-fm-bell-sheen',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'FM Bell Sheen',
+    tags: ['fm synth bell tones', 'glassy digital chimes', 'metallic fm sheen'],
+    description:
+      'Bright metallic FM synthesis bells and electric piano tones add glassy digital sheen.',
+  },
+  {
+    id: 'era-1980s-drum-machine-punch',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Drum Machine Punch',
+    tags: ['punchy drum machine', 'tight kick and snare', 'programmed rhythm click'],
+    description:
+      'Tightly programmed drum machine kick and snare hit with punchy, clicky precision.',
+  },
+  {
+    id: 'era-1980s-chorused-clean-guitars',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Chorused Clean Guitars',
+    tags: ['chorused clean guitar', 'shimmering guitar swirl', 'lush stereo chorus'],
+    description:
+      'Clean electric guitar drenched in lush stereo chorus for a shimmering, watery swirl.',
+  },
+  {
+    id: 'era-1980s-big-hall-digital-reverb',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Big Hall Digital Reverb',
+    tags: ['big hall digital reverb', 'cavernous reverb tail', 'spacious digital ambience'],
+    description:
+      'Long, bright digital hall reverb wraps vocals and instruments in cavernous space.',
+  },
+  {
+    id: 'era-1980s-synthpop-sequencer-precision',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Synthpop Sequencer Precision',
+    tags: ['synthpop sequencer precision', 'tight arpeggiated pulse', 'metronomic synth bassline'],
+    description:
+      'Rigidly quantized synth sequences and arpeggios drive a precise, metronomic pulse.',
+  },
+  {
+    id: 'era-1980s-scooped-metal-guitar-stacks',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Scooped Metal Guitar Stacks',
+    tags: ['scooped guitar stacks', 'high gain guitar wall', 'hair metal crunch'],
+    description:
+      'Layered high-gain guitars with scooped mids stack into a wide, aggressive wall of crunch.',
+  },
+  {
+    id: 'era-1980s-early-sampler-grit',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Early Sampler Grit',
+    tags: ['early sampler grit', 'lo-fi bit crushed texture', 'gritty digital sampling'],
+    description:
+      'Low-bit early digital sampling adds gritty, crunchy texture to chopped sounds and hits.',
+  },
+  {
+    id: 'era-1980s-slap-bass-pop',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Slap Bass Pop',
+    tags: ['slap bass pop', 'percussive bass snap', 'funky thumb bass'],
+    description:
+      'Percussive slap-and-pop electric bass snaps rhythmically through the funk-inflected groove.',
+  },
+  {
+    id: 'era-1980s-plate-reverb-vocal-sheen',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Plate Reverb Vocal Sheen',
+    tags: ['plate reverb vocal sheen', 'bright vocal shimmer', 'smooth reverb tail on vocals'],
+    description: 'Bright plate reverb coats lead vocals in a smooth, shimmering metallic sheen.',
+  },
+  {
+    id: 'era-1980s-analog-poly-synth-pads',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Analog Poly-Synth Pads',
+    tags: ['analog poly synth pads', 'warm sweeping pad wash', 'lush chorused synth strings'],
+    description: 'Warm analog polyphonic synth pads sweep and swell in lush, chorused washes.',
+  },
+  {
+    id: 'era-1980s-fretless-bass-glide',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Fretless Bass Glide',
+    tags: ['fretless bass glide', 'smooth sliding bassline', 'singing legato bass tone'],
+    description: 'Smooth, singing fretless bass glides between notes with fluid legato slides.',
+  },
+  {
+    id: 'era-1980s-talk-box-guitar-vocal',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Talk Box Guitar Vocal',
+    tags: ['talk box guitar vocal', 'vocoded guitar phrasing', 'robotic tube effect'],
+    description:
+      'A talk box tube effect shapes guitar or synth lines into vowel-like robotic phrasing.',
+  },
+  {
+    id: 'era-1980s-cassette-tape-saturation',
+    group: 'era-1980s',
+    groupLabel: '1980s',
+    label: 'Cassette Tape Saturation',
+    tags: ['cassette tape saturation', 'warm analog tape hiss', 'soft tape compression'],
+    description:
+      'Warm analog cassette tape saturation and soft hiss color the mix with nostalgic warmth.',
+  },
+  /* --- 1990s --- */
+  {
+    id: 'era-1990s-boom-bap-sampler-swing',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Sampler Swing Boom-Bap',
+    tags: ['sampler swing', 'chopped vinyl loops', 'dusty sample crackle', 'punchy boom-bap kick'],
+    description:
+      'Swung sampler groove built from chopped vinyl loops with dusty crackle and punchy boom-bap drums.',
+  },
+  {
+    id: 'era-1990s-grunge-room-rawness',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Grunge Room Rawness',
+    tags: ['raw room drums', 'distorted guitar wall', 'unpolished garage mix'],
+    description: 'Raw, unpolished room-mic drums under a thick wall of distorted guitars.',
+  },
+  {
+    id: 'era-1990s-rave-hoover-stab',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Rave Hoover Stab',
+    tags: [
+      'hoover synth stab',
+      'pounding four-on-floor',
+      'bright acid squelch',
+      'warehouse rave energy',
+    ],
+    description: 'Screaming hoover synth stabs riding a pounding four-on-the-floor rave pulse.',
+  },
+  {
+    id: 'era-1990s-trip-hop-dusty-loop',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Trip-Hop Dusty Loop',
+    tags: [
+      'dusty loop texture',
+      'slow hazy breakbeat',
+      'vinyl surface noise',
+      'moody downtempo groove',
+    ],
+    description: 'Hazy, slow breakbeats layered with dusty loop texture and vinyl surface noise.',
+  },
+  {
+    id: 'era-1990s-rnb-silk-polish',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Silky RnB Polish',
+    tags: ['silky vocal polish', 'warm quiet-storm keys', 'smooth sidechain glue'],
+    description:
+      'Polished, silky vocal production over warm electric-piano chords and smooth glue compression.',
+  },
+  {
+    id: 'era-1990s-jungle-chopped-breaks',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Jungle Chopped Breaks',
+    tags: ['chopped amen break', 'sub bass weight', 'ragga vocal chop', 'frantic breakbeat edit'],
+    description: 'Frantically chopped amen breaks over heavy sub bass and ragga-style vocal chops.',
+  },
+  {
+    id: 'era-1990s-shoegaze-wash',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Shoegaze Guitar Wash',
+    tags: ['washed guitar layers', 'reverb-drenched haze', 'blurred chorus pitch-shift'],
+    description:
+      'Layers of washed, reverb-drenched guitars blurred together with detuned chorus haze.',
+  },
+  {
+    id: 'era-1990s-4-track-tape-hiss',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: '4-Track Tape Hiss',
+    tags: ['tape hiss texture', 'lo-fi bedroom recording', 'wow and flutter wobble'],
+    description:
+      'Warm bedroom-recorded tracks with audible tape hiss and gentle wow-and-flutter wobble.',
+  },
+  {
+    id: 'era-1990s-house-piano-stab',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'House Piano Stab',
+    tags: ['piano house stab', 'filtered disco loop', 'pumping sidechain bassline'],
+    description: 'Pumping piano stabs and filtered disco loops driving a sidechained house groove.',
+  },
+  {
+    id: 'era-1990s-new-jack-swing-groove',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'New Jack Swing Groove',
+    tags: ['swung drum machine groove', 'syncopated funk stabs', 'gospel-tinged vocal stack'],
+    description:
+      'Syncopated drum-machine swing under funky stabs and stacked gospel-tinged vocal harmonies.',
+  },
+  {
+    id: 'era-1990s-britpop-jangle',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Britpop Jangle',
+    tags: ['jangly guitar chime', 'bright live-band mix', 'punchy pop drum kit'],
+    description: 'Chiming, jangly guitars over a bright, punchy live-band pop mix.',
+  },
+  {
+    id: 'era-1990s-industrial-grind',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Industrial Metal Grind',
+    tags: ['distorted industrial grind', 'sampled machine clang', 'aggressive compressed drums'],
+    description:
+      'Grinding distorted riffs and sampled machine clangs over aggressively compressed drums.',
+  },
+  {
+    id: 'era-1990s-eurodance-gated-vocal',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'Eurodance Gated Vocal',
+    tags: ['gated vocal chop', 'euro pluck synth', 'bright pop trance energy'],
+    description:
+      'Gated, chopped vocal hooks riding bright plucky synths and euro pop-trance energy.',
+  },
+  {
+    id: 'era-1990s-g-funk-whine-lead',
+    group: 'era-1990s',
+    groupLabel: '1990s',
+    label: 'G-Funk Whine Lead',
+    tags: ['synth whine lead', 'funky bass slide', 'laid-back groove pocket'],
+    description: 'A thin whining synth lead floats over a laid-back, slippery funk bass groove.',
+  },
+  /* --- Mix & Master Aesthetics --- */
+  {
+    id: 'sig-mix-master-glued-radio-master',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Radio-Ready Glue',
+    tags: [
+      'radio-ready glued master',
+      'bus compressed cohesion',
+      'commercial loudness master',
+      'polished broadcast sheen',
+    ],
+    description:
+      'A tightly bus-compressed master with commercial loudness and seamless glue across the mix.',
+  },
+  {
+    id: 'sig-mix-master-audiophile-headroom',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Audiophile Headroom',
+    tags: [
+      'dynamic audiophile headroom',
+      'wide dynamic range',
+      'uncompressed natural peaks',
+      'high-resolution clarity',
+    ],
+    description:
+      'A lightly limited master that preserves natural dynamics and transient peaks for audiophile playback.',
+  },
+  {
+    id: 'sig-mix-master-mono-punch',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Mid-Forward Mono Punch',
+    tags: [
+      'mid-forward mono punch',
+      'narrow center-weighted image',
+      'punchy midrange focus',
+      'collapsed stereo width',
+    ],
+    description:
+      'A mono-leaning blend that pushes midrange punch forward with a narrow, focused stereo image.',
+  },
+  {
+    id: 'sig-mix-master-wide-stereo-spread',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Wide Stereo Spread',
+    tags: [
+      'wide stereo spread',
+      'expansive panoramic image',
+      'hard-panned doubles',
+      'immersive width',
+    ],
+    description:
+      'An expansive stereo field with wide panning and doubled elements spread hard left and right.',
+  },
+  {
+    id: 'sig-mix-master-murky-basement-blend',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Murky Basement Blend',
+    tags: [
+      'murky basement blend',
+      'low-fi muffled tone',
+      'damp underground ambience',
+      'muddy low-mid haze',
+    ],
+    description:
+      'A dim, low-fidelity blend with muffled highs and a damp, underground low-mid haze.',
+  },
+  {
+    id: 'sig-mix-master-crystalline-top-end',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Crystalline Top-End Air',
+    tags: [
+      'crystalline top-end air',
+      'sparkling high shelf',
+      'airy exciter sheen',
+      'pristine treble clarity',
+    ],
+    description:
+      'A shimmering, air-boosted top end that adds sparkling clarity above the vocal and instruments.',
+  },
+  {
+    id: 'sig-mix-master-tape-bus-glue',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Tape Bus Glue',
+    tags: [
+      'tape-bus glue',
+      'analog tape saturation',
+      'warm reel compression',
+      'cohesive tape warmth',
+    ],
+    description:
+      'A mix bus run through analog tape emulation for soft saturation and cohesive warmth.',
+  },
+  {
+    id: 'sig-mix-master-ny-parallel-compression',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'NY Parallel Punch',
+    tags: [
+      'ny parallel compression',
+      'blended crushed drum bus',
+      'aggressive drum room punch',
+      'layered dynamic thickness',
+    ],
+    description:
+      'A heavily crushed parallel drum bus blended under the natural mix for aggressive punch and thickness.',
+  },
+  {
+    id: 'sig-mix-master-brickwall-loudness',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Brickwall Loudness War',
+    tags: [
+      'brickwall limited master',
+      'maximized loudness ceiling',
+      'flattened dynamic range',
+      'hyper-compressed peaks',
+    ],
+    description:
+      'An aggressively limited master pushed to a loud, flattened ceiling with minimal dynamic range.',
+  },
+  {
+    id: 'sig-mix-master-vinyl-warm-master',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Vinyl-Warm Master',
+    tags: [
+      'vinyl-warm mastering',
+      'rolled-off high shelf',
+      'gentle surface noise',
+      'nostalgic analog warmth',
+    ],
+    description:
+      'A softly rolled-off master with gentle surface warmth reminiscent of a vinyl pressing.',
+  },
+  {
+    id: 'sig-mix-master-scooped-club-master',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Scooped Club Master',
+    tags: [
+      'scooped club master',
+      'sub-heavy low end',
+      'mid-scooped low-mids',
+      'club system tuning',
+    ],
+    description:
+      'A club-tuned master with scooped low-mids and a boosted sub-bass built for large sound systems.',
+  },
+  {
+    id: 'sig-mix-master-am-radio-blend',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Vintage AM Radio Blend',
+    tags: [
+      'vintage am radio blend',
+      'narrow bandpass tone',
+      'crackly lo-fi broadcast',
+      'compressed transistor radio tone',
+    ],
+    description:
+      'A narrow-bandwidth blend filtered to sound like a crackly vintage AM transistor radio.',
+  },
+  {
+    id: 'sig-mix-master-sidechain-pump-glue',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Sidechain Pump Glue',
+    tags: [
+      'sidechain pumping glue',
+      'ducked bus breathing',
+      'rhythmic gain pumping',
+      'kick-triggered ducking',
+    ],
+    description:
+      'A mix bus ducked in rhythm with the kick, creating a pumping, breathing glue across elements.',
+  },
+  {
+    id: 'sig-mix-master-dry-close-intimacy',
+    group: 'sig-mix-master',
+    groupLabel: 'Mix & Master Aesthetics',
+    label: 'Dry Close-Mic Intimacy',
+    tags: [
+      'dry close-mic intimacy',
+      'minimal reverb tail',
+      'upfront intimate vocal',
+      'unprocessed proximity',
+    ],
+    description:
+      'A near-dry blend with minimal reverb that keeps vocals intimately close and upfront.',
+  },
+  /* --- 1950s & 1960s --- */
+  {
+    id: 'era-1950s-60s-tube-console-warmth',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Tube Console Warmth',
+    tags: ['tube console warmth', 'analog saturation', 'warm midrange', 'soft harmonic distortion'],
+    description:
+      'Signal passed through tube preamps and mixing consoles for rounded harmonic saturation and warmth.',
+  },
+  {
+    id: 'era-1950s-60s-mono-ribbon-vocal',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Mono Ribbon Vocal',
+    tags: [
+      'mono ribbon mic',
+      'warm vocal presence',
+      'narrow stereo image',
+      'vintage mic coloration',
+    ],
+    description:
+      'A single ribbon microphone captures a warm, narrow-band vocal with soft vintage coloration.',
+  },
+  {
+    id: 'era-1950s-60s-slapback-echo',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Slapback Tape Echo',
+    tags: ['slapback echo', 'single tape repeat', 'rockabilly echo', 'short delay slap'],
+    description:
+      'A single distinct tape repeat trails the source for a classic rockabilly-style echo slap.',
+  },
+  {
+    id: 'era-1950s-60s-ping-pong-stereo',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Early Ping-Pong Stereo',
+    tags: [
+      'ping-pong stereo',
+      'hard-panned instruments',
+      'early stereo separation',
+      'bouncing channel pan',
+    ],
+    description:
+      'Instruments are hard-panned fully left or right, bouncing between channels in early stereo mixes.',
+  },
+  {
+    id: 'era-1950s-60s-tape-flange-psych',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Psychedelic Tape Flanging',
+    tags: ['tape flanging', 'swirling phase sweep', 'psychedelic modulation', 'jet-swoosh texture'],
+    description:
+      'Two synced tape machines are nudged together to create a swirling, jet-like phase sweep.',
+  },
+  {
+    id: 'era-1950s-60s-surf-spring-reverb',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Surf Spring Reverb',
+    tags: ['spring reverb drip', 'surf guitar twang', 'splashy reverb tail', 'boingy spring decay'],
+    description:
+      'A guitar amp spring tank adds a splashy, drippy reverb tail associated with surf rock twang.',
+  },
+  {
+    id: 'era-1950s-60s-wall-of-sound',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Girl-Group Wall of Sound',
+    tags: [
+      'wall of sound',
+      'dense orchestral layering',
+      'stacked unison instruments',
+      'cavernous ensemble reverb',
+    ],
+    description:
+      'Dozens of layered instruments are stacked in unison for a dense, cavernous orchestral wash.',
+  },
+  {
+    id: 'era-1950s-60s-am-radio-compression',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'AM Radio Compression',
+    tags: [
+      'am radio compression',
+      'narrow-band eq',
+      'crunchy limiter squash',
+      'midrange-forward tone',
+    ],
+    description:
+      'Heavy limiting and narrow-band eq mimic the crunchy, midrange-forward sound of transistor radios.',
+  },
+  {
+    id: 'era-1950s-60s-tape-doubling-vocal',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Tape-Doubled Vocals',
+    tags: [
+      'tape vocal doubling',
+      'thickened unison vocal',
+      'subtle pitch drift',
+      'analog chorus-like blend',
+    ],
+    description:
+      'A vocal is re-recorded or tape-copied alongside itself for a thickened, subtly drifting unison.',
+  },
+  {
+    id: 'era-1950s-60s-fuzz-guitar',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Garage Fuzz Guitar',
+    tags: ['fuzz-tone guitar', 'gritty overdriven tone', 'buzzing distortion', 'raw garage grit'],
+    description:
+      'An overdriven fuzz circuit turns clean guitar tone into a buzzing, gritty distortion.',
+  },
+  {
+    id: 'era-1950s-60s-brass-room-bright',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Bright Brass Room',
+    tags: ['close-mic brass', 'bright horn section', 'punchy room brass', 'upfront horn stabs'],
+    description:
+      'Horns are close-miked in a live room for punchy, upfront brass stabs with bright presence.',
+  },
+  {
+    id: 'era-1950s-60s-vari-speed-tape',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Vari-Speed Tape Pitch',
+    tags: ['vari-speed tape', 'pitched-up playback', 'wobbly tape pitch', 'tape transposition'],
+    description:
+      'Playback speed is nudged up or down, shifting pitch and tempo together for a wobbly analog feel.',
+  },
+  {
+    id: 'era-1950s-60s-upright-bass-warmth',
+    group: 'era-1950s-60s',
+    groupLabel: '1950s & 1960s',
+    label: 'Upright Bass Warmth',
+    tags: [
+      'upright bass warmth',
+      'woody low end',
+      'plucked doghouse bass',
+      'round low-frequency thump',
+    ],
+    description: 'A plucked acoustic upright bass provides a woody, round low end beneath the mix.',
+  },
+  /* --- 1970s --- */
+  {
+    id: 'era-1970s-console-saturation',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Tube Console Saturation',
+    tags: [
+      'tube console saturation',
+      'analog warmth',
+      'subtle harmonic distortion',
+      'warm mix bus',
+    ],
+    description: 'Signal driven through a tube console for warm harmonic saturation and glue.',
+  },
+  {
+    id: 'era-1970s-tape-compression',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: '2-Inch Tape Compression',
+    tags: [
+      '2-inch tape compression',
+      'tape saturation',
+      'analog tape warmth',
+      'soft transient rounding',
+    ],
+    description: 'Tracked to 2-inch analog tape for natural compression and rounded transients.',
+  },
+  {
+    id: 'era-1970s-disco-strings',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Disco String Section',
+    tags: [
+      'lush disco strings',
+      'live string orchestra',
+      'sweeping violin runs',
+      'orchestral disco arrangement',
+    ],
+    description:
+      'A full live string section sweeps through disco arrangements for lush orchestral lift.',
+  },
+  {
+    id: 'era-1970s-funk-dry-punch',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Funk Dry Punch',
+    tags: [
+      'dry punchy funk drums',
+      'tight close-mic snare',
+      'minimal room bleed',
+      'percussive dry mix',
+    ],
+    description: 'Close-mic\'d drums and bass sit dry and tight for maximum funk punch.',
+  },
+  {
+    id: 'era-1970s-dub-spring-delay',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Dub Spring Delay',
+    tags: ['spring reverb dub', 'tape delay echo', 'dub chamber bounce', 'sparse dub mix'],
+    description: 'Spring reverb and tape delay bounce vocals and drums into cavernous dub space.',
+  },
+  {
+    id: 'era-1970s-prog-multitrack',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Prog Multitrack Layering',
+    tags: [
+      'dense multitrack layering',
+      'progressive rock arrangement',
+      'layered keyboard textures',
+      'orchestrated rock buildup',
+    ],
+    description:
+      'Dozens of overdubbed tracks build dense, orchestrated progressive rock arrangements.',
+  },
+  {
+    id: 'era-1970s-singer-songwriter-intimacy',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Singer-Songwriter Intimacy',
+    tags: [
+      'close-mic acoustic guitar',
+      'intimate vocal presence',
+      'minimal studio ambience',
+      'warm folk intimacy',
+    ],
+    description:
+      'Close-mic\'d acoustic guitar and near vocal create an intimate singer-songwriter feel.',
+  },
+  {
+    id: 'era-1970s-krautrock-motorik',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Krautrock Motorik Room',
+    tags: [
+      'motorik drum pulse',
+      'hypnotic repetitive groove',
+      'roomy krautrock ambience',
+      'steady four-on-the-floor drive',
+    ],
+    description: 'A hypnotic, steady motorik pulse drives the groove in a roomy live space.',
+  },
+  {
+    id: 'era-1970s-southern-soul-horns',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Southern Soul Horn Stabs',
+    tags: [
+      'live horn section stabs',
+      'soul brass punches',
+      'tight horn arrangement',
+      'analog brass warmth',
+    ],
+    description: 'A tight live horn section punches brass stabs across soul and R&B grooves.',
+  },
+  {
+    id: 'era-1970s-blaxploitation-wah',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Blaxploitation Wah Funk',
+    tags: [
+      'wah-wah funk guitar',
+      'cinematic funk groove',
+      'gritty analog bassline',
+      'vintage crime-funk texture',
+    ],
+    description:
+      'Wah-drenched guitar and gritty bass evoke cinematic 1970s crime-funk soundtracks.',
+  },
+  {
+    id: 'era-1970s-vinyl-mastering-warmth',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Vinyl Mastering Warmth',
+    tags: [
+      'warm vinyl mastering',
+      'subtle surface crackle',
+      'rolled-off top end',
+      'analog master glue',
+    ],
+    description: 'Mastered for vinyl with rolled-off highs, gentle crackle, and warm analog glue.',
+  },
+  {
+    id: 'era-1970s-glam-stomp',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Glam Rock Stomp',
+    tags: [
+      'stomping glam beat',
+      'layered handclaps',
+      'thick glam guitar tone',
+      'anthemic stadium stomp',
+    ],
+    description:
+      'A stomping beat layered with handclaps and thick guitar tone for glam rock anthems.',
+  },
+  {
+    id: 'era-1970s-yacht-session-smooth',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Smooth Session Groove',
+    tags: [
+      'smooth session musicianship',
+      'mellow fretless bass',
+      'polished studio groove',
+      'laid-back soft rock feel',
+    ],
+    description: 'Polished session musicians lay down a mellow, laid-back soft rock groove.',
+  },
+  {
+    id: 'era-1970s-reggae-one-drop',
+    group: 'era-1970s',
+    groupLabel: '1970s',
+    label: 'Reggae One-Drop Skank',
+    tags: [
+      'one-drop reggae rhythm',
+      'off-beat skank guitar',
+      'deep roots bassline',
+      'sparse reggae mix',
+    ],
+    description:
+      'Drums drop on the third beat while off-beat skank guitar rides a deep roots bassline.',
+  },
+  /* --- 2000s --- */
+  {
+    id: 'era-2000s-brickwall-loudness',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Brickwall Loudness War Master',
+    tags: ['brickwall limiting', 'loudness war master', 'zero headroom mix', 'squashed dynamics'],
+    description: 'Mastered to slam against 0dB with heavy limiting that crushes all dynamic range.',
+  },
+  {
+    id: 'era-2000s-autotune-gloss',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Autotune Gloss Vocal',
+    tags: [
+      'autotune gloss vocal',
+      'pitch-corrected sheen',
+      'digital vocal polish',
+      'quantized pitch',
+    ],
+    description: 'Vocals snapped to perfect pitch with an audible digital sheen.',
+  },
+  {
+    id: 'era-2000s-crunk-808-boom',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Crunk 808 Boom',
+    tags: ['crunk 808 boom', 'distorted sub bass', 'shouted hype vocals', 'sparse synth stabs'],
+    description: 'Booming distorted 808 bass under sparse stabs and shouted hype-man ad-libs.',
+  },
+  {
+    id: 'era-2000s-garage-revival-rawness',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Garage Revival Rawness',
+    tags: [
+      'garage revival rawness',
+      'lo-fi analog grit',
+      'live-room drum bleed',
+      'minimal overdubs',
+    ],
+    description: 'Deliberately unpolished analog recording capturing raw live-room energy.',
+  },
+  {
+    id: 'era-2000s-pop-punk-sheen',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Pop-Punk Compressed Sheen',
+    tags: [
+      'pop-punk compressed sheen',
+      'bright guitar doubling',
+      'tight gated drums',
+      'polished vocal stack',
+    ],
+    description:
+      'Heavily compressed bright guitars and tight drums for radio-ready pop-punk punch.',
+  },
+  {
+    id: 'era-2000s-electroclash-bitcrush',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Electroclash Bitcrush',
+    tags: [
+      'electroclash bitcrush',
+      'lo-res digital grit',
+      'analog synth stabs',
+      'deadpan vocal filter',
+    ],
+    description: 'Deliberately lo-res bitcrushed synths paired with deadpan filtered vocals.',
+  },
+  {
+    id: 'era-2000s-daw-plugin-stack',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Early DAW Plug-In Stacking',
+    tags: [
+      'early daw plugin stacking',
+      'digital reverb wash',
+      'stacked compressor chain',
+      'clinical digital sheen',
+    ],
+    description:
+      'Layers of early software reverb and compression plugins create a clinical digital polish.',
+  },
+  {
+    id: 'era-2000s-ringtone-treble',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Ringtone Rap Treble Mix',
+    tags: [
+      'ringtone rap treble',
+      'hi-pass filtered low end',
+      'tinny speaker mix',
+      'bright synth lead',
+    ],
+    description: 'Mixed treble-forward with thinned low end to translate on tiny phone speakers.',
+  },
+  {
+    id: 'era-2000s-emo-scream-layer',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Emo Scream-Clean Layering',
+    tags: [
+      'emo scream-clean layering',
+      'dual vocal tracking',
+      'palm-muted verse riff',
+      'big chorus wall',
+    ],
+    description:
+      'Alternates screamed and clean vocal takes layered over dynamic verse-chorus builds.',
+  },
+  {
+    id: 'era-2000s-blog-house-filter',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Blog House Filter Sweep',
+    tags: [
+      'blog house filter sweep',
+      'sidechain pump',
+      'detuned saw synth',
+      'four-on-the-floor kick',
+    ],
+    description:
+      'Filter sweeps and sidechain pumping drive detuned synth stabs over a four-on-the-floor kick.',
+  },
+  {
+    id: 'era-2000s-dembow-reggaeton',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Dembow Rhythm Pulse',
+    tags: [
+      'dembow rhythm pulse',
+      'syncopated snare pattern',
+      'sub bass throb',
+      'percussive loop bed',
+    ],
+    description: 'A syncopated dembow drum pattern with a throbbing sub bass loop underneath.',
+  },
+  {
+    id: 'era-2000s-vocoder-robot',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Vocoder Robot Vocal',
+    tags: [
+      'vocoder robot vocal',
+      'synth-harmonized speech',
+      'robotic formant shift',
+      'digital chorus layer',
+    ],
+    description: 'Vocals routed through a vocoder for a synthetic robotic harmonized texture.',
+  },
+  {
+    id: 'era-2000s-nu-metal-drop-tune',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Nu-Metal Drop-Tuned Crunch',
+    tags: [
+      'nu-metal drop-tuned crunch',
+      'palm-muted low riff',
+      'scooped mid guitar tone',
+      'sampled turntable scratch',
+    ],
+    description: 'Drop-tuned palm-muted riffs with scooped mids and turntable scratch accents.',
+  },
+  {
+    id: 'era-2000s-clipped-digital-edge',
+    group: 'era-2000s',
+    groupLabel: '2000s',
+    label: 'Digital Clipping Edge',
+    tags: [
+      'digital clipping edge',
+      'harsh overdrive distortion',
+      'aliased high end',
+      'flat-lined waveform',
+    ],
+    description:
+      'Intentional digital clipping adds a harsh aliased edge to an already flat-lined waveform.',
+  },
+];
+
+/*
+ * Position -> weight for a signature's tags, one notch under VOCAL_TAG_WEIGHTS
+ * for the reason given above. The first tag NAMES the signature, so it carries
+ * the most; the textures behind it decorate that signature and are worth
+ * progressively less. An entry with more tags than this list has would repeat
+ * the last value rather than fall to 0 — a described texture is never worth
+ * nothing — but the registry is capped at four tags, so today the list covers
+ * every entry exactly.
+ */
+var ERA_TAG_WEIGHTS = [0.85, 0.65, 0.55, 0.5];
+
+/*
+ * READING ORDER, DECLARED — the one place this table differs from #65's.
+ *
+ * VOCAL_REGISTRY derives its family order from the order the array declares
+ * them, because there is no natural order for eight vocal traditions. Nine
+ * production groups DO have one: decades run forwards, and the three
+ * cross-cutting signature families (which belong to no decade) follow. The
+ * banked array is stored in the order it was authored in, so deriving the
+ * order from it would put the 2010s in front of the 1980s in the picker.
+ *
+ * So the order is written down HERE rather than inferred, and the array below
+ * is left exactly as it was banked. eraRegistryGroups() and searchEraRegistry()
+ * both rank by this list, which keeps the card's order deterministic and
+ * independent of both the query and the array's storage order.
+ *
+ * Every id here must exist in the table and every group in the table must
+ * appear here — tests/era-registry.test.js checks the correspondence in both
+ * directions, so a group added to the array without a place in this list fails
+ * a test instead of quietly sorting last.
+ */
+var ERA_GROUP_ORDER = [
+  'era-1950s-60s',
+  'era-1970s',
+  'era-1980s',
+  'era-1990s',
+  'era-2000s',
+  'era-2010s-2020s',
+  'sig-saturation-tape',
+  'sig-reverb-space',
+  'sig-mix-master',
+];
+
+/** Lazily built once: group order/rank, and the lowercased search haystacks. */
+var ERA_GROUP_INDEX = null;
+var ERA_SEARCH_INDEX = null;
+
+/**
+ * The groups in ERA_GROUP_ORDER order, with the rank searchEraRegistry sorts
+ * by. A group present in the table but missing from ERA_GROUP_ORDER is still
+ * ranked — after every declared one, in first-appearance order — rather than
+ * dropped: a helper that silently hid entries would be worse than one that
+ * puts them in an unexpected place, and the suite fails on the mismatch anyway.
+ */
+function eraGroupIndex() {
+  if (ERA_GROUP_INDEX) return ERA_GROUP_INDEX;
+  var labels = {};
+  var counts = {};
+  var seen = [];
+  var i;
+  for (i = 0; i < ERA_REGISTRY.length; i += 1) {
+    var entry = ERA_REGISTRY[i];
+    if (!Object.prototype.hasOwnProperty.call(counts, entry.group)) {
+      counts[entry.group] = 0;
+      labels[entry.group] = entry.groupLabel;
+      seen.push(entry.group);
+    }
+    counts[entry.group] += 1;
+  }
+  var order = [];
+  var rank = {};
+  for (i = 0; i < ERA_GROUP_ORDER.length; i += 1) {
+    var declared = ERA_GROUP_ORDER[i];
+    if (!Object.prototype.hasOwnProperty.call(counts, declared)) continue;
+    rank[declared] = order.length;
+    order.push({ id: declared, label: labels[declared], count: counts[declared] });
+  }
+  for (i = 0; i < seen.length; i += 1) {
+    if (Object.prototype.hasOwnProperty.call(rank, seen[i])) continue;
+    rank[seen[i]] = order.length;
+    order.push({ id: seen[i], label: labels[seen[i]], count: counts[seen[i]] });
+  }
+  ERA_GROUP_INDEX = { order: order, rank: rank };
+  return ERA_GROUP_INDEX;
+}
+
+/**
+ * The nine registry groups, in reading order — six decades then the three
+ * cross-cutting signature families. This is the order the card's filter chips
+ * render in and the order the list groups by, so neither reshuffles under a
+ * search.
+ *
+ * @returns {Array<{id:string, label:string, count:number}>} fresh copies
+ */
+function eraRegistryGroups() {
+  var source = eraGroupIndex().order;
+  var out = [];
+  for (var i = 0; i < source.length; i += 1) {
+    out.push({ id: source[i].id, label: source[i].label, count: source[i].count });
+  }
+  return out;
+}
+
+/** The lowercased text one entry is searched over: label, tags, group names. */
+function eraSearchText(entry) {
+  return (
+    entry.label +
+    ' ' +
+    entry.tags.join(' ') +
+    ' ' +
+    entry.group +
+    ' ' +
+    entry.groupLabel
+  ).toLowerCase();
+}
+
+/**
+ * Case-insensitive substring search over label, tags and group — deliberately
+ * NOT over `description`, which is prose written for a human and would make
+ * "a" match half the table (the same line searchVocalRegistry draws).
+ *
+ * An empty or whitespace-only query matches EVERYTHING: a search box that has
+ * been cleared is not a filter.
+ *
+ * `group` is the card's quick-filter chips, applied as a SECOND, independent
+ * narrowing rather than as text folded into the query — chipping "1980s" and
+ * typing "reverb" means "reverb, within the 1980s", which text matching alone
+ * could not express. An unknown or empty group id filters nothing.
+ *
+ * The order is deterministic and independent of both: group in ERA_GROUP_ORDER
+ * order, then label A-Z. Sorting by "relevance" would reshuffle the list under
+ * the user's cursor on every keystroke.
+ *
+ * @param {string} query
+ * @param {string} [group] restrict to one group id
+ * @returns {Array<object>} the matching registry entries (the entries
+ *   themselves — the table is read-only by contract, never mutated in place)
+ */
+function searchEraRegistry(query, group) {
+  if (!ERA_SEARCH_INDEX) {
+    ERA_SEARCH_INDEX = [];
+    for (var s = 0; s < ERA_REGISTRY.length; s += 1) {
+      ERA_SEARCH_INDEX.push(eraSearchText(ERA_REGISTRY[s]));
+    }
+  }
+  var needle =
+    typeof query === 'string' ? query.toLowerCase().replace(/\s+/g, ' ').trim() : '';
+  var wantedGroup = typeof group === 'string' ? group.trim() : '';
+  var hits = [];
+  for (var i = 0; i < ERA_REGISTRY.length; i += 1) {
+    if (wantedGroup && ERA_REGISTRY[i].group !== wantedGroup) continue;
+    if (!needle || ERA_SEARCH_INDEX[i].indexOf(needle) !== -1) hits.push(ERA_REGISTRY[i]);
+  }
+  var rank = eraGroupIndex().rank;
+  hits.sort(function (a, b) {
+    if (rank[a.group] !== rank[b.group]) return rank[a.group] - rank[b.group];
+    var left = a.label.toLowerCase();
+    var right = b.label.toLowerCase();
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+  });
+  return hits;
+}
+
+/** @param {string} id @returns {object|null} the signature, or null if unknown */
+function eraSignatureById(id) {
+  var wanted = typeof id === 'string' ? id : '';
+  for (var i = 0; i < ERA_REGISTRY.length; i += 1) {
+    if (ERA_REGISTRY[i].id === wanted) return ERA_REGISTRY[i];
+  }
+  return null;
+}
+
+/**
+ * A signature's tags as prompt-state seeds: section 'era', source
+ * 'era-signature', weight from POSITION (ERA_TAG_WEIGHTS).
+ *
+ * @param {object} signature
+ * @returns {Array<{section:string, tag:string, weight:number, source:string}>}
+ */
+function eraSignatureSeeds(signature) {
+  var out = [];
+  if (!signature || !isArrayLike(signature.tags)) return out;
+  var last = ERA_TAG_WEIGHTS.length - 1;
+  for (var i = 0; i < signature.tags.length; i += 1) {
+    var raw = signature.tags[i];
+    var tag = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+    if (!tag) continue;
+    out.push({
+      section: ERA_SECTION,
+      tag: tag,
+      weight: ERA_TAG_WEIGHTS[i < last ? i : last],
+      source: ERA_SIGNATURE_SOURCE,
+    });
+  }
+  return out;
+}
+
+/**
+ * What a store is holding of one signature right now.
+ *
+ * `complete` is what the card renders as "Added" (aria-pressed="true"): a
+ * signature is only claimed by the draft when EVERY one of its tags is there.
+ * One whose texture word the user removed by hand from the draft chips reads
+ * as not-added again, which is the truth — half a signature is not the
+ * signature.
+ *
+ * Note what is NOT checked: the SOURCE of the tags that are there. An era tag
+ * the dissector put in the group counts towards a signature being held, which
+ * is what a person looking at the draft sees — the group either says
+ * "cassette tape saturation" or it does not, and which road it arrived by is
+ * not something the card should make the user reason about.
+ *
+ * @param {object} store a createPromptState() instance
+ * @param {object} signature
+ * @returns {{held:Array<{id:string, norm:string}>, missing:Array<object>,
+ *            complete:boolean}}
+ */
+function eraSignatureHold(store, signature) {
+  var seeds = eraSignatureSeeds(signature);
+  var held = [];
+  var missing = [];
+  var index = {};
+  var entries = store && typeof store.list === 'function' ? store.list(ERA_SECTION) : [];
+  for (var e = 0; e < entries.length; e += 1) {
+    index[normalizePromptTag(entries[e].tag)] = entries[e].id;
+  }
+  for (var i = 0; i < seeds.length; i += 1) {
+    var norm = normalizePromptTag(seeds[i].tag);
+    if (Object.prototype.hasOwnProperty.call(index, norm)) {
+      held.push({ id: index[norm], norm: norm });
+    } else {
+      missing.push(seeds[i]);
+    }
+  }
+  return { held: held, missing: missing, complete: seeds.length > 0 && missing.length === 0 };
+}
+
+/**
+ * Every signature the store currently holds in full, in the card's reading
+ * order (group, then label) rather than the array's storage order — so the
+ * selected-chips row reads the same way the list above it does.
+ *
+ * @param {object} store
+ * @returns {Array<object>}
+ */
+function selectedEraSignatures(store) {
+  var ordered = searchEraRegistry('');
+  var out = [];
+  for (var i = 0; i < ordered.length; i += 1) {
+    if (eraSignatureHold(store, ordered[i]).complete) out.push(ordered[i]);
+  }
+  return out;
+}
+
+/**
+ * Toggle one signature, atomically.
+ *
+ * Not-fully-held -> the missing tags are added (a signature half-present is
+ * COMPLETED rather than duplicated, because the store rejects a repeat anyway).
+ * Fully held     -> its tags are removed.
+ *
+ * THE SHARED-TAG RULE, exactly as toggleVocalPersona applies it. The store
+ * holds one entry per (section, tag), so two signatures that share a texture
+ * word — "analog tape saturation" belongs to both the Tape Bus Glue and the
+ * 1970s console signature — share ONE entry. Removing one of them therefore
+ * skips any tag another CURRENTLY COMPLETE signature still needs: taking one
+ * signature out must never quietly break the one beside it.
+ *
+ * Everything happens inside store.batch(), so a signature is one user action
+ * and one notification, never four half-states the draft repaints through.
+ *
+ * @param {object} store a createPromptState() instance
+ * @param {object} signature
+ * @returns {{state:'added'|'removed'|'noop', added:number, removed:number, kept:number}}
+ */
+function toggleEraSignature(store, signature) {
+  var result = { state: 'noop', added: 0, removed: 0, kept: 0 };
+  if (!store || typeof store.batch !== 'function') return result;
+  var hold = eraSignatureHold(store, signature);
+  if (!hold.held.length && !hold.missing.length) return result;
+
+  if (!hold.complete) {
+    result.state = 'added';
+    store.batch(function () {
+      for (var i = 0; i < hold.missing.length; i += 1) {
+        if (store.add(hold.missing[i]) !== null) result.added += 1;
+      }
+    });
+    return result;
+  }
+
+  var claimed = {};
+  var others = selectedEraSignatures(store);
+  for (var o = 0; o < others.length; o += 1) {
+    if (others[o].id === signature.id) continue;
+    for (var t = 0; t < others[o].tags.length; t += 1) {
+      claimed[normalizePromptTag(others[o].tags[t])] = true;
+    }
+  }
+
+  result.state = 'removed';
+  store.batch(function () {
+    for (var h = 0; h < hold.held.length; h += 1) {
+      if (Object.prototype.hasOwnProperty.call(claimed, hold.held[h].norm)) {
+        result.kept += 1;
+        continue;
+      }
+      if (store.remove(hold.held[h].id)) result.removed += 1;
+    }
+  });
+  return result;
 }
 
 /* ==========================================================================
@@ -21544,6 +23373,236 @@ function createRibbonRenderer(deps) {
     promptState.subscribe(renderVocalCard);
     renderVocalCard();
 
+    /* -- I. the Production Era & Signature card (FDD #66) over ERA_REGISTRY -- */
+
+    const eraSearch = $('era-search');
+    const eraListEl = $('era-list');
+    const eraGroupsEl = $('era-groups');
+    const eraChips = $('era-chips');
+    const eraSelectedEmpty = $('era-selected-empty');
+    const eraEmpty = $('era-empty');
+    const eraCountOut = $('era-count');
+    const eraStatus = $('era-status');
+
+    /* The active group chip, or '' for "all groups". It is VIEW state and
+     * nothing else: no tag, no draft entry and no saved workspace field
+     * depends on it, which is why it lives in a local rather than in the
+     * prompt store. */
+    let eraGroupFilter = '';
+
+    function setEraStatus(text, tone) {
+      eraStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      eraStatus.textContent = text;
+    }
+
+    /**
+     * Add or remove one signature and say plainly which of the three things
+     * happened — added, removed, or removed-but-one-tag-stayed because another
+     * selected signature still claims it (see toggleEraSignature).
+     */
+    function toggleEraSignatureFromUi(signature) {
+      const outcome = toggleEraSignature(promptState, signature);
+      if (outcome.state === 'removed') {
+        setEraStatus(
+          '“' +
+            signature.label +
+            '” removed — ' +
+            plural(outcome.removed, 'tag') +
+            ' dropped' +
+            (outcome.kept
+              ? ', ' + plural(outcome.kept, 'tag') + ' kept for another selected signature.'
+              : '.')
+        );
+        return;
+      }
+      if (outcome.added > 0) {
+        setEraStatus(
+          '“' + signature.label + '” added — ' + plural(outcome.added, 'tag') + ' in the Era group.'
+        );
+        return;
+      }
+      setEraStatus('“' + signature.label + '” had nothing new to add.', 'warn');
+    }
+
+    /** One signature row. Fixed height by contract — see VIRTUAL_ROW_HEIGHT. */
+    function buildEraRow(signature) {
+      const row = document.createElement('div');
+      row.className = 'vrow';
+
+      const main = document.createElement('div');
+      main.className = 'vrow-main';
+      const name = document.createElement('div');
+      name.className = 'vrow-name';
+      name.textContent = signature.label;
+      // The group travels on the ROW rather than in a sticky group header, for
+      // the same reason the vocal card does it: a windowed list unmounts
+      // whatever scrolls away, headers included.
+      const meta = document.createElement('div');
+      meta.className = 'vrow-meta';
+      meta.textContent = signature.groupLabel + ' · ' + signature.tags[0];
+      main.appendChild(name);
+      main.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'vrow-actions';
+      const added = eraSignatureHold(promptState, signature).complete;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'btn-mini btn-era';
+      toggle.setAttribute('data-focus-key', 'era-toggle');
+      // aria-pressed IS the state: the styling reads it too, so the picture and
+      // the accessibility tree cannot drift apart.
+      toggle.setAttribute('aria-pressed', added ? 'true' : 'false');
+      toggle.textContent = added ? 'Added' : 'Add';
+      toggle.title = added
+        ? 'Remove the “' + signature.label + '” tags from the draft'
+        : 'Add ' + plural(signature.tags.length, 'tag') + ': ' + signature.tags.join(', ');
+      toggle.setAttribute('aria-label', toggle.title);
+      toggle.addEventListener('click', function () {
+        toggleEraSignatureFromUi(signature);
+      });
+
+      actions.appendChild(toggle);
+      row.appendChild(main);
+      row.appendChild(actions);
+      return row;
+    }
+
+    const eraView = createVirtualList({
+      container: eraListEl,
+      rowHeight: VIRTUAL_ROW_HEIGHT,
+      overscan: VIRTUAL_OVERSCAN_DEFAULT,
+      label: 'Production era signatures',
+      renderRow: buildEraRow,
+      keyOf: function (signature) {
+        return signature.id;
+      },
+    });
+
+    /*
+     * The quick group filters. Built ONCE — the registry is static, so the
+     * chips are too — and only their pressed state is repainted afterwards.
+     * The "All" chip is a real chip rather than a cleared search box, so the
+     * way out of a filter is the same shape as the way in.
+     */
+    const eraGroupButtons = [];
+    (function buildEraGroupChips() {
+      const groups = [{ id: '', label: 'All', count: ERA_REGISTRY.length }].concat(
+        eraRegistryGroups()
+      );
+      for (let i = 0; i < groups.length; i += 1) {
+        const group = groups[i];
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip era-group-chip';
+        chip.setAttribute('data-group', group.id);
+        chip.textContent = group.label + ' (' + group.count + ')';
+        chip.addEventListener('click', function () {
+          // Pressing the active chip again is the way back to "All": a filter
+          // you cannot undo with the control that set it is a trap.
+          eraGroupFilter = eraGroupFilter === group.id ? '' : group.id;
+          renderEraCard();
+        });
+        eraGroupsEl.appendChild(chip);
+        eraGroupButtons.push({ id: group.id, label: group.label, el: chip });
+      }
+    })();
+
+    /**
+     * The single render path for the card, subscribed to the prompt store — so
+     * removing an era chip from the draft turns the matching row back to "Add"
+     * without this card having to be told.
+     */
+    function renderEraCard() {
+      const query = eraSearch.value;
+      const visible = searchEraRegistry(query, eraGroupFilter);
+      eraView.setItems(visible);
+      eraListEl.hidden = visible.length === 0;
+
+      let activeGroupLabel = '';
+      for (let g = 0; g < eraGroupButtons.length; g += 1) {
+        const button = eraGroupButtons[g];
+        const on = button.id === eraGroupFilter;
+        button.el.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (on && button.id) activeGroupLabel = button.label;
+      }
+
+      // The honest empty state: it names BOTH narrowings, because a search that
+      // looks broken is usually a forgotten group chip.
+      const typed = query.replace(/\s+/g, ' ').trim();
+      eraEmpty.hidden = visible.length > 0;
+      if (!visible.length) {
+        const scope = activeGroupLabel ? ' within ' + activeGroupLabel : '';
+        eraEmpty.textContent = typed
+          ? 'No signature matches “' +
+            typed +
+            '”' +
+            scope +
+            ' — try a decade (1970s, 1990s), a texture (tape, plate, crackle, sidechain), ' +
+            (activeGroupLabel ? 'the All chip, ' : '') +
+            'or clear the box for all ' +
+            ERA_REGISTRY.length +
+            '.'
+          : 'No signature in ' + activeGroupLabel + ' — pick the All chip to see the whole table.';
+      } else {
+        eraEmpty.textContent = '';
+      }
+
+      const selected = selectedEraSignatures(promptState);
+      // Same focus rescue as the vocal chip row: this runs FROM the click
+      // handler of a chip inside it, so the chip being clicked is destroyed
+      // mid-click and focus would otherwise fall back to <body>.
+      const before = Array.prototype.slice.call(eraChips.children);
+      const focusedIndex = before.indexOf(document.activeElement);
+
+      eraChips.textContent = '';
+      for (let i = 0; i < selected.length; i += 1) {
+        const signature = selected[i];
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip tag-chip';
+        chip.setAttribute('aria-pressed', 'true');
+        chip.title = 'Remove the “' + signature.label + '” tags from the draft';
+        chip.setAttribute('aria-label', chip.title);
+        const label = document.createElement('span');
+        label.textContent = signature.label;
+        const cross = document.createElement('span');
+        cross.className = 'tag-chip-x';
+        cross.setAttribute('aria-hidden', 'true');
+        cross.textContent = '×';
+        chip.appendChild(label);
+        chip.appendChild(cross);
+        chip.addEventListener('click', function () {
+          toggleEraSignatureFromUi(signature);
+        });
+        eraChips.appendChild(chip);
+      }
+      eraSelectedEmpty.hidden = selected.length > 0;
+
+      if (focusedIndex !== -1) {
+        const rebuilt = eraChips.children;
+        const target = rebuilt.length
+          ? rebuilt[Math.min(focusedIndex, rebuilt.length - 1)]
+          : eraSearch;
+        if (target && typeof target.focus === 'function') target.focus();
+      }
+
+      eraCountOut.textContent =
+        'showing ' +
+        visible.length +
+        ' of ' +
+        ERA_REGISTRY.length +
+        ' · ' +
+        (activeGroupLabel || plural(eraRegistryGroups().length, 'group')) +
+        ' · ' +
+        selected.length +
+        ' selected';
+    }
+
+    eraSearch.addEventListener('input', renderEraCard);
+    promptState.subscribe(renderEraCard);
+    renderEraCard();
+
     /* ---------------- song structure builder (FDD Domain D) ---------------- */
 
     const structure = createStructureState();
@@ -23185,14 +25244,15 @@ function createRibbonRenderer(deps) {
      * first moment a scroller has a height to measure. Cheap enough to be
      * unconditional: it is one windowed repaint of at most ~20 rows.
      *
-     * The Vocal Persona list joins them here rather than growing its own hook:
-     * it is populated at boot (the registry is static), so it is the ONE list
-     * guaranteed to have painted blind.
+     * The Vocal Persona and Era Signature lists join them here rather than
+     * growing their own hooks: both are populated at boot (their registries
+     * are static), so they are the lists guaranteed to have painted blind.
      */
     function refreshPersistenceLists() {
       historyView.refresh();
       presetsView.refresh();
       vocalView.refresh();
+      eraView.refresh();
     }
 
     renderStorageStatus();
