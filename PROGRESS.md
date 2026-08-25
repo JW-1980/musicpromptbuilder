@@ -98,3 +98,10 @@
 - **Also banked:** 124-entry production-era registry generated in parallel (workflow wf_5c2842df-17a) for #66's integration.
 - **Owner requests queued:** waveform refinement, Prompt Editor build-out, Stitch-Pro theme suite (dark/light/colorblind/high-contrast + 3 originals).
 - **Next:** waveform visualization refinement (moved to `## NOW`).
+
+### [2026-08-25] Task 15 — Waveform ribbon refinement (owner request)
+- **Workflow (3-lens judge panel → Opus implementation → adversarial review):** all 8 plan items shipped — noise-floor gating of twist (mic hiss at 0.012 peak now moves it exactly 0, was 0.022), perceptual amplitude curve rooted at exact zero (spike vs sustained now 0.153/0.801, was indistinguishable 0.654/0.654), settle-on-stop over 90 frames instead of freezing a vivid frame while chips blank, reduced-motion twist cap, 60fps temporal interpolation between real ~21.5Hz rows (uScrollT), analytic normals + Lambert/fresnel lighting + eye-space fog, DPR-aware resize triggers (window resize + ResizeObserver + resolution query), vignette/footlight. Judge REJECTED idle breathing (idle GPU burn), beat-synced accents (DSP never measures beat phase — anti-simulation), and white peak-grading (would shift the exact §1.5 hue endpoints). Pixel evidence: brightest pixel exactly 255·Σ(endpoint), silence renders as silence, renderOnce mean 0.004ms at 2560×380. APP_VERSION 0.14.0.
+- **Adversarial review found 3 minor issues; all fixed by orchestrator:** stale "~25 frames" comment (→ names the 90-frame constant), per-frame object allocation in syncSize (→ cached css/ratio triple, steady state allocation-free), one-shot DPR watcher missing a third pixel ratio (→ re-arming {once:true} listener, 1→2→1.5 all repaint).
+- **Tests:** visualizer suite +14 (633 passed / 0 failed / 12 todo total); run-all + nightly + verify-single-file GREEN after fixes (independently re-run).
+- **Also banked:** Prompt Editor build-out plan (7 ordered changes, source-verified by the judge) from the parallel design workflow.
+- **Next:** Prompt Editor build-out (moved to `## NOW`).

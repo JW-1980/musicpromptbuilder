@@ -3979,7 +3979,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.13.0';
+const APP_VERSION = '0.14.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -13812,6 +13812,20 @@ function applyThemeState(prefs, doc) {
  * ANTI-SIMULATION: every displacement on screen is a measured sample and every
  * hue is a measured mode. A null valence paints the dim neutral blend — the
  * colour of "not known yet" — and never a plausible-looking major or minor.
+ * Three rules follow from that and are worth stating outright, because they are
+ * what the polish below had to be built around:
+ *
+ *   1. NO INVENTED LEVELS. uScrollT interpolates the TIMING of two rows that
+ *      both really landed — rows arrive at ~21.5 Hz and the display asks at 60,
+ *      so the alternative is a mesh that snaps every second or third frame. No
+ *      sample is ever synthesised, blended or predicted.
+ *   2. NO MOTION WITHOUT MEASUREMENT. There is no idle breathing loop and no
+ *      beat-synced accent: the DSP estimates tempo but never beat PHASE, so a
+ *      pulse would be claiming timing nothing located. An idle ribbon is a
+ *      still, dim, untwisted grid, and it is supposed to look like one.
+ *   3. BRIGHTNESS ONLY, ABOVE THE COLOUR. Lighting, fog, vignette and the
+ *      footlight are scalars multiplied into the final pixel, never hue or
+ *      saturation grades, so the displayed colour stays on the §1.5 line.
  */
 
 /** Ribbon grid: columns across the width, rows of history into the depth. */
@@ -13832,6 +13846,67 @@ var RIBBON_ENERGY_LERP = 0.25;
 /** Radians of twist at full level, and Y displacement at |sample| == 1. */
 var RIBBON_MAX_TWIST = 0.85;
 var RIBBON_LIFT = 0.45;
+
+/**
+ * NOISE FLOOR for the twist, in the PEAK domain.
+ *
+ * The chips upstairs are gated by the worker at RMS_GATE = 0.015, so a silent
+ * room reads "—" everywhere; the ribbon used to drive its twist off the bare
+ * loudest sample of the frame and therefore kept writhing on mic hiss while
+ * every number said "nothing measured". This floor puts the two back in
+ * agreement. It is deliberately NOT a copy of RMS_GATE: that constant lives in
+ * the RMS domain over a full 2048-sample frame, this one is compared against
+ * the largest magnitude in the frame, and the peak of a signal is always the
+ * larger number. Chosen by ear at 0.02 — high enough to sit above the hiss of
+ * a laptop microphone, low enough that a quiet hum still moves the ribbon.
+ * Below it the twist is EXACTLY zero, never a small pretend value.
+ */
+var RIBBON_NOISE_FLOOR = 0.02;
+/**
+ * Linear gain applied to the frame's RMS before the response curve. RMS (not
+ * peak) is what the ear hears as loudness, and it is what the level chip
+ * reports, so the twist and the number now rise together.
+ */
+var RIBBON_RMS_DRIVE = 2.6;
+/**
+ * Soft-knee constant for ribbonAmplitudeResponse(). ONE curve, used by the JS
+ * twist scalar and mirrored in the fragment shader as RESPONSE_KNEE, so the
+ * geometry and the brightness answer the same amplitude the same way.
+ */
+var RIBBON_RESPONSE_KNEE = 2.2;
+
+/**
+ * Reduced motion does not delete the amplitude cue — it takes the SPIN out of
+ * it. Height, colour and gating stay live (they are readouts, not animation);
+ * the rotation is scaled to this fraction of RIBBON_MAX_TWIST, which turns a
+ * 49-degree sweep into a ~7-degree lean. Zero would flatten the ribbon into a
+ * plane and throw away its only depth cue at rest.
+ */
+var RIBBON_REDUCED_TWIST_SCALE = 0.15;
+
+/**
+ * Rows arrive at the capture engine's chunk rate (~46 ms), renderOnce runs at
+ * the display's (~16 ms). uScrollT slides the history between two REAL rows so
+ * the mesh stops snapping every second or third frame. These bound that:
+ * a gap longer than RIBBON_MAX_ROW_GAP_MS is a stall (backgrounded tab,
+ * stopped capture) and never enters the measured cadence, and the cadence
+ * itself is an EMA so one late chunk cannot yank the interpolation.
+ */
+var RIBBON_MAX_ROW_GAP_MS = 500;
+var RIBBON_GAP_LERP = 0.2;
+
+/**
+ * Frames the settle animation runs for after capture stops. BOUNDED and
+ * self-terminating: a fixed-length drain tied to a user action, not an idle
+ * loop, so the "no idle GPU burn" contract still holds.
+ *
+ * The length is not a taste call — it is what RIBBON_COLOR_LERP costs. At 5%
+ * of the remaining distance per frame the valence colour is still ~26% of the
+ * way from neutral after 25 frames, which would leave a stopped ribbon leaning
+ * cyan next to chips that already read "—". 90 frames (~1.5 s at 60 fps) puts
+ * it within ~1% of neutral, so the drain actually finishes what it starts.
+ */
+var RIBBON_SETTLE_FRAMES = 90;
 /** Camera. A hand-written perspective, since there is no matrix library. */
 var RIBBON_FOV = 0.9;
 var RIBBON_NEAR = 0.1;
@@ -13863,10 +13938,18 @@ var RIBBON_VERTEX_SOURCE = [
   'uniform mat4 uProjection;',
   'uniform float uLift;',
   'uniform float uTwist;',
+  '// Sub-row scroll: how far the history has travelled since the last REAL row',
+  '// landed, in the same 0..1 units aPosition.z uses. Interpolating the TIMING',
+  '// of two measured rows is not invented data — no level is ever synthesised,',
+  '// the same samples simply arrive at the depth they are due at.',
+  'uniform float uScrollT;',
   '',
   'out vec2 vUv;',
   'out float vLevel;',
-  '',
+  '// Eye-space position, shared by the fragment stage for BOTH the analytic',
+  '// normal (dFdx/dFdy of a real surface) and the distance fog. One output,',
+  '// two jobs, no extra uniform.',
+  'out vec3 vEyePos;',
   '',
   'const float RIBBON_DEPTH = 2.9;',
   'const float CAMERA_BACK = 1.25;',
@@ -13874,8 +13957,12 @@ var RIBBON_VERTEX_SOURCE = [
   'const float CAMERA_PITCH = 0.32;',
   '',
   'void main() {',
-  '  float depth = aPosition.z;',
+  '  float depth = aPosition.z + uScrollT;',
   '  float height = aLevel * uLift;',
+  '  // Additive perceptual lift: the linear term above stays the truth of the',
+  '  // sample, this one buys a quiet hum some visibility without inventing a',
+  '  // floor — it is exactly 0 when the sample is, and it keeps the sign.',
+  '  height += sign(aLevel) * pow(abs(aLevel), 0.55) * uLift * 0.22;',
   '  float angle = uTwist * (0.35 + 0.65 * depth);',
   '  float ca = cos(angle);',
   '  float sa = sin(angle);',
@@ -13887,6 +13974,7 @@ var RIBBON_VERTEX_SOURCE = [
   '  vec3 eyePos = vec3(rel.x, rel.y * cp - rel.z * sp, rel.y * sp + rel.z * cp);',
   '  vUv = aUv;',
   '  vLevel = aLevel;',
+  '  vEyePos = eyePos;',
   '  gl_Position = uProjection * vec4(eyePos, 1.0);',
   '}',
   '',
@@ -13899,6 +13987,18 @@ var RIBBON_VERTEX_SOURCE = [
  * rows decay toward their dimmed midpoint — the same "no mode measured" colour
  * valenceToColor() returns for a null valence, because history that has fallen
  * out of the classifier window no longer supports a mode claim.
+ *
+ * SHADING IS BRIGHTNESS-ONLY, ON PURPOSE. Every term below (Lambert, fresnel
+ * rim, distance fog, vignette, footlight) is a scalar folded into `lit`, and
+ * the pixel is `aged * clamp(lit, 0, 1)`. A scalar cannot move a colour off the
+ * §1.5 line: a fully-confident, fully-lit major pixel is exactly
+ * vec3(0.0, 0.94, 1.0) and nothing brighter, because `lit` is clamped BEFORE
+ * the multiply rather than letting a channel saturate and shift the hue. Any
+ * "hot peaks go white" or saturation-lift grade would break that and is out.
+ *
+ * The normal is measured, not modelled: cross(dFdx(vEyePos), dFdy(vEyePos)) is
+ * the true facet normal of the triangle actually being rasterised, so the
+ * lighting follows the waveform's real slope instead of a fabricated one.
  */
 var RIBBON_FRAGMENT_SOURCE = [
   '#version 300 es',
@@ -13908,25 +14008,57 @@ var RIBBON_FRAGMENT_SOURCE = [
   'const vec3 MODE_MAJOR = vec3(0.0, 0.94, 1.0);',
   'const vec3 MODE_NEUTRAL = (MODE_MINOR + MODE_MAJOR) * 0.5;',
   'const vec2 WIRE_DENSITY = vec2(56.0, 34.0);',
+  '// Mirrors RIBBON_RESPONSE_KNEE in the JS. One curve for the whole feature.',
+  'const float RESPONSE_KNEE = 2.2;',
+  '// Key light, eye space: up, slightly left, slightly toward the viewer.',
+  'const vec3 LIGHT_DIR = vec3(-0.35, 0.85, 0.40);',
+  '// Quadratic fog on the EYE-SPACE distance, offset so the nearest row is',
+  '// exactly unattenuated. FOG_NEAR2 is the squared distance to the front edge',
+  '// under the camera constants in the vertex stage.',
+  'const float FOG_K = 0.052;',
+  'const float FOG_NEAR2 = 1.85;',
   '',
   'in vec2 vUv;',
   'in float vLevel;',
+  'in vec3 vEyePos;',
   '',
   'uniform vec3 uColor;',
   'uniform float uDim;',
   '',
   'out vec4 fragColor;',
   '',
+  '// Soft knee, normalised so 0 maps to EXACTLY 0 and 1 to exactly 1. Quiet',
+  '// input gains contrast; nothing is added where nothing was measured.',
+  'float softKnee(float x) {',
+  '  return tanh(RESPONSE_KNEE * x) / tanh(RESPONSE_KNEE);',
+  '}',
+  '',
   'void main() {',
   '  vec2 cell = vUv * WIRE_DENSITY;',
   '  vec2 edge = abs(fract(cell) - 0.5);',
   '  vec2 wide = max(fwidth(cell), vec2(0.0001));',
   '  float wire = 1.0 - clamp(min(edge.x / wide.x, edge.y / wide.y) - 0.5, 0.0, 1.0);',
-  '  float energy = clamp(abs(vLevel) * 2.4, 0.0, 1.0);',
+  '  float energy = softKnee(clamp(abs(vLevel) * 2.4, 0.0, 1.0));',
   '  vec3 aged = mix(uColor, MODE_NEUTRAL * uDim, vUv.y * 0.6);',
-  '  float depthFade = 1.0 - 0.55 * vUv.y;',
-  '  float lit = (0.10 + 0.90 * wire) * (0.30 + 0.70 * energy) * depthFade;',
-  '  fragColor = vec4(aged * lit, 1.0);',
+  '',
+  '  vec3 raw = cross(dFdx(vEyePos), dFdy(vEyePos));',
+  '  float rawLen = length(raw);',
+  '  vec3 view = normalize(-vEyePos);',
+  '  vec3 normal = rawLen > 1e-6 ? raw / rawLen : view;',
+  '  if (dot(normal, view) < 0.0) normal = -normal;',
+  '  float lambert = 0.62 + 0.38 * clamp(dot(normal, normalize(LIGHT_DIR)), 0.0, 1.0);',
+  '  float fresnel = pow(1.0 - clamp(dot(normal, view), 0.0, 1.0), 2.5);',
+  '',
+  '  float dist = length(vEyePos);',
+  '  float depthFade = exp(-FOG_K * max(dist * dist - FOG_NEAR2, 0.0));',
+  '  float lit = (0.10 + 0.90 * wire) * (0.30 + 0.70 * energy) * depthFade * lambert;',
+  '  lit += 0.16 * fresnel * energy * depthFade;',
+  '  // Vignette: the flanks melt into the --viz-bg stage instead of ending on a',
+  '  // hard rectangle edge.',
+  '  lit *= 1.0 - 0.30 * pow(abs(vUv.x * 2.0 - 1.0), 2.2);',
+  '  // Footlight under the newest row, so "now" reads as the live edge.',
+  '  lit += 0.06 * wire * (1.0 - smoothstep(0.0, 0.14, vUv.y));',
+  '  fragColor = vec4(aged * clamp(lit, 0.0, 1.0), 1.0);',
   '}',
   '',
 ].join('\n');
@@ -14060,6 +14192,139 @@ function downsampleBuffer(samples, targetLen) {
   return out;
 }
 
+/**
+ * The ONE perceptual response curve of the ribbon — a normalised soft knee.
+ *
+ *   f(0) = 0 exactly, f(1) = 1 exactly, monotonic in between.
+ *
+ * Hearing is closer to logarithmic than linear, so a linear map spends most of
+ * its range on the loudest tenth of the signal and leaves an honest quiet hum
+ * looking like nothing happened. tanh(k*x)/tanh(k) lifts the bottom of the
+ * range without a floor: it cannot manufacture motion out of silence, because
+ * zero in is still zero out. RIBBON_RESPONSE_KNEE is mirrored in the fragment
+ * shader as RESPONSE_KNEE so the twist and the brightness agree.
+ *
+ * @param {number} value 0..1 (clamped)
+ * @returns {number} 0..1
+ */
+function ribbonAmplitudeResponse(value) {
+  var x = clamp01(value);
+  if (x === 0) return 0;
+  if (x === 1) return 1;
+  var k = RIBBON_RESPONSE_KNEE;
+  return Math.tanh(k * x) / Math.tanh(k);
+}
+
+/**
+ * Turn one downsampled row into the gated, curved 0..1 scalar that drives the
+ * twist. Two decisions live here:
+ *
+ *   1. GATE. The largest magnitude in the row is compared against
+ *      RIBBON_NOISE_FLOOR. Below it the answer is EXACTLY 0 — mic hiss must not
+ *      twist a ribbon while every chip above it reads "—". The worker's own
+ *      `gated` flag cannot be used: it arrives one message later than the frame
+ *      the ribbon is drawing right now.
+ *   2. DRIVE. Loudness follows RMS, not the single loudest sample, so a lone
+ *      click no longer slams the ribbon to full twist. (This is the RMS of the
+ *      peak-preserving downsample, so it still leans toward transients — that
+ *      is the buffer the ribbon actually draws, and measuring anything else
+ *      would describe a signal that is not on screen.)
+ *
+ * @param {ArrayLike<number>} row
+ * @returns {number} 0..1, and exactly 0 for silence or sub-floor noise
+ */
+function ribbonRowDrive(row) {
+  if (!isArrayLike(row) || row.length < 1) return 0;
+  var peak = 0;
+  var sum = 0;
+  var counted = 0;
+  for (var i = 0; i < row.length; i += 1) {
+    var value = row[i];
+    if (typeof value !== 'number' || !isFinite(value)) continue;
+    var magnitude = value < 0 ? -value : value;
+    if (magnitude > peak) peak = magnitude;
+    sum += value * value;
+    counted += 1;
+  }
+  if (counted === 0 || peak < RIBBON_NOISE_FLOOR) return 0;
+  var rms = Math.sqrt(sum / counted);
+  return ribbonAmplitudeResponse(rms * RIBBON_RMS_DRIVE);
+}
+
+/**
+ * How far the history has slid since the newest row landed, expressed in the
+ * same 0..1 depth units aPosition.z carries.
+ *
+ * Rows arrive at the capture cadence (~46 ms) but the display asks for a frame
+ * every ~16 ms, so without this the mesh jumps once every second or third
+ * frame and is frozen in between — the single largest source of visible jerk.
+ * The offset ramps from 0 to exactly one row gap over one measured interval,
+ * which is precisely where pushRibbonRow's discrete shift will put the row, so
+ * the hand-off is continuous. It is capped at one gap: a stalled capture parks
+ * the ribbon on its rows instead of sliding off into a position no data
+ * supports.
+ *
+ * @param {number} elapsedMs since the newest row was pushed
+ * @param {number} expectedMs the measured inter-row interval
+ * @param {number} rows
+ * @returns {number} 0 .. 1/(rows-1)
+ */
+function ribbonScrollOffset(elapsedMs, expectedMs, rows) {
+  var r = typeof rows === 'number' && isFinite(rows) ? Math.floor(rows) : 0;
+  if (r < 2) return 0;
+  if (typeof expectedMs !== 'number' || !isFinite(expectedMs) || expectedMs <= 0) return 0;
+  if (typeof elapsedMs !== 'number' || !isFinite(elapsedMs) || elapsedMs <= 0) return 0;
+  var t = elapsedMs / expectedMs;
+  if (t > 1) t = 1;
+  return t / (r - 1);
+}
+
+/**
+ * The twist ceiling in radians, honouring the OS reduced-motion preference.
+ *
+ * The ribbon's rotation is the only genuinely spinning motion in the panel, and
+ * prefers-reduced-motion asks for exactly that to stop. It is scaled rather
+ * than deleted: height, colour and the noise gate are readouts, not decoration,
+ * and a completely flat ribbon would lose its depth cue at rest. The default is
+ * the full cap — no preference means no reduction.
+ *
+ * @param {boolean} reduced
+ * @returns {number} radians
+ */
+function ribbonTwistCap(reduced) {
+  return reduced === true ? RIBBON_MAX_TWIST * RIBBON_REDUCED_TWIST_SCALE : RIBBON_MAX_TWIST;
+}
+
+/**
+ * The drawing-buffer size for a CSS box at a given device pixel ratio.
+ *
+ * Retina is worth paying for, a phone's 3x is not: the ratio is capped at
+ * RIBBON_MAX_DPR so a 1280 px canvas never allocates more than 2560 px of
+ * buffer. Returns null when the element has not been laid out yet (a hidden
+ * view reports a 0x0 box), which is the caller's signal to skip the frame
+ * rather than allocate a 1x1 buffer it would have to throw away.
+ *
+ * @param {number} cssWidth
+ * @param {number} cssHeight
+ * @param {number} ratio
+ * @param {number} [maxRatio] defaults to RIBBON_MAX_DPR
+ * @returns {{width:number, height:number, dpr:number}|null}
+ */
+function ribbonSurfaceSize(cssWidth, cssHeight, ratio, maxRatio) {
+  var w = typeof cssWidth === 'number' && isFinite(cssWidth) ? cssWidth : 0;
+  var h = typeof cssHeight === 'number' && isFinite(cssHeight) ? cssHeight : 0;
+  if (!(w > 0) || !(h > 0)) return null;
+  var cap =
+    typeof maxRatio === 'number' && isFinite(maxRatio) && maxRatio > 0 ? maxRatio : RIBBON_MAX_DPR;
+  var dpr = typeof ratio === 'number' && isFinite(ratio) && ratio > 0 ? ratio : 1;
+  if (dpr > cap) dpr = cap;
+  return {
+    width: Math.max(1, Math.round(w * dpr)),
+    height: Math.max(1, Math.round(h * dpr)),
+    dpr: dpr,
+  };
+}
+
 /** The dimmed midpoint of the two §1.5 anchors — the colour of "not known". */
 function ribbonNeutralColor() {
   return [
@@ -14173,19 +14438,28 @@ function perspectiveMatrix4(fovY, aspect, near, far) {
  * and every other method degrades to a no-op so the rest of the app is
  * untouched (docs/ENGINEERING-STANDARD.md §2.3).
  *
+ * The renderer is deliberately HEADLESS: it never touches window, matchMedia
+ * or a real clock. Anything environmental — the animation clock, the device
+ * pixel ratio, the wall clock the scroll interpolation needs, the OS
+ * reduced-motion preference — arrives as a dependency, which is the only
+ * reason the whole thing is drivable from a node:vm sandbox.
+ *
  * @param {{
  *   canvas?: object,
  *   gl?: object,                       pre-made context (tests inject a stub)
  *   cols?: number, rows?: number,
  *   raf?: (cb: Function) => any,       injected so the loop is drivable
  *   caf?: (handle: any) => void,
- *   devicePixelRatio?: number
+ *   devicePixelRatio?: number,
+ *   now?: () => number,                monotonic ms; drives uScrollT
+ *   reducedMotion?: boolean|(() => boolean)   OS preference, read per frame
  * }} deps
  * @returns {{pushFrame:Function, renderOnce:Function, start:Function,
- *            stop:Function, isRunning:Function, contextOk:Function,
- *            failureMessage:Function, reset:Function, colorNow:Function,
- *            levelNow:Function, framesPushed:Function, history:Function,
- *            geometry:Function, gl:Function}}
+ *            stop:Function, settle:Function, isRunning:Function,
+ *            isSettling:Function, contextOk:Function, failureMessage:Function,
+ *            reset:Function, colorNow:Function, levelNow:Function,
+ *            twistNow:Function, scrollNow:Function, framesPushed:Function,
+ *            history:Function, geometry:Function, gl:Function}}
  */
 function createRibbonRenderer(deps) {
   var d = deps || {};
@@ -14208,8 +14482,46 @@ function createRibbonRenderer(deps) {
   var ready = false;
   var failure = null;
 
+  // Settle state: a BOUNDED countdown of frames after capture stops, not a
+  // second animation loop. settleLeft is the only thing keeping it alive and
+  // it only ever counts down.
+  var settleHandle = null;
+  var settleLeft = 0;
+
+  // Scroll interpolation state. lastPushAt is -1 (not 0 — a monotonic clock is
+  // entitled to start AT zero) until a row has actually landed, and rowGapMs
+  // stays 0 until a SECOND one has, so a fresh or stalled ribbon interpolates
+  // nothing: there is no cadence to interpolate along.
+  var lastPushAt = -1;
+  var rowGapMs = 0;
+  var scrollT = 0;
+
   var raf = typeof d.raf === 'function' ? d.raf : null;
   var caf = typeof d.caf === 'function' ? d.caf : null;
+
+  /** Monotonic milliseconds. Injected in tests; performance.now() in a browser. */
+  var now =
+    typeof d.now === 'function'
+      ? d.now
+      : typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? function () {
+            return performance.now();
+          }
+        : function () {
+            return Date.now();
+          };
+
+  /**
+   * The OS reduced-motion preference. A function so a live media query can be
+   * reflected without rebuilding the renderer; matchMedia itself is never
+   * touched in here.
+   */
+  var reducedMotion =
+    typeof d.reducedMotion === 'function'
+      ? d.reducedMotion
+      : function () {
+          return d.reducedMotion === true;
+        };
 
   var gl = null;
   if (d.gl) {
@@ -14222,6 +14534,10 @@ function createRibbonRenderer(deps) {
           antialias: true,
           depth: true,
           premultipliedAlpha: false,
+          // A hint, not a demand: on a dual-GPU laptop this asks for the
+          // discrete part rather than letting a 60 fps mesh limp along on the
+          // integrated one. Ignored everywhere it does not apply.
+          powerPreference: 'high-performance',
         }) || null;
     } catch (err) {
       gl = null;
@@ -14238,6 +14554,7 @@ function createRibbonRenderer(deps) {
   var uLift = null;
   var uTwist = null;
   var uDim = null;
+  var uScrollT = null;
   var projection = perspectiveMatrix4(RIBBON_FOV, 1.6, RIBBON_NEAR, RIBBON_FAR);
   var viewWidth = 0;
   var viewHeight = 0;
@@ -14320,6 +14637,7 @@ function createRibbonRenderer(deps) {
     uLift = gl.getUniformLocation(program, 'uLift');
     uTwist = gl.getUniformLocation(program, 'uTwist');
     uDim = gl.getUniformLocation(program, 'uDim');
+    uScrollT = gl.getUniformLocation(program, 'uScrollT');
 
     if (typeof gl.enable === 'function') gl.enable(gl.DEPTH_TEST);
     if (typeof gl.clearColor === 'function') gl.clearColor(0, 0, 0, 0);
@@ -14335,24 +14653,45 @@ function createRibbonRenderer(deps) {
     }
   }
 
-  /** Match the drawing buffer to the laid-out CSS box, and re-aim the camera. */
+  /** Match the drawing buffer to the laid-out CSS box, and re-aim the camera.
+      The last successful (cssW, cssH, ratio) triple is cached so the steady
+      state costs no ribbonSurfaceSize call and no per-frame object allocation
+      — renderOnce runs this every frame of a live capture. */
+  var syncedCssWidth = -1;
+  var syncedCssHeight = -1;
+  var syncedRatio = -1;
   function syncSize() {
     var width = 0;
     var height = 0;
     if (canvas) {
       var cssWidth = typeof canvas.clientWidth === 'number' ? canvas.clientWidth : 0;
       var cssHeight = typeof canvas.clientHeight === 'number' ? canvas.clientHeight : 0;
-      if (cssWidth > 0 && cssHeight > 0) {
-        var dpr =
-          typeof d.devicePixelRatio === 'number' && d.devicePixelRatio > 0
-            ? d.devicePixelRatio
-            : (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
-        if (dpr > RIBBON_MAX_DPR) dpr = RIBBON_MAX_DPR;
-        width = Math.max(1, Math.round(cssWidth * dpr));
-        height = Math.max(1, Math.round(cssHeight * dpr));
+      var ratio =
+        typeof d.devicePixelRatio === 'number' && d.devicePixelRatio > 0
+          ? d.devicePixelRatio
+          : (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+      if (
+        cssWidth === syncedCssWidth &&
+        cssHeight === syncedCssHeight &&
+        ratio === syncedRatio &&
+        viewWidth > 0 &&
+        viewHeight > 0
+      ) {
+        return true;
+      }
+      var size = ribbonSurfaceSize(cssWidth, cssHeight, ratio, RIBBON_MAX_DPR);
+      if (size) {
+        width = size.width;
+        height = size.height;
         if (canvas.width !== width) canvas.width = width;
         if (canvas.height !== height) canvas.height = height;
+        syncedCssWidth = cssWidth;
+        syncedCssHeight = cssHeight;
+        syncedRatio = ratio;
       } else {
+        // Not laid out (a hidden view reports 0x0). Fall back to whatever the
+        // element already owns rather than allocating a buffer for a box that
+        // does not exist yet.
         width = typeof canvas.width === 'number' ? canvas.width : 0;
         height = typeof canvas.height === 'number' ? canvas.height : 0;
       }
@@ -14364,6 +14703,33 @@ function createRibbonRenderer(deps) {
       projection = perspectiveMatrix4(RIBBON_FOV, width / height, RIBBON_NEAR, RIBBON_FAR);
     }
     return true;
+  }
+
+  /** Hand a scheduled frame back to the host. A retired handle is not an error. */
+  function cancelFrame(id) {
+    if (id === null || !caf) return;
+    try {
+      caf(id);
+    } catch (err) {
+      /* a handle the host has already retired is not an error */
+    }
+  }
+
+  /** Abandon a settle in flight — a new session or an explicit stop wins. */
+  function cancelSettle() {
+    settleLeft = 0;
+    if (settleHandle !== null) {
+      cancelFrame(settleHandle);
+      settleHandle = null;
+    }
+  }
+
+  /** Forget the row cadence, so nothing interpolates along an interval that
+   *  is no longer being measured. */
+  function clearScrollTiming() {
+    lastPushAt = -1;
+    rowGapMs = 0;
+    scrollT = 0;
   }
 
   return {
@@ -14383,16 +14749,26 @@ function createRibbonRenderer(deps) {
       pushed += 1;
       levelsDirty = true;
 
-      var peak = 0;
-      for (var i = 0; i < row.length; i += 1) {
-        var magnitude = row[i] < 0 ? -row[i] : row[i];
-        if (magnitude > peak) peak = magnitude;
+      // Row cadence, MEASURED. The first row has nothing to measure against,
+      // and a gap past RIBBON_MAX_ROW_GAP_MS is a stall rather than a cadence,
+      // so neither is allowed to seed the interval the interpolation trusts.
+      var stamp = now();
+      if (typeof stamp !== 'number' || !isFinite(stamp)) stamp = 0;
+      if (lastPushAt >= 0 && stamp > lastPushAt) {
+        var observed = stamp - lastPushAt;
+        if (observed < RIBBON_MAX_ROW_GAP_MS) {
+          rowGapMs = rowGapMs > 0 ? rowGapMs + (observed - rowGapMs) * RIBBON_GAP_LERP : observed;
+        } else {
+          rowGapMs = 0;
+        }
       }
-      // Smoothed so the twist breathes with the performance instead of
-      // jittering frame to frame.
-      var scaled = peak * 2.2;
-      if (scaled > 1) scaled = 1;
-      energy += (scaled - energy) * RIBBON_ENERGY_LERP;
+      lastPushAt = stamp;
+      scrollT = 0;
+
+      // Gated at the noise floor and shaped by the one response curve, then
+      // smoothed so the twist breathes with the performance instead of
+      // jittering frame to frame. Silence in, exactly zero out.
+      energy += (ribbonRowDrive(row) - energy) * RIBBON_ENERGY_LERP;
 
       target = valenceToColor(valence);
       return true;
@@ -14416,6 +14792,14 @@ function createRibbonRenderer(deps) {
         levelsDirty = false;
       }
 
+      // Sub-row scroll. Only ever between two rows that really landed, and
+      // only while a cadence is actually being measured — a stopped or stalled
+      // capture leaves this at 0 so the mesh sits exactly on its rows.
+      scrollT =
+        lastPushAt >= 0 && rowGapMs > 0
+          ? ribbonScrollOffset(now() - lastPushAt, rowGapMs, rows)
+          : 0;
+
       gl.useProgram(program);
       if (vao && typeof gl.bindVertexArray === 'function') gl.bindVertexArray(vao);
       gl.viewport(0, 0, viewWidth, viewHeight);
@@ -14424,8 +14808,9 @@ function createRibbonRenderer(deps) {
       if (uProjection) gl.uniformMatrix4fv(uProjection, false, projection);
       if (uColor) gl.uniform3f(uColor, color[0], color[1], color[2]);
       if (uLift) gl.uniform1f(uLift, RIBBON_LIFT);
-      if (uTwist) gl.uniform1f(uTwist, energy * RIBBON_MAX_TWIST);
+      if (uTwist) gl.uniform1f(uTwist, energy * ribbonTwistCap(reducedMotion() === true));
       if (uDim) gl.uniform1f(uDim, RIBBON_NEUTRAL_DIM);
+      if (uScrollT) gl.uniform1f(uScrollT, scrollT);
 
       gl.drawElements(gl.TRIANGLES, geometry.indexCount, indexType, 0);
       return true;
@@ -14438,6 +14823,9 @@ function createRibbonRenderer(deps) {
      */
     start: function () {
       if (running || !ready || !raf) return false;
+      // A live session owns the ribbon; a settle draining toward neutral must
+      // not keep pulling the colour away from what is being measured now.
+      cancelSettle();
       running = true;
       var self = this;
       function tick() {
@@ -14452,21 +14840,72 @@ function createRibbonRenderer(deps) {
 
     /** Stop the loop. Idempotent. @returns {boolean} whether it was running */
     stop: function () {
+      cancelSettle();
       if (!running) return false;
       running = false;
-      if (handle !== null && caf) {
-        try {
-          caf(handle);
-        } catch (err) {
-          /* a handle the host has already retired is not an error */
-        }
-      }
+      cancelFrame(handle);
       handle = null;
+      return true;
+    },
+
+    /**
+     * Leave the live state honestly.
+     *
+     * stop() alone froze whatever frame happened to be on screen — very often a
+     * vivid, fully-twisted one — and left it there indefinitely while the chips
+     * beside it blanked to "—" the same instant. That is a picture claiming a
+     * measurement nobody is taking any more.
+     *
+     * settle() drains the CLAIM without erasing the RECORD: the colour lerps
+     * back to the "nothing measured" neutral and the twist relaxes to rest,
+     * while the captured waveform shape stays exactly where it was, because it
+     * really was measured. It runs for RIBBON_SETTLE_FRAMES — long enough for
+     * the 5%-per-frame colour lerp to actually ARRIVE at neutral rather than
+     * stopping most of the way there — and then stops itself. A fixed-length
+     * drain tied to a user action, not an idle loop, so the "no idle GPU burn"
+     * rule still holds. Calling it again restarts the countdown rather than
+     * stacking a second one.
+     *
+     * @returns {boolean} whether an animated settle was armed
+     */
+    settle: function () {
+      this.stop();
+      target = ribbonNeutralColor();
+      // Nothing is being measured, so nothing may be interpolated.
+      clearScrollTiming();
+
+      if (!ready || !gl) return false;
+      if (!raf) {
+        // No animation clock to drain along: land on the settled state in one
+        // frame rather than pretending to animate.
+        energy = 0;
+        color = [target[0], target[1], target[2]];
+        this.renderOnce();
+        return false;
+      }
+
+      var self = this;
+      settleLeft = RIBBON_SETTLE_FRAMES;
+      function drain() {
+        settleHandle = null;
+        if (settleLeft <= 0) return;
+        settleLeft -= 1;
+        energy += (0 - energy) * RIBBON_ENERGY_LERP;
+        self.renderOnce();
+        if (settleLeft > 0 && raf) settleHandle = raf(drain);
+      }
+      this.renderOnce();
+      settleHandle = raf(drain);
       return true;
     },
 
     isRunning: function () {
       return running === true;
+    },
+
+    /** True while the bounded post-capture drain still has frames to run. */
+    isSettling: function () {
+      return settleLeft > 0;
     },
 
     /** True when there is a live WebGL2 context with a linked program. */
@@ -14481,6 +14920,7 @@ function createRibbonRenderer(deps) {
 
     /** Clear the history and the colour back to "nothing measured yet". */
     reset: function () {
+      cancelSettle();
       for (var i = 0; i < history.length; i += 1) history[i] = 0;
       var fresh = ribbonNeutralColor();
       color = [fresh[0], fresh[1], fresh[2]];
@@ -14488,6 +14928,9 @@ function createRibbonRenderer(deps) {
       energy = 0;
       pushed = 0;
       levelsDirty = true;
+      // A new session has no cadence yet; carrying the old one over would slide
+      // the first row of the new take along an interval nobody measured.
+      clearScrollTiming();
     },
 
     /** Introspection for tests and for the browser smoke check. */
@@ -14496,6 +14939,14 @@ function createRibbonRenderer(deps) {
     },
     levelNow: function () {
       return energy;
+    },
+    /** The twist actually sent to the GPU last frame, in radians. */
+    twistNow: function () {
+      return energy * ribbonTwistCap(reducedMotion() === true);
+    },
+    /** The sub-row scroll offset last uploaded, in 0..1 depth units. */
+    scrollNow: function () {
+      return scrollT;
     },
     framesPushed: function () {
       return pushed;
@@ -15041,6 +15492,15 @@ function createRibbonRenderer(deps) {
     const vizCanvas = $('viz-ribbon');
     const vizNote = $('viz-note');
 
+    // The renderer is headless by design and never reads matchMedia itself, so
+    // the OS motion preference is resolved HERE and injected. A live query (not
+    // a boolean snapshot) means toggling the setting takes effect without a
+    // reload — the stylesheet already behaves that way.
+    const motionQuery =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+
     const ribbon = createRibbonRenderer({
       canvas: vizCanvas,
       // Bound wrappers: a bare `requestAnimationFrame` reference throws
@@ -15057,6 +15517,11 @@ function createRibbonRenderer(deps) {
               cancelAnimationFrame(id);
             }
           : undefined,
+      reducedMotion: motionQuery
+        ? function () {
+            return motionQuery.matches === true;
+          }
+        : false,
     });
 
     if (ribbon.contextOk()) {
@@ -15067,10 +15532,49 @@ function createRibbonRenderer(deps) {
       // it is NOT running nothing would, so a resized window would leave the
       // last frame stretched across a drawing buffer of the wrong size. One
       // redraw per resize costs nothing and is not a loop.
+      const repaintIfIdle = function () {
+        if (!ribbon.isRunning()) ribbon.renderOnce();
+      };
       if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-        window.addEventListener('resize', function () {
-          if (!ribbon.isRunning()) ribbon.renderOnce();
-        });
+        window.addEventListener('resize', repaintIfIdle);
+      }
+      // 'resize' is the WINDOW's event, and the canvas can change size without
+      // it: switching back from the Editor view un-hides a container that was
+      // display:none (so the box was 0x0 and syncSize refused it), and a
+      // container query reflow can resize the card while the window stands
+      // still. A ResizeObserver on the element itself catches both.
+      if (typeof ResizeObserver === 'function') {
+        new ResizeObserver(repaintIfIdle).observe(vizCanvas);
+      }
+      // Dragging the window to a display with a different pixel density fires
+      // no resize at all when the CSS box is unchanged, yet every device pixel
+      // in the drawing buffer just became the wrong size. The resolution media
+      // query is the only thing that reports it — but a query pinned to one
+      // dppx value only fires when leaving or re-entering THAT value, so the
+      // watcher re-arms against the new devicePixelRatio after every change
+      // (1 -> 2 -> 1.5 must repaint at each step, not just the first).
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        const armDprWatch = function () {
+          const dprQuery = window.matchMedia(
+            '(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)'
+          );
+          if (dprQuery && typeof dprQuery.addEventListener === 'function') {
+            dprQuery.addEventListener(
+              'change',
+              function () {
+                repaintIfIdle();
+                armDprWatch();
+              },
+              { once: true }
+            );
+          }
+        };
+        armDprWatch();
+      }
+      // A motion-preference flip changes the twist ceiling, so an idle ribbon
+      // has to be repainted to show it.
+      if (motionQuery && typeof motionQuery.addEventListener === 'function') {
+        motionQuery.addEventListener('change', repaintIfIdle);
       }
     } else {
       // No fabricated fallback animation: the canvas goes away and says why,
@@ -15214,13 +15718,19 @@ function createRibbonRenderer(deps) {
             }
           }
           // The rAF loop runs ONLY while capture is live: no idle GPU burn on a
-          // tab that is just sitting in the Hum view. One last frame is drawn
-          // on the way out so the panel shows the state it stopped in.
+          // tab that is just sitting in the Hum view. On the way out the ribbon
+          // SETTLES rather than freezing: this same branch has just blanked
+          // every chip to "—", so leaving a vivid full-twist frame on screen
+          // would be the picture insisting on a measurement the numbers have
+          // already withdrawn. settle() drains the twist and the valence colour
+          // over RIBBON_SETTLE_FRAMES (90, ~1.5s — see the constant's derivation)
+          // and then stops itself — the captured waveform shape stays, because
+          // that part really was measured.
           if (state === 'live') {
             ribbon.start();
           } else {
             ribbon.stop();
-            ribbon.renderOnce();
+            ribbon.settle();
           }
           renderMic(state, detail);
         },

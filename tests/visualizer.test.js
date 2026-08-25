@@ -865,10 +865,13 @@ s.test('createRibbonRenderer compiles, links and wires the program against a stu
   // Every attribute and uniform the shaders declare is looked up.
   const attribs = gl.callsTo('getAttribLocation').map((c) => c.args[1]);
   assert.deepStrictEqual(attribs, ['aPosition', 'aUv', 'aLevel'], `attribute lookups: ${attribs.join(', ')}`);
+  // Closed list: every uniform the shaders declare is looked up, and nothing
+  // else is. uScrollT joined it in 0.14.0 — it carries the sub-row scroll that
+  // slides the history between two REAL captured rows.
   const uniforms = gl.callsTo('getUniformLocation').map((c) => c.args[1]).sort();
   assert.deepStrictEqual(
     uniforms,
-    ['uColor', 'uDim', 'uLift', 'uProjection', 'uTwist'],
+    ['uColor', 'uDim', 'uLift', 'uProjection', 'uScrollT', 'uTwist'],
     `uniform lookups: ${uniforms.join(', ')}`
   );
 
@@ -1293,6 +1296,646 @@ s.test('boot binds the ribbon to the capture pipeline, and only animates while l
   assert.ok(!/\bTHREE\s*\./.test(code), 'no THREE.* API may appear in this file');
   assert.ok(!/three\.js/i.test(code), 'no Three.js may be embedded in this file');
   assert.ok(/getContext\('webgl2'/.test(source), 'the renderer must ask for a raw WebGL2 context');
+});
+
+/* -------------------------------------------------------------------------- *
+ * 0.14.0 ribbon refinement.
+ *
+ * The theme of this release is HONESTY BEFORE POLISH: the twist is gated at a
+ * real noise floor, one shared response curve replaces three linear ceilings,
+ * the stopped ribbon settles to neutral instead of freezing a vivid frame, and
+ * the reduced-motion preference reaches the only spinning thing on the panel.
+ * The polish that follows (sub-row scroll, analytic lighting, fog, vignette)
+ * is only defensible on top of that, which is why it is tested after it.
+ * -------------------------------------------------------------------------- */
+
+/** makeRenderer with every dependency overridable — clock, motion, sizing. */
+function makeRendererWith(extra) {
+  const gl = makeGlStub();
+  const clock = makeClock();
+  const renderer = app.sandbox.createRibbonRenderer(
+    Object.assign(
+      {
+        canvas: makeCanvas(null),
+        gl,
+        cols: 8,
+        rows: 6,
+        raf: clock.raf,
+        caf: clock.caf,
+        devicePixelRatio: 1,
+      },
+      extra || {}
+    )
+  );
+  return { renderer, gl, clock };
+}
+
+/** The last value a named float uniform was given. */
+function lastUniform(gl, name) {
+  const calls = gl.callsTo('uniform1f').filter((c) => c.args[0] && c.args[0].name === name);
+  return calls.length ? calls[calls.length - 1].args[1] : undefined;
+}
+
+/** A frame whose every downsampled bucket ends up at ±level. */
+function squareFrame(level, length) {
+  const frame = new Float32Array(length || 64);
+  for (let i = 0; i < frame.length; i += 1) frame[i] = i % 2 === 0 ? level : -level;
+  return frame;
+}
+
+s.test('the 0.14.0 ribbon helpers and their constants are reachable and sane', () => {
+  for (const name of [
+    'ribbonAmplitudeResponse',
+    'ribbonRowDrive',
+    'ribbonScrollOffset',
+    'ribbonTwistCap',
+    'ribbonSurfaceSize',
+  ]) {
+    assert.strictEqual(
+      typeof app.sandbox[name],
+      'function',
+      `${name} is not reachable as a top-level function declaration`
+    );
+  }
+
+  const S = app.sandbox;
+  assert.ok(S.RIBBON_NOISE_FLOOR > 0, 'a floor of zero gates nothing');
+  assert.ok(S.RIBBON_NOISE_FLOOR < 0.1, `a floor of ${S.RIBBON_NOISE_FLOOR} would swallow a quiet hum`);
+  // The worker gates the CHIPS at RMS_GATE = 0.015 over a full frame. This one
+  // is compared against the largest magnitude in the frame, and the peak of a
+  // signal is always the larger number — copying the constant across would be
+  // comparing two different quantities and calling it agreement.
+  assert.notStrictEqual(
+    S.RIBBON_NOISE_FLOOR,
+    0.015,
+    'the peak-domain floor must not be a copy of the worker RMS gate'
+  );
+  assert.ok(S.RIBBON_RMS_DRIVE > 1, 'the RMS drive has to make up for RMS being below peak');
+  assert.ok(S.RIBBON_RESPONSE_KNEE > 0, 'a knee of zero is a division by zero, not a curve');
+  assert.ok(
+    S.RIBBON_REDUCED_TWIST_SCALE >= 0 && S.RIBBON_REDUCED_TWIST_SCALE < 1,
+    'reduced motion must reduce the twist, not amplify it'
+  );
+  assert.ok(
+    S.RIBBON_SETTLE_FRAMES > 0 && S.RIBBON_SETTLE_FRAMES <= 90,
+    `the settle must be bounded and short, got ${S.RIBBON_SETTLE_FRAMES} frames`
+  );
+  assert.ok(S.RIBBON_MAX_ROW_GAP_MS > 100, 'the stall threshold must be well past a normal chunk');
+  assert.ok(S.RIBBON_GAP_LERP > 0 && S.RIBBON_GAP_LERP <= 1, 'the cadence EMA needs a real weight');
+});
+
+s.test('ribbonAmplitudeResponse is a soft knee rooted at EXACTLY zero', () => {
+  const f = app.sandbox.ribbonAmplitudeResponse;
+
+  // The anti-simulation edge: no input, no output. Not 1e-9 — zero.
+  assert.strictEqual(f(0), 0, 'silence must map to exactly 0, never a small pretend value');
+  assert.strictEqual(f(1), 1, 'full scale must map to exactly 1, so the twist cap still holds');
+
+  // Monotonic, and never outside the unit range.
+  let previous = -1;
+  for (let i = 0; i <= 100; i += 1) {
+    const y = f(i / 100);
+    assert.ok(y >= previous, `the curve dips at x=${i / 100}`);
+    assert.ok(y >= 0 && y <= 1, `x=${i / 100} left the unit range at ${y}`);
+    previous = y;
+  }
+
+  // It is a KNEE, not a line: quiet input gains contrast.
+  for (const x of [0.05, 0.1, 0.2, 0.4]) {
+    assert.ok(f(x) > x, `a soft knee must lift quiet input; f(${x}) = ${f(x)}`);
+  }
+  assert.ok(f(0.1) / 0.1 > 1.5, 'a 10% signal should be visibly more than 10% of the twist');
+
+  // Nonsense in, clamped out — never NaN on the GPU path.
+  assert.strictEqual(f(-3), 0, 'a negative amplitude is not motion');
+  assert.strictEqual(f(9), 1, 'past full scale is still full scale');
+  assert.strictEqual(f(NaN), 0, 'NaN must not reach a uniform');
+  assert.strictEqual(f(undefined), 0, 'a missing amplitude is silence');
+});
+
+s.test('ribbonRowDrive gates mic hiss to exactly zero and follows RMS, not a lone spike', () => {
+  const drive = app.sandbox.ribbonRowDrive;
+  const floor = app.sandbox.RIBBON_NOISE_FLOOR;
+
+  // 1. THE GATE. A silent room and a hissing microphone both read nothing,
+  //    because the chips beside the ribbon read nothing.
+  assert.strictEqual(drive(new Float32Array(8)), 0, 'silence must not twist the ribbon');
+  const hiss = new Float32Array(8);
+  for (let i = 0; i < hiss.length; i += 1) hiss[i] = (i % 2 === 0 ? 1 : -1) * (floor * 0.9);
+  assert.strictEqual(drive(hiss), 0, 'noise below the floor must be exactly 0, not merely small');
+
+  // …and the gate is a floor, not a wall: real quiet signal still moves.
+  const quiet = new Float32Array(8);
+  for (let i = 0; i < quiet.length; i += 1) quiet[i] = (i % 2 === 0 ? 1 : -1) * (floor * 3);
+  assert.ok(drive(quiet) > 0, 'a quiet hum above the floor must still drive the twist');
+
+  // 2. RMS, NOT PEAK. Two rows with the SAME peak — one lone transient, one
+  //    sustained tone. The old peak*2.2 rule scored them identically; loudness
+  //    does not work that way and neither does the level chip.
+  const spike = new Float32Array(8);
+  spike[0] = 0.35;
+  const sustained = new Float32Array(8);
+  for (let i = 0; i < sustained.length; i += 1) sustained[i] = i % 2 === 0 ? 0.35 : -0.35;
+  assert.ok(
+    drive(sustained) > drive(spike) + 0.2,
+    `same peak, very different loudness: spike ${drive(spike)} vs sustained ${drive(sustained)}`
+  );
+  assert.ok(drive(spike) > 0, 'a real transient is still real — it just is not full twist');
+
+  // 3. BOUNDED. Whatever arrives, the twist cap survives.
+  const clipping = new Float32Array(8).fill(1);
+  assert.strictEqual(drive(clipping), 1, 'a full-scale row must saturate at exactly 1');
+  const over = new Float32Array(8).fill(4);
+  assert.strictEqual(drive(over), 1, 'a hot buffer must clamp, not overshoot the cap');
+
+  // 4. GARBAGE-SAFE. A NaN in the buffer must not poison the uniform.
+  const dirty = new Float32Array(8);
+  dirty[0] = NaN;
+  dirty[1] = 0.5;
+  dirty[2] = 0.5;
+  const value = drive(dirty);
+  assert.ok(isFinite(value) && value > 0, `a NaN sample must be skipped, got ${value}`);
+  assert.strictEqual(drive(null), 0, 'no row is no drive');
+  assert.strictEqual(drive(new Float32Array(0)), 0, 'an empty row is no drive');
+});
+
+s.test('ribbonScrollOffset interpolates between two REAL rows and never past one', () => {
+  const offset = app.sandbox.ribbonScrollOffset;
+
+  // One row gap in the same 0..1 units the mesh uses — read off the real
+  // geometry rather than re-typed, so a grid change cannot desync them.
+  const geometry = app.sandbox.buildRibbonGeometry(4, 5);
+  const gap = geometry.positions[4 * 3 + 2] - geometry.positions[2];
+  assert.ok(Math.abs(gap - 1 / 4) < 1e-9, `row spacing sanity: ${gap}`);
+
+  assert.strictEqual(offset(0, 46, 5), 0, 'the instant a row lands the offset is zero');
+  assert.ok(Math.abs(offset(23, 46, 5) - gap * 0.5) < 1e-9, 'half an interval is half a row');
+  assert.ok(
+    Math.abs(offset(46, 46, 5) - gap) < 1e-9,
+    'a full interval must land EXACTLY where pushRibbonRow will put the row'
+  );
+
+  // A stall parks on the rows; it never slides off into a position no data
+  // supports, and it never runs backwards.
+  assert.ok(Math.abs(offset(5000, 46, 5) - gap) < 1e-9, 'a stalled capture must clamp at one row');
+  assert.strictEqual(offset(-20, 46, 5), 0, 'a clock that went backwards offsets nothing');
+
+  // Nothing to interpolate along means no interpolation, not a guess.
+  assert.strictEqual(offset(23, 0, 5), 0, 'no measured cadence, no scroll');
+  assert.strictEqual(offset(23, NaN, 5), 0, 'a nonsense cadence must not reach the GPU');
+  assert.strictEqual(offset(23, 46, 1), 0, 'a one-row mesh has no gap to slide along');
+  assert.strictEqual(offset(23, 46, 0), 0, 'a zero-row mesh has no gap to slide along');
+
+  // Monotonic across the interval.
+  let previous = -1;
+  for (let ms = 0; ms <= 60; ms += 1) {
+    const y = offset(ms, 46, 96);
+    assert.ok(y >= previous, `the scroll went backwards at ${ms} ms`);
+    assert.ok(y <= 1 / 95 + 1e-12, `the scroll passed one row gap at ${ms} ms`);
+    previous = y;
+  }
+});
+
+s.test('ribbonTwistCap defaults to the full cap and only reduced motion scales it', () => {
+  const cap = app.sandbox.ribbonTwistCap;
+  const max = app.sandbox.RIBBON_MAX_TWIST;
+
+  // DEFAULT OFF, deliberately: a renderer built with no opinion about motion
+  // twists exactly as much as it always did.
+  assert.strictEqual(cap(false), max, 'no preference means the full documented cap');
+  assert.strictEqual(cap(undefined), max, 'an unset preference is not a preference');
+  assert.strictEqual(cap(null), max, 'a null preference is not a preference');
+  assert.strictEqual(cap('true'), max, 'only a real boolean true may reduce the motion');
+
+  const reduced = cap(true);
+  assert.ok(reduced < max, 'prefers-reduced-motion must actually reduce the spin');
+  assert.ok(reduced >= 0, 'the cap can never go negative');
+  assert.strictEqual(reduced, max * app.sandbox.RIBBON_REDUCED_TWIST_SCALE, 'the scale is the contract');
+});
+
+s.test('ribbonSurfaceSize is the DPR buffer maths: capped, rounded, honest about no box', () => {
+  const maxDpr = app.sandbox.RIBBON_MAX_DPR;
+  // The sandbox has its own Object realm, so compare the numbers, not the box.
+  const size = (w, h, r) => {
+    const out = app.sandbox.ribbonSurfaceSize(w, h, r);
+    return out === null ? null : { width: out.width, height: out.height, dpr: out.dpr };
+  };
+
+  assert.deepStrictEqual(size(320, 190, 1), { width: 320, height: 190, dpr: 1 }, '1x is 1:1');
+  assert.deepStrictEqual(size(320, 190, 2), { width: 640, height: 380, dpr: 2 }, 'retina doubles the buffer');
+
+  // Retina is worth paying for; a phone's 3x is not.
+  const capped = size(320, 190, 3);
+  assert.strictEqual(capped.dpr, maxDpr, `3x must be capped at ${maxDpr}`);
+  assert.deepStrictEqual(
+    [capped.width, capped.height],
+    [320 * maxDpr, 190 * maxDpr],
+    'the capped ratio must be what actually sizes the buffer'
+  );
+  assert.strictEqual(size(1280, 190, 2).width, 2560, 'a 1280 px canvas at DPR 2 is a 2560 px buffer');
+
+  // A hidden view reports a 0x0 box. Saying so lets the caller skip the frame
+  // instead of allocating a 1x1 buffer it would immediately throw away.
+  assert.strictEqual(size(0, 190, 2), null, 'a zero-width box is not a box');
+  assert.strictEqual(size(320, 0, 2), null, 'a zero-height box is not a box');
+  assert.strictEqual(size(NaN, 190, 2), null, 'a nonsense box is not a box');
+  assert.strictEqual(size(undefined, undefined, 2), null, 'no box at all is not a box');
+
+  // Sub-pixel CSS boxes round, and never round away to nothing.
+  assert.deepStrictEqual(size(100.4, 50.6, 1), { width: 100, height: 51, dpr: 1 });
+  assert.deepStrictEqual(size(0.2, 0.2, 1), { width: 1, height: 1, dpr: 1 }, 'never a zero-pixel buffer');
+
+  // A missing or broken ratio falls back to 1 rather than to zero pixels.
+  assert.strictEqual(size(320, 190, 0).dpr, 1, 'a zero ratio is not a ratio');
+  assert.strictEqual(size(320, 190, NaN).dpr, 1, 'a NaN ratio is not a ratio');
+});
+
+s.test('mic hiss does not twist the ribbon, but is still drawn as the sample it was', () => {
+  const { renderer, gl } = makeRendererWith({});
+  const floor = app.sandbox.RIBBON_NOISE_FLOOR;
+
+  const hiss = squareFrame(floor * 0.6);
+  for (let i = 0; i < 40; i += 1) renderer.pushFrame(hiss, null);
+  renderer.renderOnce();
+
+  assert.strictEqual(
+    lastUniform(gl, 'uTwist'),
+    0,
+    'the ribbon must not writhe on noise the chips above it are reporting as nothing'
+  );
+  assert.strictEqual(renderer.levelNow(), 0, 'the smoothed level must be exactly 0, not merely small');
+
+  // The GATE is on the claim, not on the record: those samples were really
+  // captured, so they are really on the mesh.
+  assert.strictEqual(renderer.framesPushed(), 40, 'gated frames are still frames');
+  const history = renderer.history();
+  let peak = 0;
+  for (let i = 0; i < 8; i += 1) peak = Math.max(peak, Math.abs(history[i]));
+  assert.ok(peak > 0, 'the captured samples must still reach the geometry');
+
+  // And the floor is not a wall.
+  const audible = squareFrame(floor * 4);
+  renderer.pushFrame(audible, null);
+  assert.ok(renderer.levelNow() > 0, 'a hum above the floor must move the ribbon again');
+});
+
+s.test('the reduced-motion dependency scales the twist and nothing else', () => {
+  const loud = squareFrame(0.9);
+  const feed = (r) => {
+    for (let i = 0; i < 20; i += 1) r.pushFrame(loud, { mode: 'major', strength: 1 });
+    r.renderOnce();
+  };
+
+  const full = makeRendererWith({ reducedMotion: false });
+  const easy = makeRendererWith({ reducedMotion: true });
+  feed(full.renderer);
+  feed(easy.renderer);
+
+  const twistFull = lastUniform(full.gl, 'uTwist');
+  const twistEasy = lastUniform(easy.gl, 'uTwist');
+  assert.ok(twistFull > 0.5, `the control renderer must really be twisting, got ${twistFull}`);
+  assert.ok(twistEasy < twistFull, 'reduced motion must take the spin out');
+  assert.ok(
+    Math.abs(twistEasy - twistFull * app.sandbox.RIBBON_REDUCED_TWIST_SCALE) < 1e-12,
+    'the reduction must be exactly the documented scale'
+  );
+
+  // NO MEASUREMENT CUE IS LOST. Height, colour and the neutral dim are
+  // readouts, not decoration, so reduced motion leaves them alone.
+  assert.strictEqual(lastUniform(easy.gl, 'uLift'), lastUniform(full.gl, 'uLift'), 'the lift must survive');
+  assert.strictEqual(lastUniform(easy.gl, 'uDim'), lastUniform(full.gl, 'uDim'), 'the dim must survive');
+  assert.deepStrictEqual(
+    easy.renderer.colorNow(),
+    full.renderer.colorNow(),
+    'the valence colour must survive reduced motion'
+  );
+  assert.ok(easy.renderer.levelNow() > 0, 'the measured level itself is untouched — only its cap moves');
+
+  // The preference is read PER FRAME, so toggling the OS setting takes effect
+  // without rebuilding the renderer (the stylesheet already behaves that way).
+  let reduced = false;
+  const live = makeRendererWith({ reducedMotion: () => reduced });
+  feed(live.renderer);
+  const before = lastUniform(live.gl, 'uTwist');
+  reduced = true;
+  live.renderer.renderOnce();
+  const after = lastUniform(live.gl, 'uTwist');
+  assert.ok(after < before, 'flipping the preference must reach the very next frame');
+});
+
+s.test('uScrollT slides the history between two real rows, and stays 0 without a cadence', () => {
+  let clock = 1000;
+  const { renderer, gl } = makeRendererWith({ cols: 8, rows: 5, now: () => clock });
+  const scroll = () => lastUniform(gl, 'uScrollT');
+  const gap = 1 / 4;
+  const frame = new Float32Array(64);
+  frame[3] = 0.6;
+
+  renderer.renderOnce();
+  assert.strictEqual(scroll(), 0, 'nothing has landed yet, so nothing may slide');
+
+  renderer.pushFrame(frame, null);
+  clock += 8;
+  renderer.renderOnce();
+  assert.strictEqual(scroll(), 0, 'one row is not a cadence — there is no interval to interpolate along');
+
+  clock += 38; // the second row lands 46 ms after the first: a measured interval
+  renderer.pushFrame(frame, null);
+  assert.strictEqual(scroll(), 0, 'a fresh row starts the interval at zero');
+
+  clock += 23;
+  renderer.renderOnce();
+  assert.ok(Math.abs(scroll() - gap * 0.5) < 1e-9, `half an interval is half a row, got ${scroll()}`);
+  assert.strictEqual(renderer.scrollNow(), scroll(), 'scrollNow must mirror what the GPU was given');
+
+  clock += 23;
+  renderer.renderOnce();
+  assert.ok(
+    Math.abs(scroll() - gap) < 1e-9,
+    'a full interval must land exactly on the next row, so the discrete push is seamless'
+  );
+
+  clock += 5000;
+  renderer.renderOnce();
+  assert.ok(Math.abs(scroll() - gap) < 1e-9, 'a stalled capture parks on the rows, it does not drift');
+
+  // A stall must not be MEASURED as a cadence either — otherwise the ribbon
+  // would creep along an interval nobody is producing rows at.
+  renderer.reset();
+  renderer.renderOnce();
+  assert.strictEqual(scroll(), 0, 'reset must forget the cadence with the history');
+  renderer.pushFrame(frame, null);
+  clock += 900; // longer than RIBBON_MAX_ROW_GAP_MS: a stall, not a rhythm
+  renderer.pushFrame(frame, null);
+  clock += 20;
+  renderer.renderOnce();
+  assert.strictEqual(scroll(), 0, 'a stalled gap must not seed a phantom cadence');
+});
+
+s.test('settle() drains the twist and the valence claim over a bounded run, then stops itself', () => {
+  const { renderer, gl, clock } = makeRendererWith({});
+  const neutral = app.sandbox.valenceToColor(null);
+  const loud = squareFrame(0.9);
+  for (let i = 0; i < 20; i += 1) renderer.pushFrame(loud, { mode: 'major', strength: 1 });
+  renderer.start();
+  clock.flush(60);
+  renderer.stop();
+
+  const liveTwist = renderer.twistNow();
+  const liveColor = renderer.colorNow();
+  const recorded = Array.from(renderer.history());
+  assert.ok(liveTwist > 0.5, `the live ribbon must really be twisted, got ${liveTwist}`);
+  assert.ok(distance(liveColor, neutral) > 0.1, 'the live ribbon must really be carrying a mode colour');
+
+  assert.strictEqual(renderer.settle(), true, 'settle must report that it armed the drain');
+  assert.strictEqual(renderer.isRunning(), false, 'settling is NOT the live loop');
+  assert.strictEqual(renderer.isSettling(), true, 'and it must say what it is doing');
+
+  const ran = clock.flush(500);
+  assert.ok(
+    ran <= app.sandbox.RIBBON_SETTLE_FRAMES,
+    `the drain must be bounded, ran ${ran} frames of ${app.sandbox.RIBBON_SETTLE_FRAMES}`
+  );
+  assert.strictEqual(clock.pending.length, 0, 'a settle that ended must leave NOTHING scheduled');
+  assert.strictEqual(renderer.isSettling(), false, 'the countdown must reach zero on its own');
+
+  // The CLAIM drains…
+  assert.ok(
+    renderer.twistNow() < liveTwist * 0.05,
+    `the twist must relax, went from ${liveTwist} to ${renderer.twistNow()}`
+  );
+  // The drain has to ARRIVE, not stop most of the way there: a ribbon still
+  // leaning cyan beside a chip reading "—" is the exact disagreement settle()
+  // exists to remove. RIBBON_SETTLE_FRAMES is sized off RIBBON_COLOR_LERP for
+  // precisely this assertion.
+  assert.ok(
+    distance(renderer.colorNow(), neutral) < 0.02,
+    `the colour must reach "nothing measured", got ${renderer.colorNow()} vs ${neutral}`
+  );
+  assert.ok(
+    distance(liveColor, neutral) > 0.5,
+    'sanity: the live colour really was far from neutral before the drain'
+  );
+  // …but the RECORD stays. Those samples really were captured.
+  assert.deepStrictEqual(
+    Array.from(renderer.history()),
+    recorded,
+    'settling must not erase the waveform that really was measured'
+  );
+
+  // No idle GPU burn: once it is over, it is over.
+  const drawn = gl.callsTo('drawElements').length;
+  clock.flush(20);
+  assert.strictEqual(gl.callsTo('drawElements').length, drawn, 'a finished settle must not keep drawing');
+});
+
+s.test('a settle never stacks, and start/stop/reset all take the ribbon back off it', () => {
+  const { renderer, clock } = makeRendererWith({});
+  const loud = squareFrame(0.9);
+  for (let i = 0; i < 10; i += 1) renderer.pushFrame(loud, { mode: 'minor', strength: 1 });
+
+  renderer.settle();
+  assert.strictEqual(clock.pending.length, 1, 'the drain is one frame at a time');
+  renderer.settle();
+  assert.strictEqual(clock.pending.length, 1, 'a second settle must restart the countdown, not stack a loop');
+
+  // stop() wins over a settle in flight.
+  renderer.stop();
+  assert.strictEqual(renderer.isSettling(), false, 'stop must abandon the drain');
+  assert.strictEqual(clock.pending.length, 0, 'stop must leave nothing scheduled');
+
+  // A new live session wins over a settle in flight — otherwise the drain would
+  // keep pulling the colour away from what is being measured right now.
+  renderer.settle();
+  assert.strictEqual(renderer.start(), true, 'a settling ribbon must still be startable');
+  assert.strictEqual(renderer.isSettling(), false, 'going live must abandon the drain');
+  assert.strictEqual(clock.pending.length, 1, 'only the live loop may be scheduled');
+  renderer.stop();
+
+  // reset() is the session boundary and clears it too.
+  renderer.settle();
+  renderer.reset();
+  assert.strictEqual(renderer.isSettling(), false, 'reset must abandon the drain');
+  assert.strictEqual(clock.pending.length, 0, 'reset must leave nothing scheduled');
+
+  // Without an animation clock there is nothing to drain ALONG, so it lands on
+  // the settled state in one frame rather than pretending to animate.
+  const headless = makeRendererWith({ raf: undefined, caf: undefined });
+  for (let i = 0; i < 10; i += 1) headless.renderer.pushFrame(loud, { mode: 'major', strength: 1 });
+  assert.strictEqual(headless.renderer.settle(), false, 'no clock means no animated drain, and it says so');
+  assert.strictEqual(headless.renderer.levelNow(), 0, 'it must still arrive at rest');
+  assert.deepStrictEqual(
+    headless.renderer.colorNow(),
+    app.sandbox.valenceToColor(null),
+    'and at the "nothing measured" colour'
+  );
+});
+
+s.test('the shader refinements are wired: sub-row scroll, analytic normal, eye-space fog', () => {
+  const vs = app.sandbox.RIBBON_VERTEX_SOURCE;
+  const fs = app.sandbox.RIBBON_FRAGMENT_SOURCE;
+
+  // Sub-row scroll offsets the DEPTH, so the whole history slides as one rigid
+  // body and lands exactly where pushRibbonRow's discrete shift will put it.
+  assert.ok(/uniform\s+float\s+uScrollT\s*;/.test(vs), 'no uScrollT uniform in the vertex stage');
+  assert.ok(
+    /float\s+depth\s*=\s*aPosition\.z\s*\+\s*uScrollT\s*;/.test(vs),
+    'uScrollT must offset the row depth, before the Z placement'
+  );
+
+  // The linear amplitude term is UNTOUCHED; the perceptual lift is additive on
+  // top of it, so the sample itself is still literally on screen.
+  assert.ok(
+    /float\s+height\s*=\s*aLevel\s*\*\s*uLift\s*;/.test(vs),
+    'the linear height term must stay exactly what it was — the sample is the truth'
+  );
+  assert.ok(/height\s*\+=/.test(vs), 'the perceptual lift must be ADDED to it, never replace it');
+  assert.ok(/sign\s*\(\s*aLevel\s*\)/.test(vs), 'the additive lift must carry the sample sign');
+  assert.ok(/pow\s*\(\s*abs\s*\(\s*aLevel\s*\)/.test(vs), 'the additive lift must be a curve on the real level');
+
+  // One eye-space position, shared by the lighting and the fog.
+  assert.ok(/out\s+vec3\s+vEyePos\s*;/.test(vs), 'the vertex stage emits no eye-space position');
+  assert.ok(
+    /vEyePos\s*=\s*eyePos\s*;/.test(vs),
+    'vEyePos must be the same eyePos gl_Position is built from, not a second guess'
+  );
+  assert.ok(/in\s+vec3\s+vEyePos\s*;/.test(fs), 'the fragment stage never receives it');
+
+  // The normal is DERIVED from the surface being rasterised, not authored.
+  assert.ok(
+    /cross\s*\(\s*dFdx\s*\(\s*vEyePos\s*\)\s*,\s*dFdy\s*\(\s*vEyePos\s*\)\s*\)/.test(fs),
+    'the normal must be the derivative of the real geometry'
+  );
+  // …and the wireframe derivative FDD #11 depends on is still there.
+  assert.ok(/fwidth\s*\(\s*cell\s*\)/.test(fs), 'the wireframe still needs fwidth on the cell');
+
+  // Depth cue: a real exponential on a real distance, not a flat UV ramp.
+  assert.ok(/length\s*\(\s*vEyePos\s*\)/.test(fs), 'the fog must measure an actual eye-space distance');
+  assert.ok(/exp\s*\(\s*-\s*FOG_K/.test(fs), 'the depth cue must be an exponential falloff');
+  assert.ok(
+    !/1\.0\s*-\s*0\.55\s*\*\s*vUv\.y/.test(fs),
+    'the old flat UV depth ramp must be gone, not left alongside the fog'
+  );
+
+  // ONE response curve for the whole feature: the same number on both sides.
+  const knee = /const\s+float\s+RESPONSE_KNEE\s*=\s*([0-9.]+)\s*;/.exec(fs);
+  assert.ok(knee, 'the fragment shader declares no RESPONSE_KNEE');
+  assert.strictEqual(
+    parseFloat(knee[1]),
+    app.sandbox.RIBBON_RESPONSE_KNEE,
+    'the shader knee drifted from RIBBON_RESPONSE_KNEE — the twist and the brightness would disagree'
+  );
+  assert.ok(/softKnee\s*\(/.test(fs), 'the fragment energy must go through the shared response curve');
+  assert.ok(/\babs\s*\(\s*vLevel\s*\)/.test(fs), 'brightness must still be scaled by the amplitude');
+});
+
+s.test('every fragment shading term is brightness-only, so the §1.5 endpoints survive', () => {
+  const fs = app.sandbox.RIBBON_FRAGMENT_SOURCE;
+
+  // THE WHOLE CONTRACT IN ONE LINE. The pixel is the §1.5 colour times a single
+  // scalar, and the scalar is clamped BEFORE the multiply. Clamping the scalar
+  // keeps the ratio between the channels; letting a channel saturate instead
+  // would quietly walk a bright major pixel off vec3(0.0, 0.94, 1.0).
+  assert.ok(
+    /fragColor\s*=\s*vec4\(\s*aged\s*\*\s*clamp\(\s*lit\s*,\s*0\.0\s*,\s*1\.0\s*\)\s*,\s*1\.0\s*\)\s*;/.test(fs),
+    'the pixel must be `aged * clamp(lit, 0.0, 1.0)` — one scalar, clamped before the multiply'
+  );
+
+  // Vignette and footlight touch the scalar, never the colour.
+  assert.ok(
+    /lit\s*\*=\s*1\.0\s*-\s*0\.30\s*\*\s*pow\(\s*abs\(\s*vUv\.x\s*\*\s*2\.0\s*-\s*1\.0\s*\)/.test(fs),
+    'the vignette must be a multiplicative brightness term on lit'
+  );
+  assert.ok(/lit\s*\+=\s*0\.06\s*\*\s*wire/.test(fs), 'the footlight must be an additive brightness term on lit');
+
+  // The aged colour is still nothing but the smoothed uniform blended toward
+  // the shader's own neutral — no grade, no tint, no white mixed into peaks.
+  const agedLine = /vec3\s+aged\s*=\s*([^;]+);/.exec(fs);
+  assert.ok(agedLine, 'the fragment shader builds no aged colour');
+  assert.strictEqual(
+    agedLine[1].trim(),
+    'mix(uColor, MODE_NEUTRAL * uDim, vUv.y * 0.6)',
+    `the aged colour must stay the uColor -> neutral blend, got "${agedLine[1].trim()}"`
+  );
+
+  // Nothing may reach for a hue/saturation space or mix white in.
+  const lower = fs.toLowerCase();
+  for (const banned of ['hsv', 'hsl', 'saturat', 'vec3(1.0)', 'vec3(1.0, 1.0, 1.0)']) {
+    assert.strictEqual(
+      lower.indexOf(banned.toLowerCase()),
+      -1,
+      `a "${banned}" grade would move the displayed pixel off the §1.5 endpoints`
+    );
+  }
+  // The anchors themselves are, as ever, exactly the two §1.5 values.
+  assert.ok(fs.indexOf(MAJOR_LITERAL) !== -1, 'the major anchor must survive the shading rewrite');
+  assert.ok(fs.indexOf(MINOR_LITERAL) !== -1, 'the minor anchor must survive the shading rewrite');
+});
+
+s.test('boot settles the ribbon, injects the motion preference, and catches every resize', () => {
+  const source = extractScriptById(INDEX, 'app-main');
+
+  // Leaving 'live' must not freeze a vivid full-twist frame beside chips that
+  // have already blanked to an em dash.
+  assert.ok(
+    /ribbon\.stop\(\);\s*ribbon\.settle\(\);/.test(source),
+    'leaving the live state must settle the ribbon, not freeze it'
+  );
+
+  // The renderer stays HEADLESS: the OS preference is resolved in boot and
+  // injected, never read from inside createRibbonRenderer.
+  const bootAt = source.indexOf("if (typeof document === 'undefined') return;");
+  const ribbonAt = source.indexOf('function createRibbonRenderer');
+  assert.ok(bootAt !== -1 && ribbonAt !== -1 && ribbonAt < bootAt, 'the ribbon/boot boundary moved');
+  // Comments stripped first: the header comments that RULE OUT reading the
+  // media query themselves name it, and must not read as doing it.
+  const rendererCode = source
+    .slice(ribbonAt, bootAt)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  assert.strictEqual(
+    rendererCode.indexOf('matchMedia'),
+    -1,
+    'createRibbonRenderer must never read matchMedia — it has to stay drivable from a DOM-free sandbox'
+  );
+  assert.ok(/prefers-reduced-motion: reduce/.test(source), 'boot never asks for the motion preference');
+  assert.ok(/reducedMotion:/.test(source), '…and never injects it into the renderer');
+
+  // Resize triggers: the window event alone misses a container-only reflow
+  // (switching back from the Editor un-hides a box that was 0x0) and misses a
+  // DPR change entirely.
+  assert.ok(/window\.addEventListener\('resize'/.test(source), 'the window resize listener is gone');
+  assert.ok(
+    /typeof ResizeObserver === 'function'/.test(source),
+    'a ResizeObserver must be feature-guarded, not assumed'
+  );
+  assert.ok(
+    /new ResizeObserver\([\s\S]{0,40}\)\.observe\(vizCanvas\)/.test(source),
+    'the ResizeObserver must watch the canvas itself'
+  );
+  assert.ok(/dppx/.test(source), 'a DPR change fires no resize event; the resolution query is the only signal');
+
+  // Every one of those triggers goes through the SAME idle-only repaint, so
+  // none of them can start a second loop.
+  const repaints = source.match(/if \(!ribbon\.isRunning\(\)\) ribbon\.renderOnce\(\);/g) || [];
+  assert.strictEqual(repaints.length, 1, 'every resize trigger must share one idle-only repaint path');
+
+  // The context asks for the discrete GPU where there is one.
+  assert.ok(
+    /powerPreference: 'high-performance'/.test(source),
+    'the WebGL2 context should ask for the high-performance adapter'
+  );
+
+  // Still exactly two things may schedule an animation frame: the live loop and
+  // the bounded settle. Each arms once and reschedules once — four call sites,
+  // and no fifth, because a fifth would be an idle loop.
+  assert.strictEqual((source.match(/raf\(tick\)/g) || []).length, 2, 'the live loop arms once and reschedules once');
+  assert.strictEqual((source.match(/raf\(drain\)/g) || []).length, 2, 'the bounded drain arms once and reschedules once');
+  assert.strictEqual(
+    (source.match(/\braf\(/g) || []).length,
+    4,
+    'nothing else in this file may schedule an animation frame — an idle tab must not burn the GPU'
+  );
 });
 
 /* ------------------------------------------------------------------------ *
