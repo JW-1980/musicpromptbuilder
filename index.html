@@ -118,6 +118,14 @@
     --vt-out: 200ms;
     --vt-in: 280ms;
     --vt-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+    /* Nominal height of the Prompt Editor's sticky jump strip, which is also
+       its min-height. Two unrelated rules have to agree with it — the
+       scroll-margin every jump target reserves, and the offset the sticky
+       compile rail parks at — so the number is declared ONCE here instead of
+       being typed out in both. Both consumers add a 12px gutter on top, which
+       absorbs the ±1px the chips' font metrics move the real strip by. A
+       length, not a colour, so it is deliberately outside the palette mirror. */
+    --jumpnav-h: 44px;
   }
 
   /* ==========================================================================
@@ -560,9 +568,13 @@
   #view-hum { view-transition-name: hum-view; }
   #view-editor { view-transition-name: editor-view; }
 
+  /* The view's own title. It used to sit 0.1rem from .panel-heading, which made
+     an h2 and the h3s under it read as one flat run of labels; at 1.35rem it is
+     unmistakably the top of the outline the zone headings hang from. */
   .view-heading {
     margin: 0 0 4px;
-    font-size: 1.05rem;
+    font-size: 1.35rem;
+    font-weight: 600;
     letter-spacing: 0.01em;
   }
 
@@ -573,6 +585,97 @@
     line-height: 1.55;
     color: var(--text-dim);
   }
+
+  /* --- Workflow zones ------------------------------------------------------ */
+
+  /* Nine sibling cards are a pile; four named steps are a workflow. A zone
+     heading is the middle rung of the outline — h2 view > h3 zone > h4 card —
+     and it borrows .profile-heading's small-caps treatment rather than
+     inventing a third label style.
+
+     Every number here is set against .panel-heading (0.95rem, bold, 0.06em,
+     --text-dim), because that is the rung directly below it and the only one
+     it can be confused with. A rung that out-ranks its children only in
+     COLOUR is not a rung, so this out-ranks them three ways at once: larger
+     (1.05rem over 0.95rem), tracked twice as wide, and at full --text against
+     their dim. The 30px of air above it does the rest. */
+  .zone-heading {
+    margin: 30px 0 12px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  /* Every card and grid already carries its own 24px top margin from the days
+     it was one item in one stack. Under a zone heading that margin is the
+     heading's job, so the gap is the heading's 12px and nothing else — four
+     zones that all open the same way.
+
+     TWO classes rather than `.zone-heading + *`, and the reason is specificity
+     arithmetic, not taste: every margin being cancelled here (.vibe-grid,
+     .persist-grid and .draft-panel) is a one-class rule declared LATER in this
+     sheet, so a one-class reset ties at (0,1,0) and loses on source order. It
+     would have read exactly right and done exactly nothing. At (0,2,0) it wins
+     wherever it sits, and the two class names cover all four zone openers: a
+     .view-grid (Describe, Shape, Library) or a bare .vibe-card (Compile). */
+  .zone-heading + .view-grid,
+  .zone-heading + .vibe-card {
+    margin-top: 0;
+  }
+
+  /* A jump lands ON its heading, and the strip above it is --jumpnav-h tall
+     (44px declared, 45px as the chips' font metrics actually render), so every
+     jump target reserves that much room plus the 12px gutter that absorbs the
+     difference. Without this the heading arrives UNDER the sticky strip and
+     reads as simply missing. Measured: a chip jump lands the heading 11px
+     clear of the strip's bottom edge. */
+  .zone-heading,
+  .panel-heading {
+    scroll-margin-top: calc(var(--jumpnav-h) + 12px);
+  }
+
+  /* --- Sticky jump strip --------------------------------------------------- */
+
+  /* Five chips, five headings that already exist — no new ids, no second
+     navigation model. It sticks to the top of the scrollport (the app header
+     is position: relative and scrolls away, so nothing else is up there) and
+     carries an opaque ground of its own, because a translucent strip over
+     scrolling card text is unreadable. z-index stays UNDER the header's 20 so
+     the colour panel that pops out of the header still wins. */
+  .jump-nav {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-height: var(--jumpnav-h);
+    margin: 0 0 4px;
+    padding: 8px 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--surface-border);
+  }
+
+  /* The chips are the shared .chip pill; these three rules are only what an
+     <a> needs that a <span> or a <button> did not. */
+  a.chip {
+    text-decoration: none;
+  }
+
+  a.chip:hover { color: var(--text); border-color: var(--accent-cyan); }
+
+  a.chip:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  /* A jump that teleports loses the reader's place. This is motion, so the
+     prefers-reduced-motion guard at the end of this sheet turns it back off —
+     the same shape every other animation in this file has. */
+  html { scroll-behavior: smooth; }
 
   /* Single column until the CONTAINER (not the window) is wide enough. */
   .view-grid {
@@ -835,6 +938,25 @@
   .dissector-panel,
   .editor-output { container-name: dissector; }
 
+  /* The results column earns a card only when it HAS results. It holds nothing
+     but #dissect-results, which is [hidden] until a dissection actually runs,
+     so an unconditional .vibe-card would paint an empty box where the honest
+     answer is "nothing here yet". Same four declarations as .vibe-card, gated
+     on the content — the same :has() pattern the .editor-grid collapse below
+     already uses, and it degrades the same way: no :has(), no card. */
+  .editor-output:has(#dissect-results:not([hidden])) {
+    padding: 20px;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+  }
+
+  /* Inside that card the results are the only child, so the gap that separated
+     them from the form when they floated free is now the card's padding. */
+  .editor-output:has(#dissect-results:not([hidden])) > .dissect-results {
+    margin-top: 0;
+  }
+
   .dissect-input {
     width: 100%;
     min-height: 82px;
@@ -1072,14 +1194,31 @@
   }
 
   /* They answer to the SAME container name as the dissector columns, so every
-     control in this view reflows against its own column width. */
+     control in this view reflows against its own column width.
+     .exclude-panel and .style-panel were missing from this list, which made the
+     `@container dissector (max-width: 520px)` rules for .exclude-row and the
+     shared .draft-foot dead CSS: with no named container above them the query
+     never matched and both rows stayed horizontal at any width. They matter now
+     that the compile rail can be a ~440px column. */
   .scene-panel,
   .slider-panel,
   .vocal-panel,
   .structure-panel,
+  .exclude-panel,
+  .style-panel,
   .draft-panel { container-name: dissector; }
 
   .vibe-grid { margin-top: 24px; }
+
+  /* --- The zoned editor: shape column + compile rail ---------------------- */
+
+  /* One grid, two wrappers, no new cards: SHAPE holds everything that feeds the
+     prompt, COMPILE holds the draft, the exclusions and the compiled style
+     field. Below the wide breakpoint it is a single column and the DOM order
+     is byte-for-byte the reading order the stacked layout always had. The
+     wide-layout rule lives in its own @container block further down. */
+  .editor-shape,
+  .editor-rail { min-width: 0; }
 
   /* The shared pill. A span for a read-only tag, a <button> when it does
      something — the button rule below adds the affordances rather than the
@@ -1369,7 +1508,20 @@
 
   /* --- Strict 1,000-character gauge + compiled style prompt (FDD #67) ----- */
 
-  .style-panel { margin-top: 24px; }
+  /* Eight cards feed this one; this is the only card holding the string that
+     actually gets pasted into Suno, and until now it looked exactly like its
+     feeders. It takes the SAME "this element is live" language the active tab
+     and the armed record button already speak — accent border plus the shared
+     outer glow — rather than growing a bespoke treatment, and lifts its ground
+     one step off the common card wash. Both halves are tokens, so a recolour
+     and a theme swap reach it for free; Code Mode overrides it further down,
+     because a glow is exactly the signal that mode exists to replace. */
+  .style-panel {
+    margin-top: 24px;
+    background: color-mix(in srgb, var(--tint-cyan) 60%, var(--surface-2));
+    border-color: var(--tint-cyan-border);
+    box-shadow: var(--glow-cyan);
+  }
 
   .style-gauge-head {
     display: flex;
@@ -1960,6 +2112,50 @@
     }
   }
 
+  /* Prompt Editor, wide: the compiled output stops chasing its own inputs down
+     the page. The SHAPE column keeps every card that feeds the prompt; the
+     COMPILE rail — draft, exclusions and the 1,000-character gauge — sticks
+     beside them, so the string that is actually pasted into Suno stays on
+     screen while the thing that produces it is being edited. No gauge is
+     duplicated and no control is mirrored: this moves the real one.
+     A THIRD @container block rather than an extension of the two above,
+     because tests/vibe-translators.test.js reads the first 880px block whole
+     and a nested rule inside it would truncate that read. */
+  @container editor-view (min-width: 1080px) {
+    .editor-split { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+
+    .editor-rail {
+      position: sticky;
+      /* Parks just below the jump strip, which is the only other sticky thing
+         on the page. --jumpnav-h is the single source of that number. */
+      top: calc(var(--jumpnav-h) + 12px);
+      /* A rail taller than the window would scroll its own bottom off screen
+         and never come back; capped, it scrolls internally instead. The cost
+         is that .style-panel's outer glow is clipped at the rail's edge — its
+         accent border and tinted ground carry the same signal, so the card
+         still reads as the live one. */
+      max-height: calc(100vh - 96px);
+      overflow: auto;
+    }
+
+    /* The 880px rule above queries the VIEW, not this column. Left alone it
+       would fire inside the ~600px shape column and squeeze Scene and Physical
+       feel into two ~290px cells. One column inside the split, always. */
+    .vibe-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* A narrow editor cannot afford a permanently parked two-line chip strip, so
+     the jump nav stops sticking and scrolls away with the content — and the
+     headings stop reserving room for a strip that is no longer above them. */
+  @container editor-view (max-width: 520px) {
+    .jump-nav {
+      position: static;
+      min-height: 0;
+    }
+    .zone-heading,
+    .panel-heading { scroll-margin-top: 12px; }
+  }
+
   @container capture (max-width: 360px) {
     .capture-controls { align-items: stretch; flex-direction: column; }
     .btn-record { justify-content: center; }
@@ -2190,6 +2386,16 @@
     border: 1px solid var(--warning-amber);
   }
 
+  /* Same contract for the one card that outranks the other eight. Code Mode
+     flattens every ground to black and every glow to nothing, so without this
+     the Style prompt card would quietly become a sibling again — the cyan
+     border has to carry the whole "this is the one you paste" signal. */
+  .high-contrast .style-panel {
+    background: var(--bg);
+    border: 1px solid var(--accent-cyan);
+    box-shadow: none;
+  }
+
   /* A block's tag line is primary text, not a badge. Violet is 3.52:1 on black
      (see the table above) — enough for a label, not for a line you read — so
      in the legibility mode it takes the full-contrast foreground instead. The
@@ -2220,6 +2426,9 @@
     .studio-view.is-entering,
     #view-hum.is-entering { animation: none; }
     .view-tab, .btn-toggle, .btn-mini { transition: none; }
+    /* The jump strip's smooth scroll is motion too: a jump becomes an instant
+       one rather than a 400ms glide across the whole workspace. */
+    html { scroll-behavior: auto; }
   }
 </style>
 </head>
@@ -2409,8 +2618,23 @@
     <h2 class="view-heading">Prompt Editor</h2>
     <p class="view-intro">
       Turn plain language into copyright-safe Suno v5.5 tokens, then read back exactly which
-      traits were matched and how confident the engine is.
+      traits were matched and how confident the engine is. Four steps, in order: describe it,
+      shape it, compile it, keep it.
     </p>
+
+    <!-- The workspace is long enough that the four zones below cannot all be on
+         screen at once, so it ships a way back to each of them. Every target is
+         a heading that already exists — this adds no ids and no second
+         navigation model — and .panel-heading / .zone-heading both reserve
+         scroll-margin-top so a jump lands ON the heading rather than under the
+         strip. -->
+    <nav class="jump-nav" aria-label="Prompt editor sections">
+      <a class="chip" href="#dissect-heading">Describe</a>
+      <a class="chip" href="#scene-heading">Shape</a>
+      <a class="chip" href="#structure-heading">Structure</a>
+      <a class="chip" href="#style-heading">Compile</a>
+      <a class="chip" href="#history-heading">Library</a>
+    </nav>
 
     <!-- Workspace Profiling (docs/FDD.md #77) over FEATURE-MECHANICS.md §6.2.
          A profile is the LIGHT subset — three slider positions, the genre
@@ -2438,9 +2662,15 @@
       <p id="profile-status" class="dissect-status" role="status" aria-live="polite"></p>
     </section>
 
+    <!-- ZONE 1 of 4. The zone headings are the middle rung of the outline the
+         cards hang from: h2 view > h3 zone > h4 card. They sit OUTSIDE every
+         .view-grid on purpose — inside one they would become a stray grid cell
+         the moment the 880px rule gives that grid a second column. -->
+    <h3 class="zone-heading">Describe</h3>
+
     <div class="view-grid editor-grid">
-    <section class="view-col dissector-panel" aria-labelledby="dissect-heading">
-      <h3 id="dissect-heading" class="panel-heading">AI acoustic dissector</h3>
+    <section class="view-col vibe-card dissector-panel" aria-labelledby="dissect-heading">
+      <h4 id="dissect-heading" class="panel-heading">AI acoustic dissector</h4>
       <p class="panel-note">
         Describe a vibe, a scene or a reference sound in plain language and it is deconstructed into
         generic, copyright-safe Suno tokens. <strong>Local</strong> runs a deterministic taxonomy
@@ -2519,7 +2749,11 @@
     </section>
 
     <div class="view-col editor-output">
-      <div id="dissect-results" class="dissect-results" hidden>
+      <!-- tabindex="-1" adds no tab stop; it makes the panel a legal target for
+           the .focus() that runs the moment [hidden] comes off, so the results
+           are where the keyboard already is instead of a screenful below the
+           button that summoned them. -->
+      <div id="dissect-results" class="dissect-results" tabindex="-1" hidden>
         <div id="dissect-badges" class="genre-badges"></div>
         <dl class="dissect-facts">
           <dt>BPM</dt><dd id="dissect-bpm">—</dd>
@@ -2562,12 +2796,24 @@
     </div>
     </div>
 
+    <!-- ZONES 2 and 3, side by side once the view can hold both.
+         SHAPE is everything that FEEDS the prompt; COMPILE is the draft, the
+         exclusions and the compiled style field the user actually pastes.
+         Splitting them is what lets the compile side be sticky: above 1080px
+         the finished string stays on screen while its inputs are edited.
+         Below that this is one column and the DOM order — scene, sliders,
+         vocal, structure, draft, exclusions, style — is exactly the reading
+         order the stacked layout has always had. -->
+    <div class="view-grid editor-split">
+    <div class="editor-shape">
+    <h3 class="zone-heading">Shape</h3>
+
     <!-- Layman Vibe Translators (docs/FDD.md Domain C). Three ways in, one
          working set out: everything below writes into the same prompt state
-         the draft card at the end renders. -->
+         the draft card in the compile rail renders. -->
     <div class="view-grid vibe-grid">
     <section class="view-col vibe-card scene-panel" aria-labelledby="scene-heading">
-      <h3 id="scene-heading" class="panel-heading">Scene to sound</h3>
+      <h4 id="scene-heading" class="panel-heading">Scene to sound</h4>
       <p class="panel-note">
         Name a place or a moment and the embedded scene table answers with the
         production tokens that make it sound like that. If nothing matches, nothing
@@ -2587,7 +2833,7 @@
     </section>
 
     <section class="view-col vibe-card slider-panel" aria-labelledby="sliders-heading">
-      <h3 id="sliders-heading" class="panel-heading">Physical feel</h3>
+      <h4 id="sliders-heading" class="panel-heading">Physical feel</h4>
       <p class="panel-note">
         Three physical axes, no jargon. The middle band (30–70) deliberately injects
         nothing and leaves the vote with your genre; past either end it adds the exact
@@ -2635,7 +2881,7 @@
          the case that rule exists for, so it reuses the same .vlist scroller
          the history and preset cards use rather than mounting 104 rows. -->
     <section class="view-col vibe-card vocal-panel" aria-labelledby="vocal-heading">
-      <h3 id="vocal-heading" class="panel-heading">Vocal persona</h3>
+      <h4 id="vocal-heading" class="panel-heading">Vocal persona</h4>
       <p class="panel-note">
         Pick the voice, not the singer. Every persona is a generic, copyright-safe
         timbre description — search by family (choral, rap, metal), by timbre
@@ -2669,7 +2915,7 @@
          draft card compiles, and the structure sheet compiled here. Reading
          order follows the order they are filled in. -->
     <section class="view-col vibe-card structure-panel" aria-labelledby="structure-heading">
-      <h3 id="structure-heading" class="panel-heading">Song structure</h3>
+      <h4 id="structure-heading" class="panel-heading">Song structure</h4>
       <p class="panel-note">
         Click a metatag to append a block, then reorder the flow by dragging a handle,
         pressing Move up / Move down, or holding <kbd>Alt</kbd> with the arrow keys.
@@ -2708,9 +2954,9 @@
       </p>
       <ol id="structure-blocks" class="structure-blocks" aria-label="Song flow blocks"></ol>
 
-      <h4 id="structure-preview-heading" class="structure-preview-heading" hidden>
+      <h5 id="structure-preview-heading" class="structure-preview-heading" hidden>
         Compiled structure sheet
-      </h4>
+      </h5>
       <p id="structure-refrain-note" class="structure-refrain-note" role="status"
          aria-live="polite" hidden></p>
       <pre id="structure-preview" class="structure-preview" role="region" tabindex="0"
@@ -2726,8 +2972,13 @@
       </div>
     </section>
 
+    </div><!-- /.editor-shape -->
+
+    <div class="editor-rail">
+    <h3 class="zone-heading">Compile</h3>
+
     <section class="view-col vibe-card draft-panel" aria-labelledby="draft-heading">
-      <h3 id="draft-heading" class="panel-heading">Prompt draft</h3>
+      <h4 id="draft-heading" class="panel-heading">Prompt draft</h4>
       <p class="panel-note">
         Everything the translators have contributed, grouped by what it describes.
         Remove a chip, clear a group, or copy the draft as one comma-separated Suno
@@ -2750,7 +3001,7 @@
          Everything toggled here is compiled into ONE bracketed block at the
          very end of the style prompt, never sprinkled through it. -->
     <section class="view-col vibe-card exclude-panel" aria-labelledby="exclude-heading">
-      <h3 id="exclude-heading" class="panel-heading">Exclusions</h3>
+      <h4 id="exclude-heading" class="panel-heading">Exclusions</h4>
       <p class="panel-note">
         What Suno must <em>not</em> do. Toggle a common exclusion or type your own;
         they are compiled into a single <code>[Exclude: …]</code> block at the very
@@ -2783,7 +3034,7 @@
          a SEPARATE Suno field and is deliberately not counted against this
          budget. -->
     <section class="view-col vibe-card style-panel" aria-labelledby="style-heading">
-      <h3 id="style-heading" class="panel-heading">Style prompt</h3>
+      <h4 id="style-heading" class="panel-heading">Style prompt</h4>
       <p class="panel-note">
         The finished style field: genre tokens weighted to the front, contradictory
         tags resolved in favour of the heavier one, exclusions appended last, and the
@@ -2824,15 +3075,24 @@
       </div>
     </section>
 
-    <!-- PERSISTENCE (docs/FDD.md #21, #74, #85, #86, #93).
+    </div><!-- /.editor-rail -->
+    </div><!-- /.editor-split -->
+
+    <!-- ZONE 4 of 4. PERSISTENCE (docs/FDD.md #21, #74, #85, #86, #93).
          Both lists below are VIRTUALIZED (ENGINEERING-STANDARD.md §2.2): only
          the rows in view plus a small overscan are ever in the DOM, and two
          spacer divs hold the scrollbar geometry. Both tables live in
          IndexedDB, not localStorage — see FEATURE-MECHANICS.md §6.4 and the
-         long comment above createIdbStore(). -->
+         long comment above createIdbStore().
+         It stays full-width below the split rather than joining either column:
+         a saved-things library is not part of assembling THIS prompt, and both
+         scrollers measure their own height on view entry (refreshPersistenceLists),
+         which only works in a box that is neither clipped nor sticky. -->
+    <h3 class="zone-heading">Library</h3>
+
     <div class="view-grid persist-grid">
     <section class="view-col vibe-card history-panel" aria-labelledby="history-heading">
-      <h3 id="history-heading" class="panel-heading">Prompt history</h3>
+      <h4 id="history-heading" class="panel-heading">Prompt history</h4>
       <p class="panel-note">
         Every successful <em>Copy style prompt</em> is banked here with the whole
         workspace behind it, so <strong>Restore</strong> puts the sliders, tags,
@@ -2865,7 +3125,7 @@
     </section>
 
     <section class="view-col vibe-card presets-panel" aria-labelledby="presets-heading">
-      <h3 id="presets-heading" class="panel-heading">Presets &amp; backup</h3>
+      <h4 id="presets-heading" class="panel-heading">Presets &amp; backup</h4>
       <p class="panel-note">
         A preset is the <em>whole</em> workspace under a name you choose. Export the
         library as a JSON file or straight to the clipboard (which is the path that
@@ -3979,7 +4239,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.14.0';
+const APP_VERSION = '0.15.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -15971,6 +16231,24 @@ function createRibbonRenderer(deps) {
       fellBackFlag.hidden = outcome.fellBack !== true;
       rawJson.textContent = JSON.stringify(result, null, 2);
       dissectResults.hidden = false;
+      /*
+       * The results arrive somewhere the keyboard is not. Focus is still on the
+       * Dissect button, and everything that ACTS on this result — the trait
+       * badges and the five "Add …" buttons — sits either in the column beside
+       * it (wide) or a full screen below it (narrow), so the next Tab would
+       * walk the rest of the form before reaching any of it. Moving focus to
+       * the panel itself puts the very next Tab on the first trait badge (which
+       * adds that one token) with the Add row a few stops after, instead of a
+       * screenful away; #dissect-results carries tabindex="-1" so that costs no
+       * extra tab stop of its own.
+       *
+       * Deliberately no announcement here: #dissect-status is already the live
+       * region for this action and a second one would double-speak. Deliberately
+       * a plain .focus() rather than scrollIntoView({behavior:'smooth'}) — the
+       * browser's own focus scroll respects the page's scroll-behavior, which
+       * the prefers-reduced-motion guard already governs.
+       */
+      dissectResults.focus();
     }
 
     let dissectBusy = false;

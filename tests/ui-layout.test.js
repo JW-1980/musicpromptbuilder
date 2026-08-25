@@ -43,7 +43,42 @@ const INDEX = path.resolve(__dirname, '..', 'index.html');
  * two palettes must come before the Code Mode override, which wins on equal
  * specificity purely by sitting last. */
 const TOKEN_BLOCK_SELECTORS = [':root {', '.theme-light {', '.high-contrast {'];
-const EXPECTED_VERSION = '0.14.0';
+/* CONSCIOUSLY UPDATED IN 0.15.0: was '0.14.0' (the ribbon-refinement release).
+ * This constant and the title of the test that reads it are the only two things
+ * in this file that a version bump is allowed to touch, and both moved together
+ * — the assertion itself is unchanged. The bump follows the one-release-per-task
+ * cadence PROGRESS.md records for 0.10.0 through 0.14.0; the design plan for
+ * this task listed a bump as "not required", not as forbidden, so if the owner
+ * prefers 0.15.0 to be held back, index.html:APP_VERSION and this line revert
+ * together and nothing else in the suite moves. */
+const EXPECTED_VERSION = '0.15.0';
+/* The Prompt Editor's four workflow zones, in the order they must be read. */
+const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
+/* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
+ * the "outline" test below for why the level matters. */
+const EDITOR_CARD_HEADINGS = [
+  'dissect-heading',
+  'scene-heading',
+  'sliders-heading',
+  'vocal-heading',
+  'structure-heading',
+  'draft-heading',
+  'exclude-heading',
+  'style-heading',
+  'history-heading',
+  'presets-heading',
+];
+/* The two halves of the zoned split, in reading order. SHAPE holds everything
+ * that FEEDS the prompt; the COMPILE rail holds the three cards that produce
+ * and carry the string that is actually pasted into Suno. Which card sits in
+ * which wrapper is the whole point of the split — a card in the wrong one is
+ * either a sticky input or a compiled output that scrolls away. */
+const EDITOR_SHAPE_CARDS = ['scene-panel', 'slider-panel', 'vocal-panel', 'structure-panel'];
+const EDITOR_RAIL_CARDS = ['draft-panel', 'exclude-panel', 'style-panel'];
+/* Every card in the view, in the order the single-column stack reads them. The
+ * split must not reorder the document: below 1080px it IS that stack. */
+const EDITOR_CARD_ORDER = ['dissector-panel']
+  .concat(EDITOR_SHAPE_CARDS, EDITOR_RAIL_CARDS, ['history-panel', 'presets-panel']);
 const PREFS_KEY = 'suno_ui_prefs';
 
 /* -------------------------------------------------------------------------- */
@@ -239,6 +274,107 @@ function hexLiterals(css) {
   while ((m = re.exec(css)) !== null) {
     const lineNo = css.slice(0, m.index).split(/\r\n|\r|\n/).length;
     out.push({ hex: m[0], line: lineNo, index: m.index, text: (lines[lineNo - 1] || '').trim() });
+  }
+  return out;
+}
+
+/** The Prompt Editor view's markup, from its <section> to the end of <main>. */
+function readEditorMarkup() {
+  const html = readIndex();
+  const start = html.indexOf('id="view-editor"');
+  const end = html.indexOf('</main>');
+  assert.ok(start !== -1 && end > start, 'could not locate the Prompt Editor view');
+  return html.slice(start, end);
+}
+
+/**
+ * For every `<h3 class="zone-heading">` in `markup`, the class attribute of the
+ * element it is a DIRECT child of (`''` when that ancestor carries no class).
+ *
+ * A zone heading is only ever wrong in one specific way: dropped inside a
+ * `.view-grid`, it becomes a grid ITEM, and the moment the 880px rule gives
+ * that grid a second column the heading silently turns into a stray cell
+ * beside a card. Nothing about the rendered page says so, and no other
+ * assertion in this file would catch it — hence a real (small) tag scan rather
+ * than a regex that guesses at nesting. `<div>`, `<section>` and `<nav>` are
+ * the only containers the Editor view uses and none of them self-close here.
+ *
+ * @param {string} markup
+ * @returns {string[]} one entry per zone heading, in document order
+ */
+function zoneHeadingParents(markup) {
+  // Prose inside an HTML comment is not structure; a comment that merely names
+  // a tag must not push anything onto the stack.
+  const source = markup.replace(/<!--[\s\S]*?-->/g, '');
+  const re = /<(\/?)(div|section|nav)\b([^>]*)>|<h3 class="zone-heading">/g;
+  const stack = [];
+  const parents = [];
+  let m;
+  while ((m = re.exec(source)) !== null) {
+    if (m[2] === undefined) {
+      parents.push(stack.length ? stack[stack.length - 1] : '');
+      continue;
+    }
+    if (m[1] === '/') {
+      stack.pop();
+      continue;
+    }
+    const cls = /class="([^"]*)"/.exec(m[3] || '');
+    stack.push(cls ? cls[1] : '');
+  }
+  return parents;
+}
+
+/**
+ * The INNER markup of the first container in `markup` whose class list holds
+ * `cls`, found by walking container depth rather than by regex.
+ *
+ * `.editor-shape` and `.editor-rail` are plain wrappers with no id, and what
+ * matters about them is what is INSIDE each — which a flat regex cannot say,
+ * because both wrappers are siblings inside one `.editor-split` and a lazy
+ * match would happily run from the first `<div` to the first `</div>` nine
+ * cards early. Same tag vocabulary and the same comment-stripping as
+ * zoneHeadingParents() above.
+ *
+ * @param {string} markup
+ * @param {string} cls exact class name to look for in a class attribute
+ * @returns {string|null}
+ */
+function sliceByClass(markup, cls) {
+  const source = markup.replace(/<!--[\s\S]*?-->/g, '');
+  const re = /<(\/?)(div|section|nav)\b([^>]*)>/g;
+  let depth = null;
+  let start = -1;
+  let m;
+  while ((m = re.exec(source)) !== null) {
+    const closing = m[1] === '/';
+    if (depth === null) {
+      if (closing) continue;
+      const attr = /class="([^"]*)"/.exec(m[3] || '');
+      if (attr && attr[1].trim().split(/\s+/).indexOf(cls) !== -1) {
+        depth = 1;
+        start = re.lastIndex;
+      }
+      continue;
+    }
+    depth += closing ? -1 : 1;
+    if (depth === 0) return source.slice(start, m.index);
+  }
+  return null;
+}
+
+/**
+ * The `*-panel` class of every `<section>` card in `markup`, in document order.
+ * @param {string} markup
+ * @returns {string[]}
+ */
+function cardOrder(markup) {
+  const out = [];
+  const re = /<section class="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(markup)) !== null) {
+    const panel = m[1].trim().split(/\s+/).filter((c) => /-panel$/.test(c));
+    if (panel.length) out.push(panel[0]);
   }
   return out;
 }
@@ -752,7 +888,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the ribbon-refinement release (§1.5 gating, response curve, sub-row scroll, analytic lighting)`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the Prompt Editor workspace release (four workflow zones, sticky compile rail, jump strip)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });
@@ -1005,6 +1141,507 @@ s.test('the token blocks are the only place a hex colour appears', () => {
   }
 });
 
+/* -------------------------------------------------------------------------- */
+/* The Prompt Editor workspace — four zones, a jump strip and a compile rail   */
+/*                                                                            */
+/* The Editor grew from a stack of nine equal cards into a zoned workspace.    */
+/* Everything below is the part of that which is STRUCTURE rather than paint:  */
+/* an outline a screen reader can navigate, a layout that reflows on the       */
+/* container, and the two rules (scroll-margin, the rail's offset) that must   */
+/* agree with a single published length or the whole thing lands under itself. */
+/* -------------------------------------------------------------------------- */
+
+s.test('the Editor outline is h2 view > h3 zones > h4 cards, in workflow order', () => {
+  const editor = readEditorMarkup();
+
+  // One h2 at the top of the view; the zones hang off it.
+  const h2s = editor.match(/<h2\b/g) || [];
+  assert.strictEqual(h2s.length, 1, `the Editor view must own exactly one h2, found ${h2s.length}`);
+  assert.ok(/<h2 class="view-heading">Prompt Editor<\/h2>/.test(editor), 'the view heading is missing');
+
+  // Four zone headings, in the order the work is done.
+  const zones = (editor.match(/<h3 class="zone-heading">([^<]*)<\/h3>/g) || []).map(
+    (tag) => /<h3 class="zone-heading">([^<]*)<\/h3>/.exec(tag)[1]
+  );
+  assert.deepStrictEqual(
+    zones,
+    EDITOR_ZONES,
+    'the four workflow zones must read in order — describe it, shape it, compile it, keep it'
+  );
+
+  // Every card heading is one rung DOWN from its zone. Demoting these from h3
+  // to h4 is what turns a flat run of ten labels into a navigable outline;
+  // ids, classes and text are unchanged, so every aria-labelledby still binds.
+  for (const id of EDITOR_CARD_HEADINGS) {
+    assert.ok(
+      new RegExp(`<h4 id="${id}" class="panel-heading">`).test(editor),
+      `#${id} must be an <h4> under its zone heading, not a second h3`
+    );
+  }
+
+  // …and nothing else in the view may re-enter at h3, or the outline flattens
+  // again. The workspace-profile strip is the one allowed exception: it
+  // configures the view rather than belonging to a zone.
+  const h3s = editor.match(/<h3[^>]*>/g) || [];
+  const strays = h3s.filter(
+    (tag) => !/class="zone-heading"/.test(tag) && !/id="profile-heading"/.test(tag)
+  );
+  assert.deepStrictEqual(strays, [], `h3 outside the zone rung: ${strays.join(', ')}`);
+});
+
+s.test('no zone heading sits inside a .view-grid, where it would become a stray cell', () => {
+  const editor = readEditorMarkup();
+  const parents = zoneHeadingParents(editor);
+  assert.strictEqual(
+    parents.length,
+    EDITOR_ZONES.length,
+    `expected ${EDITOR_ZONES.length} zone headings, the scanner found ${parents.length}`
+  );
+  for (let i = 0; i < parents.length; i += 1) {
+    assert.ok(
+      !/\bview-grid\b/.test(parents[i]),
+      `the "${EDITOR_ZONES[i]}" zone heading is a direct child of "${parents[i]}" — inside a ` +
+        '.view-grid it becomes a grid item, and the 880px rule would park it beside a card'
+    );
+  }
+  // The two middle zones head the split's own columns; the outer two are
+  // view-level. The slice starts INSIDE the view's own <section …> tag, so
+  // that element never reaches the stack — '' is "a direct child of the view".
+  assert.deepStrictEqual(
+    parents,
+    ['', 'editor-shape', 'editor-rail', ''],
+    'the zone headings are not where the split expects them: Describe and Library are ' +
+      'view-level, Shape and Compile head the split’s two columns'
+  );
+});
+
+s.test('the jump strip is a labelled nav over headings that already exist', () => {
+  const editor = readEditorMarkup();
+  const css = readStyle();
+
+  const nav = /<nav class="jump-nav" aria-label="([^"]+)">([\s\S]*?)<\/nav>/.exec(editor);
+  assert.ok(nav, 'the Prompt Editor has no <nav class="jump-nav"> with an aria-label');
+  assert.ok(/\S/.test(nav[1]), 'the jump nav must be named — a landmark with no name is noise');
+  assert.strictEqual(nav[1], 'Prompt editor sections');
+
+  const links = nav[2].match(/<a class="chip" href="#([^"]+)">([^<]*)<\/a>/g) || [];
+  assert.ok(links.length >= 4, `expected a chip per zone, found ${links.length}`);
+  for (const link of links) {
+    const target = /href="#([^"]+)"/.exec(link)[1];
+    assert.ok(
+      editor.indexOf(`id="${target}"`) !== -1,
+      `the jump chip points at #${target}, which does not exist in the Editor view`
+    );
+  }
+
+  // Sticky, and its height published once so two unrelated rules can agree.
+  const strip = cssBlock(css, '.jump-nav {');
+  assert.ok(strip, 'no .jump-nav rule');
+  assert.ok(/position:\s*sticky/.test(strip.body), '.jump-nav must be position: sticky');
+  assert.ok(/top:\s*0/.test(strip.body), '.jump-nav must stick to the top of the scrollport');
+  assert.ok(
+    /background:\s*var\(--bg\)/.test(strip.body),
+    'a sticky strip needs an opaque ground or scrolling text reads through it'
+  );
+  assert.ok(
+    /:root\s*\{[\s\S]*?--jumpnav-h:\s*\d+px/.test(css),
+    '--jumpnav-h must be declared on :root — the rail offset and the scroll-margin both read it'
+  );
+
+  // A jump has to land ON the heading, not under the strip that is covering it.
+  assert.ok(
+    /\.zone-heading,\s*\.panel-heading\s*\{[^}]*scroll-margin-top:\s*calc\(var\(--jumpnav-h\)/.test(css),
+    'both heading levels must reserve scroll-margin-top for the sticky strip'
+  );
+});
+
+s.test('the wide editor is a THIRD container block that also resets .vibe-grid', () => {
+  const css = readStyle();
+
+  const wide = cssBlock(css, '@container editor-view (min-width: 1080px)');
+  assert.ok(wide, 'no @container editor-view (min-width: 1080px) block — the rail never appears');
+
+  // It must come after BOTH 880px blocks, which cascade below it.
+  const first880 = cssBlock(css, '@container editor-view (min-width: 880px)');
+  const second880 = cssBlock(css, '@container editor-view (min-width: 880px)', first880.end);
+  assert.ok(second880, 'the two 880px editor blocks are no longer both present');
+  assert.ok(
+    wide.start > second880.end,
+    'the 1080px block must follow both 880px blocks or its resets lose the cascade'
+  );
+
+  // The 880px block stays FLAT: tests/vibe-translators.test.js reads it whole
+  // with a `\n  }` terminator, which a nested at-rule would truncate.
+  assert.ok(
+    !/@container/.test(first880.body),
+    'the first 880px block must stay flat — no nested at-rules'
+  );
+
+  assert.ok(
+    /\.editor-split\s*\{[^}]*grid-template-columns:\s*minmax\([^)]*\)\s+minmax/.test(wide.body),
+    'the wide layout must split the editor into two columns'
+  );
+
+  const rail = /\.editor-rail\s*\{([^}]*)\}/.exec(wide.body);
+  assert.ok(rail, 'the 1080px block declares no .editor-rail rule');
+  assert.ok(/position:\s*sticky/.test(rail[1]), 'the compile rail must be position: sticky');
+  assert.ok(
+    /top:\s*calc\(var\(--jumpnav-h\)/.test(rail[1]),
+    'the rail must park below the jump strip using the published --jumpnav-h'
+  );
+  assert.ok(/overflow:\s*auto/.test(rail[1]), 'a capped rail must be able to scroll its own overflow');
+
+  // The 880px rule queries the VIEW, not the column. Without this reset the
+  // scene and slider cards get two ~290px cells inside the shape column.
+  assert.ok(
+    /\.vibe-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;?\s*\}/.test(wide.body),
+    'the 1080px block must reset .vibe-grid to a single column inside the split'
+  );
+});
+
+s.test('every editor card answers to the `dissector` container — exclusions and style included', () => {
+  const css = readStyle();
+  const selectors = [];
+  const re = /([^{}]+)\{\s*container-name:\s*dissector\s*;?\s*\}/g;
+  let m;
+  while ((m = re.exec(css)) !== null) selectors.push(m[1]);
+  const named = selectors.join(' ');
+  assert.ok(named.length > 0, 'nothing declares container-name: dissector any more');
+
+  for (const panel of [
+    '.dissector-panel',
+    '.editor-output',
+    '.scene-panel',
+    '.slider-panel',
+    '.vocal-panel',
+    '.structure-panel',
+    '.draft-panel',
+    // These two were missing, which made the 520px .exclude-row and .draft-foot
+    // rules dead CSS — they never had a named container to match against.
+    '.exclude-panel',
+    '.style-panel',
+  ]) {
+    assert.ok(
+      new RegExp(`\\${panel}(?![a-zA-Z0-9_-])`).test(named),
+      `${panel} declares no container-name: dissector, so the 520px stacking rules never fire in it`
+    );
+  }
+
+  // And the rules that depend on it are really there to fire.
+  const narrow = cssBlock(css, '@container dissector (max-width: 520px)');
+  assert.ok(narrow, 'no @container dissector (max-width: 520px) block');
+  assert.ok(/\.exclude-row\s*\{[^}]*flex-direction:\s*column/.test(narrow.body));
+  assert.ok(/\.draft-foot\s*\{[^}]*flex-direction:\s*column/.test(narrow.body));
+});
+
+s.test('the dissector is a card; its results column is one only when it HAS results', () => {
+  const editor = readEditorMarkup();
+  const css = readStyle();
+
+  assert.ok(
+    /<section class="view-col vibe-card dissector-panel"/.test(editor),
+    'the dissector panel must be a .vibe-card like the eight boxes under it'
+  );
+
+  const gated = cssBlock(css, '.editor-output:has(#dissect-results:not([hidden]))');
+  assert.ok(gated, 'the results column is not carded on a :has() gate');
+  for (const decl of ['padding:', 'background:', 'border:', 'border-radius:']) {
+    assert.ok(gated.body.indexOf(decl) !== -1, `the gated card is missing ${decl}`);
+  }
+
+  // Honest empty state: the column holds nothing but a [hidden] #dissect-results
+  // until a dissection runs, so an UNCONDITIONAL card would paint an empty box.
+  const bare = /\.editor-output\s*\{([^}]*)\}/.exec(css);
+  if (bare) {
+    assert.ok(
+      !/background:|border:|padding:/.test(bare[1]),
+      'an unconditional .editor-output card would print an empty box before the first dissection'
+    );
+  }
+});
+
+s.test('the Style prompt card carries primary weight in BOTH the glass and Code modes', () => {
+  const css = readStyle();
+
+  const style = cssBlock(css, '.style-panel {');
+  assert.ok(style, 'no .style-panel rule');
+  assert.ok(
+    /box-shadow:\s*var\(--glow-cyan\)/.test(style.body),
+    'the compiled-prompt card must borrow the shared "this element is live" glow'
+  );
+  assert.ok(
+    /border-color:\s*var\(--tint-cyan-border\)/.test(style.body),
+    'the card must take the accent border, not the neutral hairline of its feeders'
+  );
+  assert.ok(
+    /background:\s*color-mix\(/.test(style.body),
+    'the card must lift its ground off the shared card wash with a mixed token'
+  );
+  assert.ok(
+    !/#[0-9a-fA-F]{3,8}\b|\brgba?\(/.test(style.body),
+    `the emphasis must be token-only, no literal: ${style.body.trim()}`
+  );
+
+  // The companion is not optional: Code Mode flattens every wash and kills
+  // every glow, so without it this card quietly becomes a sibling again.
+  const contrast = cssBlock(css, '.high-contrast .style-panel');
+  assert.ok(
+    contrast,
+    'Code Mode has no .style-panel override — the emphasis silently vanishes in the legibility mode'
+  );
+  assert.ok(/background:\s*var\(--bg\)/.test(contrast.body), 'Code Mode must flatten the wash to --bg');
+  assert.ok(
+    /border:\s*1px solid var\(--accent-cyan\)/.test(contrast.body),
+    'with the wash and the glow gone the accent border has to carry the whole signal'
+  );
+});
+
+s.test('a finished dissection moves focus to its results', () => {
+  const editor = readEditorMarkup();
+  const source = extractScriptById(INDEX, 'app-main');
+
+  const tag = /<div id="dissect-results"[^>]*>/.exec(editor);
+  assert.ok(tag, '#dissect-results is missing');
+  assert.ok(
+    /tabindex="-1"/.test(tag[0]),
+    '#dissect-results must be programmatically focusable without adding a tab stop'
+  );
+  assert.ok(/\bhidden\b/.test(tag[0]), 'the results must still start hidden — nothing has been dissected');
+
+  // The focus move belongs where [hidden] comes off, not beside the click.
+  assert.ok(
+    /dissectResults\.hidden = false;[\s\S]{0,1400}?dissectResults\.focus\(\);/.test(source),
+    'nothing focuses #dissect-results when it is unhidden — the next Tab walks the whole form'
+  );
+  // One live region for this action, not two: #dissect-status already speaks.
+  const focusCalls = source.match(/dissectResults\.focus\(\)/g) || [];
+  assert.strictEqual(focusCalls.length, 1, 'focus must move exactly once, where the panel is revealed');
+});
+
+s.test('the jump strip’s smooth scroll is motion, and the reduced-motion guard turns it off', () => {
+  const css = readStyle();
+  assert.ok(
+    /\bhtml\s*\{[^}]*scroll-behavior:\s*smooth/.test(css),
+    'the jump strip has no smooth scrolling to guard'
+  );
+  let from = 0;
+  let guarded = false;
+  for (;;) {
+    const block = cssBlock(css, '@media (prefers-reduced-motion: reduce)', from);
+    if (!block) break;
+    if (/scroll-behavior:\s*auto/.test(block.body)) guarded = true;
+    from = block.end;
+  }
+  assert.ok(guarded, 'no prefers-reduced-motion block resets scroll-behavior to auto');
+});
+
+s.test('the split puts the feeders in the shape column and the compiled output in the rail', () => {
+  const editor = readEditorMarkup();
+
+  const split = sliceByClass(editor, 'editor-split');
+  assert.ok(split, 'there is no .editor-split wrapper — the zoned layout has been undone');
+  const shape = sliceByClass(split, 'editor-shape');
+  const rail = sliceByClass(split, 'editor-rail');
+  assert.ok(shape, '.editor-split has no .editor-shape column');
+  assert.ok(rail, '.editor-split has no .editor-rail column');
+
+  // Which side a card lands on is not cosmetic: everything in the rail becomes
+  // position: sticky at 1080px, so a feeder parked there would pin an INPUT to
+  // the viewport, and a compiled card left behind in the shape column would go
+  // on scrolling away from the controls that change it — the exact problem the
+  // split exists to fix.
+  for (const card of EDITOR_SHAPE_CARDS) {
+    assert.ok(shape.indexOf(card) !== -1, `.${card} feeds the prompt and belongs in the shape column`);
+    assert.ok(rail.indexOf(card) === -1, `.${card} is an input; the sticky rail must not hold it`);
+  }
+  for (const card of EDITOR_RAIL_CARDS) {
+    assert.ok(rail.indexOf(card) !== -1, `.${card} is part of the compiled output and belongs in the rail`);
+    assert.ok(shape.indexOf(card) === -1, `.${card} must not be left behind in the scrolling column`);
+  }
+
+  // The two full-width grids stay OUTSIDE the split. .editor-grid keeps its own
+  // 880px two-column rule, and .persist-grid's two virtualised lists measure
+  // their own height on view entry — which a clipped, sticky column breaks.
+  for (const outside of ['editor-grid', 'persist-grid']) {
+    assert.ok(editor.indexOf(outside) !== -1, `.${outside} has gone missing from the view`);
+    assert.ok(
+      split.indexOf(outside) === -1,
+      `.${outside} has been pulled inside .editor-split; it must stay full width`
+    );
+  }
+
+  // Below 1080px the split IS the old single-column stack, so wrapping the
+  // cards must not have reordered a single one of them.
+  assert.deepStrictEqual(
+    cardOrder(editor),
+    EDITOR_CARD_ORDER,
+    'the split reordered the document — the stacked reading order must survive it byte for byte'
+  );
+});
+
+s.test('.editor-split has no column rule below 1080px, so it stacks like it always did', () => {
+  const css = readStyle();
+  const first = cssBlock(css, '@container editor-view (min-width: 880px)');
+  assert.ok(first, 'the first 880px editor block is gone');
+  const second = cssBlock(css, '@container editor-view (min-width: 880px)', first.end);
+  assert.ok(second, 'the second 880px editor block (the :has() collapse) is gone');
+  for (const block of [first, second]) {
+    assert.ok(
+      block.body.indexOf('.editor-split') === -1,
+      'an 880px rule mentions .editor-split — the rail would appear ~200px too early, ' +
+        'inside a column too narrow for the exclusion row it carries'
+    );
+  }
+  // …and the base rule is a plain .view-grid, i.e. one column until 1080.
+  assert.ok(
+    /<div class="view-grid editor-split">/.test(readEditorMarkup()),
+    '.editor-split must ride the shared .view-grid base (one column, 24px/16px gap)'
+  );
+});
+
+s.test('a zone heading really cancels the 24px margin under it, rather than tying and losing', () => {
+  const css = readStyle();
+  const editor = readEditorMarkup();
+
+  // The one-class form is the trap: `.zone-heading + *` READS correct and does
+  // nothing, because every margin it cancels is also a one-class rule and is
+  // declared later in this sheet. Equal specificity, later wins, reset dead.
+  assert.ok(
+    !/\.zone-heading\s*\+\s*\*/.test(css),
+    '`.zone-heading + *` ties at (0,1,0) with .vibe-grid / .persist-grid / .draft-panel ' +
+      'and loses on source order — it would be dead CSS that looks right'
+  );
+  const reset = /\.zone-heading\s*\+\s*\.view-grid\s*,\s*\.zone-heading\s*\+\s*\.vibe-card\s*\{([^}]*)\}/.exec(css);
+  assert.ok(reset, 'no two-class `.zone-heading + .view-grid, .zone-heading + .vibe-card` reset');
+  assert.ok(/margin-top:\s*0/.test(reset[1]), 'the reset must zero the top margin');
+
+  // Prove the trap is real rather than theoretical: each margin it cancels is
+  // a single-class rule sitting AFTER the reset.
+  for (const later of ['.vibe-grid', '.persist-grid', '.draft-panel']) {
+    const rule = new RegExp(`\\${later}\\s*\\{[^}]*margin-top:\\s*24px`).exec(css);
+    assert.ok(rule, `${later} no longer carries the 24px margin this reset exists to cancel`);
+    assert.ok(
+      rule.index > reset.index,
+      `${later} is declared before the reset, so this test no longer proves anything — ` +
+        're-check the specificity argument if the sheet has been reordered'
+    );
+  }
+
+  // And every zone opens with an element the reset can actually reach.
+  const openers = editor
+    .split(/<h3 class="zone-heading">/)
+    .slice(1)
+    .map((rest) => {
+      const tag = /<(?:div|section)\b[^>]*class="([^"]*)"/.exec(rest.replace(/<!--[\s\S]*?-->/g, ''));
+      return tag ? tag[1] : '';
+    });
+  assert.strictEqual(openers.length, EDITOR_ZONES.length);
+  for (let i = 0; i < openers.length; i += 1) {
+    const classes = openers[i].trim().split(/\s+/);
+    assert.ok(
+      classes.indexOf('view-grid') !== -1 || classes.indexOf('vibe-card') !== -1,
+      `the "${EDITOR_ZONES[i]}" zone opens with "${openers[i]}", which the two-class reset ` +
+        'cannot match — its own 24px margin would double the gap under the heading'
+    );
+  }
+});
+
+s.test('the heading scale is a real outline: view > zone > card, on size as well as colour', () => {
+  const css = readStyle();
+  /* `.panel-heading {` also opens the shared scroll-margin rule a few hundred
+   * lines earlier, so take the first block that actually SETS a size rather
+   * than the first block whose prelude mentions the class. */
+  const typeBlock = (selector, needle) => {
+    let from = 0;
+    for (;;) {
+      const block = cssBlock(css, selector, from);
+      assert.ok(block, `no ${selector} rule declaring ${needle}`);
+      if (block.body.indexOf(needle) !== -1) return block;
+      from = block.end;
+    }
+  };
+  const rem = (selector) => parseFloat(/font-size:\s*([\d.]+)rem/.exec(typeBlock(selector, 'font-size:').body)[1]);
+  const view = rem('.view-heading {');
+  const zone = rem('.zone-heading {');
+  const card = rem('.panel-heading {');
+
+  assert.ok(view > zone, `.view-heading (${view}rem) must out-rank the zone headings (${zone}rem)`);
+  // The rung that is easy to get wrong. .panel-heading is ALSO an uppercase,
+  // tracked, small-caps label, so a zone heading set from .profile-heading's
+  // 0.82rem lands BELOW the cards it gathers and the outline reads inverted —
+  // an h3 printed smaller and lighter than the h4s under it.
+  assert.ok(
+    zone > card,
+    `.zone-heading (${zone}rem) must out-rank .panel-heading (${card}rem); both are uppercase ` +
+      'tracked labels, so size is what separates the rungs'
+  );
+  const zoneBlock = typeBlock('.zone-heading {', 'color:');
+  const cardBlock = typeBlock('.panel-heading {', 'color:');
+  assert.ok(
+    /color:\s*var\(--text\)\s*;/.test(zoneBlock.body),
+    'a zone heading takes the full-contrast foreground'
+  );
+  assert.ok(
+    /color:\s*var\(--text-dim\)/.test(cardBlock.body),
+    'the card headings stay dim under it — if this changed, the colour half of the rung is gone'
+  );
+});
+
+s.test('the jump chips run in the same order as the headings they point at', () => {
+  const editor = readEditorMarkup();
+  const nav = /<nav class="jump-nav"[^>]*>([\s\S]*?)<\/nav>/.exec(editor);
+  assert.ok(nav, 'no jump nav');
+
+  const targets = [];
+  const re = /<a class="chip" href="#([^"]+)">/g;
+  let m;
+  while ((m = re.exec(nav[1])) !== null) targets.push(m[1]);
+  assert.ok(targets.length >= 4, `expected a chip per zone, found ${targets.length}`);
+
+  // A strip whose chips do not descend the page is a menu, not a map: the
+  // reader cannot use position in the strip to guess position in the document.
+  const positions = targets.map((id) => {
+    const at = editor.indexOf(`id="${id}"`);
+    assert.ok(at !== -1, `the jump chip points at #${id}, which is not in the Editor view`);
+    return at;
+  });
+  for (let i = 1; i < positions.length; i += 1) {
+    assert.ok(
+      positions[i] > positions[i - 1],
+      `chip ${i + 1} (#${targets[i]}) points ABOVE chip ${i} (#${targets[i - 1]}) — ` +
+        'the strip must read top to bottom like the workspace it maps'
+    );
+  }
+
+  // Both ends of the workspace are reachable: the first chip lands in the first
+  // zone and the last one in the Library, which is the furthest scroll.
+  assert.strictEqual(targets[0], 'dissect-heading');
+  assert.strictEqual(targets[targets.length - 1], 'history-heading');
+});
+
+s.test('a narrow editor unsticks the strip AND stops reserving room for it', () => {
+  const css = readStyle();
+  const narrow = cssBlock(css, '@container editor-view (max-width: 520px)');
+  assert.ok(narrow, 'no @container editor-view (max-width: 520px) block');
+  assert.ok(
+    /\.jump-nav\s*\{[^}]*position:\s*static/.test(narrow.body),
+    'a two-line chip strip permanently parked at the top of a 285px column is most of the screen'
+  );
+  assert.ok(
+    /\.jump-nav\s*\{[^}]*min-height:\s*0/.test(narrow.body),
+    'a static strip must not keep reserving --jumpnav-h of height'
+  );
+  // The half that is easy to forget: with nothing sticky above them, headings
+  // that still reserved 56px would open every jump with a band of dead space.
+  assert.ok(
+    /\.zone-heading,\s*\.panel-heading\s*\{[^}]*scroll-margin-top:\s*12px/.test(narrow.body),
+    'the jump targets must release the scroll-margin they reserved for the strip'
+  );
+  // It has to come after the base rule to win — same specificity, later wins.
+  const base = css.indexOf('scroll-margin-top: calc(var(--jumpnav-h)');
+  assert.ok(base !== -1 && narrow.start > base, 'the 520px override must follow the base scroll-margin rule');
+});
+
 /* ------------------------------------------------------------------------ *
  * TODO: coverage that activates with later features.
  * ------------------------------------------------------------------------ */
@@ -1021,6 +1658,21 @@ s.todo(
   'the container-query breakpoint is verified against a real laid-out view',
   'needs the browser E2E harness; today the 880px rule is asserted statically'
 );
+s.todo(
+  'the compile rail is proven to STICK, not merely to declare position: sticky',
+  'needs a headless browser: scroll the workspace and assert the rail’s ' +
+    'getBoundingClientRect().top stays pinned at --jumpnav-h + 12px while the shape ' +
+    'column scrolls past it. Measured in Chrome for 0.15.0 at a 1110px container — rail ' +
+    'top held at exactly 56px across scrollY 1400→2000 while .editor-shape ran -213→-813, ' +
+    'and released at the bottom of .editor-split as sticky should. Asserted structurally here.'
+);
+s.todo(
+  'the jump chips are proven to LAND below the strip, not merely to reserve scroll-margin',
+  'same harness: click each chip and assert the target heading’s rect.top lands at the ' +
+    'strip’s bottom edge. Measured in Chrome for 0.15.0 — four of the five landed at ' +
+    'top 56px against a 45px strip (11px clear); the Compile chip lands INSIDE the rail’s ' +
+    'own scrollport, which reveals the heading without pinning it to the rail’s top.'
+);
 
 module.exports = {
   loadAppSandbox,
@@ -1030,6 +1682,10 @@ module.exports = {
   cssBlock,
   hexLiterals,
   stripCssComments,
+  readEditorMarkup,
+  zoneHeadingParents,
+  sliceByClass,
+  cardOrder,
 };
 
 if (require.main === module) {

@@ -2,12 +2,10 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Build out the 'Prompt Editor' view (owner request): grow it from stacked cards into a coherent editor workspace — layout hierarchy, workflow ordering, and whatever editing affordances make prompt assembly genuinely fluid. *(Synthesized 7-change plan banked from workflow wf_d84cb3a5-672.)*
+- [ ] Theme suite via Stitch Pro (owner request): use the Stitch MCP **Pro model** for design references; ship as selectable themes — dark (Obsidian), light (Daylight), a colorblind-safe theme, a high-contrast theme (fold/reconcile with existing Code Mode), plus 3 original themes of our own design. All through the existing token layer with WCAG verification. *(Judged spec banked: theme-spec.json — Studio ColorSafe, Studio Code, Tape Deck, Null Signal, Abyssal Bloom; Stitch Pro usage verified GEMINI_3_1_PRO/PRO_AGENT.)*
 
 ## NEXT
 *Owner requests (2026-08-25), in order:*
-- [ ] Theme suite via Stitch Pro (owner request): use the Stitch MCP **Pro model** for design references; ship as selectable themes — dark (Obsidian), light (Daylight), a colorblind-safe theme, a high-contrast theme (fold/reconcile with existing Code Mode), plus 3 original themes of our own design. All through the existing token layer with WCAG verification.
-
 - [ ] Local AI as default (owner request 2026-08-25): make Mode 1 (local, in-browser) the default dissector mode and upgrade it to the most powerful of the FDD-named local models — Qwen2.5-0.5B via WebGPU with WASM fallback (lazy opt-in weight download with progress bar per FDD §3; the embedded taxonomy engine stays as the instant/offline fallback). *Note: this owner request relaxes the earlier "no runtime downloads" reading for Mode 1 — record the decision in ASSUMPTIONS.md when implementing.*
 - [ ] API key persistence + provider focus (owner request 2026-08-25): keep offering cloud APIs; add opt-in "remember key on this device" so users never re-enter keys — encrypted at rest via WebCrypto (AES-GCM), with honest UI copy about what browser storage can and cannot protect. Providers: OpenAI-compatible endpoints (generic base-URL + model) and OpenRouter as the first-class presets; per-provider key slots.
 
@@ -25,6 +23,7 @@
 - [ ] Consider: Code Mode violet accent at 3.52:1 on black (noted in Task 7).
 
 ## DONE
+- [x] Build out the 'Prompt Editor' view (owner request): zoned workspace — shape column + sticky compile rail, jump nav, heading hierarchy, primary-weight style card, focus management.
 - [x] Refine the waveform visualization (owner request): honesty-gated twist, perceptual amplitude curve, settle-on-stop, 60fps row interpolation, analytic lighting + fog, DPR-correct sizing, vignette/footlight.
 - [x] #65 Expanded Vocal Registries (104 timbres) + #28 Vocal Persona Selector.
 - [x] Run the comprehensive nightly E2E verification and tag `v1.0.0-release`. *(Audited honestly: 31 implemented + 6 partial of 94 FDD features — the original "50 features" phrasing was aspirational; see RELEASE.md.)*

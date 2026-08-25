@@ -105,3 +105,11 @@
 - **Tests:** visualizer suite +14 (633 passed / 0 failed / 12 todo total); run-all + nightly + verify-single-file GREEN after fixes (independently re-run).
 - **Also banked:** Prompt Editor build-out plan (7 ordered changes, source-verified by the judge) from the parallel design workflow.
 - **Next:** Prompt Editor build-out (moved to `## NOW`).
+
+### [2026-08-25] Task 16 — Prompt Editor build-out (owner request)
+- **Two-stage delivery:** the first implementation run was killed by a session limit mid-flight; its partial work survived green and a completion workflow audited every plan item against the diff rather than redoing it. Items 1–3, 5–7 were already done; item 4 (zone headings) was half-done with two real defects the completer fixed: a dead `.zone-heading + *` margin rule losing on specificity (all four zones rendered 36px gaps claiming 12px) and an inverted heading scale (zones rendered smaller than the cards they gather). Plus comment-honesty fixes.
+- **Shipped (per the judged 7-change plan):** shape column + sticky compile rail at ≥1080px container (rail measured pinned at exactly 56px through 1100px of scroll travel), previously-dead exclude/style container rules wired, dissector carding with `:has()`-gated results, four workflow zones (Describe/Shape/Compile/Library) with h2>h3>h4 outline, sticky jump nav with scroll-margin landings, primary visual weight on the Style prompt card (Code Mode companion carries the signal with glow/blur off), focus moves to dissect results. Full width matrix 375→1280 verified, every re-parented card exercised live, mutation-tested (5/5 caught). APP_VERSION 0.15.0.
+- **Adversarial review:** one minor finding — the version bump was technically a plan-rejected item; kept deliberately (matches the repo's one-release-per-task convention) with a documented revert path.
+- **Tests:** ui-layout 50 tests (+6, incl. a specificity-trap guard and size-based outline assertions). Total 648 passed / 0 failed / 14 todo; run-all + nightly GREEN (independently re-run).
+- **Also banked in parallel:** theme-suite spec (5 new themes, Stitch Pro verified) and the AI-provider design workflow launched (local-LLM default + key persistence + OpenRouter/OpenAI-compatible).
+- **Next:** theme suite implementation (moved to `## NOW`).
