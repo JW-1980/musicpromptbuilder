@@ -534,6 +534,7 @@ s.test('draftText groups by section order, then appends the sliders energy→war
   state.add({ section: 'custom', tag: 'hand written', source: 'manual' });
   state.add({ section: 'scene', tag: 'neon rain', source: 'scene' });
   state.add({ section: 'instrument', tag: 'TR-909 kick', source: 'dissector' });
+  state.add({ section: 'vocal', tag: 'raspy baritone vocals', source: 'vocal-persona' });
   state.add({ section: 'mood', tag: 'hypnotic', source: 'dissector' });
   state.add({ section: 'genre', tag: 'techno', source: 'dissector' });
   state.add({ section: 'genre', tag: 'french electro', source: 'dissector' });
@@ -544,10 +545,27 @@ s.test('draftText groups by section order, then appends the sliders energy→war
 
   assert.strictEqual(
     state.draftText(),
-    'techno, french electro, hypnotic, TR-909 kick, neon rain, 1980s production, hand written, ' +
-      'high energy, tape hiss, dense arrangement'
+    'techno, french electro, hypnotic, raspy baritone vocals, TR-909 kick, neon rain, ' +
+      '1980s production, hand written, high energy, tape hiss, dense arrangement'
   );
-  deepEqual(PROMPT_SECTION_ORDER, ['genre', 'mood', 'instrument', 'scene', 'era', 'custom']);
+  /* CONSCIOUSLY UPDATED IN 0.13.0 (FDD #65 + #28).
+   * 'vocal' was inserted between 'mood' and 'instrument'. A named voice is not
+   * an instrument: it decides WHO is singing, and Suno v5.5 weights what it
+   * reads first, so the one tag saying a human sings at all must not sit
+   * behind a long instrument list. Nothing else moved — genre still leads and
+   * the sliders still trail — and the assertion above pins the whole string,
+   * not just the constant, so the constant and the emitted order cannot drift
+   * apart. tests/vocal-registry.test.js asserts the same order from the
+   * compiler's side (weightTokens). */
+  deepEqual(PROMPT_SECTION_ORDER, [
+    'genre',
+    'mood',
+    'vocal',
+    'instrument',
+    'scene',
+    'era',
+    'custom',
+  ]);
   deepEqual(PROMPT_SLIDER_SOURCES, ['slider-energy', 'slider-warmth', 'slider-density']);
 });
 

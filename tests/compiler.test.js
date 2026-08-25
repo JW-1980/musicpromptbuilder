@@ -261,7 +261,7 @@ s.test('a weightless genre counts as zero, so a scored dissection outranks a han
   deepEqual(weightTokens(state.list()), ['scored', 'typed by hand']);
 });
 
-s.test('after genre come mood, instrument, scene, era, custom — in section order, insertion order within', () => {
+s.test('after genre come mood, vocal, instrument, scene, era, custom — in section order, insertion order within', () => {
   const state = createPromptState();
   // Added in deliberately the WRONG order.
   state.add({ section: 'custom', tag: 'hand written', source: 'manual' });
@@ -269,12 +269,20 @@ s.test('after genre come mood, instrument, scene, era, custom — in section ord
   state.add({ section: 'scene', tag: 'neon rain', source: 'scene' });
   state.add({ section: 'instrument', tag: 'TR-909 kick', source: 'dissector' });
   state.add({ section: 'instrument', tag: 'supersaw stack', source: 'dissector' });
+  state.add({ section: 'vocal', tag: 'breathy soft vocals', weight: 0.9, source: 'vocal-persona' });
   state.add({ section: 'mood', tag: 'hypnotic', source: 'dissector' });
   state.add({ section: 'genre', tag: 'techno', weight: 1, source: 'dissector' });
 
+  /* CONSCIOUSLY UPDATED IN 0.13.0 (FDD #65 + #28): the 'vocal' section joined
+   * PROMPT_SECTION_ORDER between 'mood' and 'instrument', so weightTokens()
+   * emits a named voice ahead of the instrument list — see the long note on
+   * PROMPT_SECTION_ORDER in index.html. Note what did NOT change: the weight
+   * on the vocal tag does not move it, because only the genre bucket is ever
+   * re-sorted by weight. */
   deepEqual(weightTokens(state.list()), [
     'techno',
     'hypnotic',
+    'breathy soft vocals',
     'TR-909 kick',
     'supersaw stack',
     'neon rain',

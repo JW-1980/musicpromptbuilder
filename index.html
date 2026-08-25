@@ -30,8 +30,10 @@
        allowed to hold a remote URL (tests/verify-single-file.js enforces it)
     4. the Layman Vibe Translators (FDD Domain C) — createPromptState, the
        shared working set every translator writes into, plus the pure
-       sliderTags / sliderValueText (FEATURE-MECHANICS §4), matchScenes and
-       the Safe-Mode sanitizer (sanitizeSafeMode and its vocabulary helpers)
+       sliderTags / sliderValueText (FEATURE-MECHANICS §4), matchScenes, the
+       Safe-Mode sanitizer (sanitizeSafeMode and its vocabulary helpers) and
+       the single var VOCAL_REGISTRY (FDD #65) with the pure selector helpers
+       the Vocal Persona card (FDD #28) is built on
     5. the Song Structure Builder (FDD Domain D) — the SUNO_METATAGS taxonomy
        and its sanitiser/compiler (validateMetatag, sanitizeStructureTag,
        formatStructureTag), createStructureState with the §2.3 auto-chorus
@@ -1073,6 +1075,7 @@
      control in this view reflows against its own column width. */
   .scene-panel,
   .slider-panel,
+  .vocal-panel,
   .structure-panel,
   .draft-panel { container-name: dissector; }
 
@@ -1319,6 +1322,50 @@
   }
 
   .exclude-chips:empty { display: none; }
+
+  /* --- Vocal Persona Selector (FDD #28) over the #65 registry ------------- */
+
+  /* The card deliberately borrows the persistence scroller's classes (.vlist,
+     .vrow, .vrow-main, .vrow-name, .vrow-meta, .vrow-actions) rather than
+     growing a parallel set: 104 personas is exactly the case DOM
+     virtualization exists for (ENGINEERING-STANDARD.md §2.2), and reusing the
+     scroller means the row height, the focus ring and the Code Mode
+     flattening are already right. Only the things this card adds are below. */
+  .vocal-panel { margin-top: 24px; }
+
+  .vocal-row {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .vocal-count {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .vocal-chips {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .vocal-chips:empty { display: none; }
+
+  /* Added / not added is a pressed toggle, so aria-pressed carries the state
+     and the styling reads it — the same contract the exclusion chips and the
+     history star already use. Cyan rather than crimson because a persona ADDS
+     tags; the shield's chips are the ones that take them away. */
+  .btn-persona[aria-pressed="true"] {
+    color: var(--accent-cyan);
+    background: var(--tint-cyan);
+    border-color: var(--tint-cyan-border);
+  }
 
   /* --- Strict 1,000-character gauge + compiled style prompt (FDD #67) ----- */
 
@@ -1928,6 +1975,8 @@
     .scene-row .field { width: 100%; }
     .exclude-row { flex-direction: column; align-items: stretch; }
     .exclude-row .field { width: 100%; }
+    .vocal-row { flex-direction: column; align-items: stretch; }
+    .vocal-row .field { width: 100%; }
     .draft-foot { align-items: stretch; flex-direction: column; }
     /* A narrow structure card stacks the block toolbar rather than letting the
        tag line, the handle and four buttons fight over one line. */
@@ -2067,6 +2116,7 @@
   .high-contrast .slider-chip,
   .high-contrast .style-meter,
   .high-contrast .exclude-chip[aria-pressed="true"],
+  .high-contrast .btn-persona[aria-pressed="true"],
   .high-contrast .view-tab[aria-selected="true"] {
     background: var(--bg);
   }
@@ -2125,6 +2175,12 @@
      mode that flattens every chip background keeps the toggle readable. */
   .high-contrast .btn-star[aria-pressed="true"] {
     border: 1px solid var(--warning-amber);
+  }
+
+  /* Same story for an added vocal persona: the cyan wash is gone, so the cyan
+     border becomes the whole "this one is in the draft" signal. */
+  .high-contrast .btn-persona[aria-pressed="true"] {
+    border: 1px solid var(--accent-cyan);
   }
 
   /* A warning panel must survive the mode that removes washes: the accent
@@ -2570,6 +2626,42 @@
       </div>
     </section>
     </div>
+
+    <!-- Vocal Persona Selector (docs/FDD.md #28) over the Expanded Vocal
+         Registry (#65). It sits with the other translators because it answers
+         the same question they do — "what goes in the prompt?" — from the
+         voice's angle, and it writes into the same prompt state. The list is
+         VIRTUALIZED (ENGINEERING-STANDARD.md §2.2): 104 personas is exactly
+         the case that rule exists for, so it reuses the same .vlist scroller
+         the history and preset cards use rather than mounting 104 rows. -->
+    <section class="view-col vibe-card vocal-panel" aria-labelledby="vocal-heading">
+      <h3 id="vocal-heading" class="panel-heading">Vocal persona</h3>
+      <p class="panel-note">
+        Pick the voice, not the singer. Every persona is a generic, copyright-safe
+        timbre description — search by family (choral, rap, metal), by timbre
+        (raspy, breathy, vocoder) or by name. Adding one puts <em>all</em> of its
+        tags in the Vocals group, weighted so the timbre that names it leads;
+        clicking it again takes them straight back out.
+      </p>
+
+      <div class="vocal-row">
+        <span class="field field-grow">
+          <label class="field-label" for="vocal-search">Search personas</label>
+          <input type="search" id="vocal-search" class="field-input" autocomplete="off"
+                 spellcheck="false" placeholder="e.g. raspy, gospel, vocoder, tenor">
+        </span>
+        <span id="vocal-count" class="vocal-count"></span>
+      </div>
+
+      <p id="vocal-selected-empty" class="draft-empty">
+        No persona picked yet — the prompt carries no vocal timbre.
+      </p>
+      <div id="vocal-chips" class="vocal-chips"></div>
+
+      <p id="vocal-empty" class="draft-empty" hidden></p>
+      <div id="vocal-list" class="vlist" tabindex="0" aria-label="Vocal personas"></div>
+      <p id="vocal-status" class="dissect-status" role="status" aria-live="polite"></p>
+    </section>
 
     <!-- Song structure (docs/FDD.md Domain D #39/#40/#42/#50, over
          FEATURE-MECHANICS.md §2.3 and §3.1-§3.2). It sits ABOVE the prompt
@@ -3887,7 +3979,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.13.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -7104,11 +7196,36 @@ function createToastHost(doc, options) {
 /* -------------------------------------------------------------------------- */
 
 /*
+ * The Vocal Persona section (FDD #28 over the #65 registry, section E below).
+ * Its two names live HERE, next to the canonical section order and source list
+ * that both need them, rather than beside the registry data itself — a section
+ * id that the order list spelled out as a bare literal would be one rename away
+ * from silently splitting into two sections.
+ */
+var VOCAL_SECTION = 'vocal';
+var VOCAL_PERSONA_SOURCE = 'vocal-persona';
+
+/*
  * Emission order. Suno reads a style prompt front-to-back and weights what it
  * sees first, so the genre leads, the feel follows, and the physical-slider
  * tags (which colour everything before them) are appended last.
+ *
+ * WHY 'vocal' SITS BETWEEN mood AND instrument (changed in 0.13.0).
+ * A named voice is not an instrument in Suno's reading of a style prompt: it
+ * decides who is singing, which colours every instrument choice after it the
+ * way the mood colours the arrangement. Putting it behind the instrument list
+ * would have let a long "TR-909 kick, supersaw stack, …" run push the one tag
+ * that says a human is singing at all towards the back of the string, where
+ * v5.5 weights it least. So the order is genre -> mood -> vocal -> instrument
+ * -> scene -> era -> custom, and then the sliders.
+ *
+ * This IS a behaviour change for existing prompts: a workspace saved before
+ * 0.13.0 compiles its tags in the same groups but emits any vocal tag earlier.
+ * Nothing is dropped, added or reworded by the move — tests/vocal-registry.js
+ * and the ordering assertions in tests/vibe-translators.test.js and
+ * tests/compiler.test.js pin the new order from both ends.
  */
-var PROMPT_SECTION_ORDER = ['genre', 'mood', 'instrument', 'scene', 'era', 'custom'];
+var PROMPT_SECTION_ORDER = ['genre', 'mood', VOCAL_SECTION, 'instrument', 'scene', 'era', 'custom'];
 
 /* The sliders share one section but NOT one source: 'slider' is the bucket the
  * draft appends last, and the per-axis source is what makes a slider move a
@@ -7118,13 +7235,16 @@ var PROMPT_SLIDER_SOURCES = ['slider-energy', 'slider-warmth', 'slider-density']
 
 var PROMPT_SECTIONS = PROMPT_SECTION_ORDER.concat([PROMPT_SLIDER_SECTION]);
 
-var PROMPT_SOURCES = ['dissector', 'scene', 'manual'].concat(PROMPT_SLIDER_SOURCES);
+var PROMPT_SOURCES = ['dissector', 'scene', 'manual', VOCAL_PERSONA_SOURCE].concat(
+  PROMPT_SLIDER_SOURCES
+);
 
 /** Section a source writes to when an entry does not name one itself. */
 var PROMPT_SOURCE_SECTION = {
   dissector: 'custom',
   scene: 'scene',
   manual: 'custom',
+  'vocal-persona': VOCAL_SECTION,
   'slider-energy': PROMPT_SLIDER_SECTION,
   'slider-warmth': PROMPT_SLIDER_SECTION,
   'slider-density': PROMPT_SLIDER_SECTION,
@@ -7985,6 +8105,1311 @@ function sanitizeSafeMode(inputText, result, kb) {
     !out.era.length
   ) {
     out.confidence = 0;
+  }
+  return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* E. VOCAL PERSONA REGISTRY (FDD #65) AND ITS SELECTOR (FDD #28)             */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * EXPANDED VOCAL REGISTRIES — docs/FDD.md #65: "80+ timbres spanning choral,
+ * pop, rap, and extreme metal". This table is that feature; the Vocal Persona
+ * Selector (#28, the card wired in the boot IIFE) is the UI over it, and the
+ * two shipped together so the registry is user-exercisable rather than dead
+ * data (PLANNING.md NOW).
+ *
+ * WHAT AN ENTRY IS
+ *   id           kebab-case, ALWAYS prefixed with its own family id, so an id
+ *                is self-describing and two families can hold a "smoky
+ *                crooner" apiece without colliding;
+ *   family /
+ *   familyLabel  the eight registry families and the words a person reads;
+ *   label        the persona's name, unique across the registry;
+ *   tags         2-4 lowercase, comma-free Suno descriptors, MOST SPECIFIC
+ *                FIRST. Order is load-bearing: vocalPersonaSeeds() weights by
+ *                position (VOCAL_TAG_WEIGHTS), so tags[0] — the phrase that
+ *                names the voice — is the one the #73 weighting engine and the
+ *                #67 limiter treat as the persona's identity;
+ *   description  one plain sentence for a human, never emitted into a prompt.
+ *
+ * COPYRIGHT SAFETY (FDD #24's rule, applied to a static table)
+ * Not one entry names a real artist, band or track. Every label describes a
+ * TECHNIQUE or a TRADITION ("Gospel Powerhouse", "Tuvan Throat Singer"), which
+ * is the same standard sanitizeSafeMode() enforces on dissector output — and
+ * tests/vocal-registry.test.js re-checks it against a blocklist rather than
+ * taking this comment's word for it.
+ *
+ * NO COMMAS, EVER. A tag carrying a comma would split into two tags the moment
+ * the draft is joined for the style prompt; the suite pins that too.
+ */
+var VOCAL_REGISTRY = [
+  /* --- Choral & Classical --- */
+  {
+    id: 'choral-classical-dramatic-soprano',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Dramatic Operatic Soprano',
+    tags: [
+      'powerful operatic soprano vocals',
+      'full vibrato',
+      'soaring high notes',
+      'theatrical projection',
+    ],
+    description:
+      'A big, richly vibrating soprano voice that fills a hall with soaring dramatic power.',
+  },
+  {
+    id: 'choral-classical-lyric-coloratura',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Lyric Coloratura Soprano',
+    tags: ['coloratura soprano vocals', 'agile trills', 'bright silvery tone', 'rapid runs'],
+    description:
+      'A light, bright soprano that flits through rapid trills and ornamented runs with ease.',
+  },
+  {
+    id: 'choral-classical-mezzo-soprano',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Velvet Mezzo-Soprano',
+    tags: ['velvety mezzo-soprano vocals', 'warm chest resonance', 'smoky lower register'],
+    description:
+      'A warm, velvety mid-range female voice with a smoky lower register and rounded tone.',
+  },
+  {
+    id: 'choral-classical-heroic-tenor',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Heroic Spinto Tenor',
+    tags: ['heroic tenor vocals', 'ringing high notes', 'brassy squillo', 'powerful sustain'],
+    description:
+      'A robust, ringing tenor voice that cuts through an orchestra with brassy heroic power.',
+  },
+  {
+    id: 'choral-classical-bel-canto-tenor',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Bel Canto Tenor',
+    tags: ['bel canto tenor vocals', 'smooth legato phrasing', 'sweet lyrical tone'],
+    description:
+      'A smooth, sweet-toned tenor gliding through long legato lines with effortless grace.',
+  },
+  {
+    id: 'choral-classical-bass-baritone',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Resonant Bass-Baritone',
+    tags: ['resonant bass-baritone vocals', 'deep chest tone', 'commanding low register'],
+    description:
+      'A deep, commanding male voice with a resonant chest tone and authoritative low register.',
+  },
+  {
+    id: 'choral-classical-basso-profondo',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Basso Profondo',
+    tags: ['basso profondo vocals', 'cavernous low notes', 'rumbling foundation tone'],
+    description:
+      'An extremely deep bass voice that rumbles like a cavernous foundation beneath the music.',
+  },
+  {
+    id: 'choral-classical-countertenor',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Angelic Countertenor',
+    tags: ['countertenor falsetto vocals', 'ethereal high register', 'androgynous pure tone'],
+    description:
+      'A pure, ethereal male falsetto voice hovering in an androgynous, angelic high register.',
+  },
+  {
+    id: 'choral-classical-boy-treble',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Cathedral Boy Treble',
+    tags: ['boy treble vocals', 'pure unbroken tone', 'innocent bright timbre'],
+    description:
+      'A pure, unbroken boy\'s treble voice with an innocent, bright, bell-like clarity.',
+  },
+  {
+    id: 'choral-classical-cathedral-choir',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Cathedral SATB Choir',
+    tags: [
+      'cathedral choir ensemble vocals',
+      'layered satb harmony',
+      'reverberant stone acoustics',
+    ],
+    description:
+      'A full four-part cathedral choir blending in rich harmony inside a reverberant stone space.',
+  },
+  {
+    id: 'choral-classical-gregorian-chant',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Gregorian Plainchant Monks',
+    tags: ['gregorian chant vocals', 'unison monastic voices', 'modal unaccompanied melody'],
+    description: 'A unison choir of monastic male voices chanting an unaccompanied modal melody.',
+  },
+  {
+    id: 'choral-classical-oratorio-chorus',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Grand Oratorio Chorus',
+    tags: ['oratorio chorus vocals', 'massed choral power', 'triumphant fortissimo swell'],
+    description:
+      'A massive oratorio-style chorus swelling to a triumphant, fortissimo wall of sound.',
+  },
+  {
+    id: 'choral-classical-madrigal-ensemble',
+    family: 'choral-classical',
+    familyLabel: 'Choral & Classical',
+    label: 'Renaissance Madrigal Ensemble',
+    tags: [
+      'madrigal ensemble vocals',
+      'interweaving polyphonic lines',
+      'early music courtly tone',
+    ],
+    description:
+      'A small early-music ensemble weaving interlocking polyphonic lines in courtly close harmony.',
+  },
+
+  /* --- Jazz, Soul & Blues --- */
+  {
+    id: 'jazz-soul-blues-smoky-crooner',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Smoky Jazz Crooner',
+    tags: ['smoky baritone vocals', 'smooth jazz phrasing', 'late-night lounge tone'],
+    description:
+      'A warm, smoke-hazed baritone that glides behind the beat with unhurried, intimate phrasing.',
+  },
+  {
+    id: 'jazz-soul-blues-scat-improviser',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Scat Improviser',
+    tags: ['scat vocal improvisation', 'agile syllabic runs', 'playful rhythmic vocals'],
+    description:
+      'Rapid-fire nonsense syllables bounce and swing like a horn solo traded across the beat.',
+  },
+  {
+    id: 'jazz-soul-blues-gospel-powerhouse',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Gospel Powerhouse',
+    tags: ['gospel belt vocals', 'soaring church runs', 'powerful vibrato'],
+    description:
+      'A thunderous, choir-trained belt that surges from a whisper to a rafter-shaking wail.',
+  },
+  {
+    id: 'jazz-soul-blues-motown-soul',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Motown-Style Soul Lead',
+    tags: ['punchy soul vocals', 'tight vibrato', 'crisp rhythmic delivery'],
+    description:
+      'Bright, driving soul vocals with clipped consonants and a snapping, danceable pulse.',
+  },
+  {
+    id: 'jazz-soul-blues-torch-singer',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Torch Singer',
+    tags: ['aching torch vocals', 'sultry vibrato', 'slow ballad phrasing'],
+    description:
+      'A trembling, heartbroken voice that lingers over every note like a dying ember.',
+  },
+  {
+    id: 'jazz-soul-blues-blues-shouter',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Blues Shouter',
+    tags: ['raw blues shout', 'gravel-edged belt', 'raucous chest voice'],
+    description:
+      'A raw-throated holler that tears through the beat with unfiltered grit and force.',
+  },
+  {
+    id: 'jazz-soul-blues-velvet-lounge-baritone',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Velvet Lounge Baritone',
+    tags: ['velvet baritone vocals', 'silky low register', 'relaxed lounge croon'],
+    description:
+      'A deep, plush baritone that pours out like syrup over a slow, easy lounge groove.',
+  },
+  {
+    id: 'jazz-soul-blues-neo-soul-melisma',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Neo-Soul Melisma Singer',
+    tags: ['airy melismatic runs', 'breathy neo-soul tone', 'loose rhythmic phrasing'],
+    description:
+      'Breathy, floating vocals that curl through winding runs with a laid-back neo-soul feel.',
+  },
+  {
+    id: 'jazz-soul-blues-sultry-jazz-alto',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Sultry Jazz Alto',
+    tags: ['sultry alto vocals', 'smoky lower register', 'behind-the-beat phrasing'],
+    description:
+      'A low, honeyed alto that purrs through jazz standards with unhurried, seductive ease.',
+  },
+  {
+    id: 'jazz-soul-blues-delta-blues-growler',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Delta Blues Growler',
+    tags: ['gritty growl vocals', 'rustic rasp', 'field-holler intensity'],
+    description: 'A dusty, guttural growl steeped in porch-worn grit and raw rural ache.',
+  },
+  {
+    id: 'jazz-soul-blues-big-band-swing-tenor',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Big Band Swing Tenor',
+    tags: ['bright swing tenor vocals', 'brassy projection', 'buoyant rhythmic bounce'],
+    description:
+      'A brassy, high-energy tenor that rides the horns with crisp diction and swinging bounce.',
+  },
+  {
+    id: 'jazz-soul-blues-soul-falsetto',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Soul Falsetto Angel',
+    tags: ['sweet falsetto vocals', 'featherlight upper register', 'soulful head voice'],
+    description: 'A weightless, sweet falsetto that floats over the groove like silk in the air.',
+  },
+  {
+    id: 'jazz-soul-blues-whiskey-rasp-blues',
+    family: 'jazz-soul-blues',
+    familyLabel: 'Jazz, Soul & Blues',
+    label: 'Whiskey-Soaked Blues Rasp',
+    tags: ['whiskey-rasp vocals', 'weathered gravel texture', 'world-weary blues tone'],
+    description:
+      'A weathered, whiskey-cured rasp that drags across each line with lived-in sorrow.',
+  },
+
+  /* --- Pop & Indie --- */
+  {
+    id: 'pop-indie-breathy-bedroom',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Breathy Bedroom Pop Vocal',
+    tags: [
+      'breathy soft vocals',
+      'close-mic intimacy',
+      'hushed bedroom pop tone',
+      'airy upper register',
+    ],
+    description:
+      'A hushed, close-mic voice that sounds like it\'s whispering directly into your ear.',
+  },
+  {
+    id: 'pop-indie-falsetto-dreamer',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Indie Falsetto Dreamer',
+    tags: [
+      'floating falsetto vocals',
+      'feathery head voice',
+      'delicate indie tone',
+      'gentle vibrato',
+    ],
+    description:
+      'A light, floating falsetto that drifts weightlessly over shimmering indie chords.',
+  },
+  {
+    id: 'pop-indie-stadium-belter',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Stadium Pop Belter',
+    tags: [
+      'powerhouse belting vocals',
+      'soaring chest voice',
+      'anthemic pop delivery',
+      'big dynamic range',
+    ],
+    description:
+      'A huge, chest-driven belt built to fill arenas and lead massive singalong choruses.',
+  },
+  {
+    id: 'pop-indie-whisper-pop',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Whisper Pop Confessional',
+    tags: [
+      'whispered vocals',
+      'barely-there breath tone',
+      'intimate spoken-sung delivery',
+      'soft sibilance',
+    ],
+    description:
+      'A near-silent whisper-sung voice that feels like a secret shared under the covers.',
+  },
+  {
+    id: 'pop-indie-dream-haze',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Dream Pop Haze Vocal',
+    tags: [
+      'hazy reverb-soaked vocals',
+      'blurred dreamlike tone',
+      'washed-out shoegaze pop voice',
+      'ethereal drift',
+    ],
+    description:
+      'A blurred, reverb-drenched voice that melts into the mix like a half-remembered dream.',
+  },
+  {
+    id: 'pop-indie-teen-bright-lead',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Teen-Pop Bright Lead',
+    tags: [
+      'bright youthful vocals',
+      'crisp pop enunciation',
+      'sparkling upper register',
+      'sunny energetic tone',
+    ],
+    description:
+      'A crisp, sunny lead voice with youthful energy and perfectly polished pop diction.',
+  },
+  {
+    id: 'pop-indie-singer-songwriter-intimate',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Singer-Songwriter Confidant',
+    tags: [
+      'intimate conversational vocals',
+      'warm acoustic tone',
+      'plainspoken singer-songwriter delivery',
+      'gentle rasp',
+    ],
+    description:
+      'A warm, plainspoken voice that sounds like a friend confiding a story over acoustic guitar.',
+  },
+  {
+    id: 'pop-indie-art-pop-theatrical',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Art-Pop Theatrical Voice',
+    tags: [
+      'theatrical art-pop vocals',
+      'dramatic phrasing',
+      'eccentric tonal shifts',
+      'operatic pop flourishes',
+    ],
+    description:
+      'A dramatic, genre-bending voice that swings between spoken theater and operatic pop flair.',
+  },
+  {
+    id: 'pop-indie-synth-android',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Synth-Pop Android Voice',
+    tags: [
+      'processed synth-pop vocals',
+      'robotic vocoder edge',
+      'glassy digital tone',
+      'detached cool delivery',
+    ],
+    description:
+      'A glassy, vocoder-tinged voice with a cool, robotic detachment over synth-pop textures.',
+  },
+  {
+    id: 'pop-indie-folk-pop-girl-next-door',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Folk-Pop Girl-Next-Door',
+    tags: [
+      'warm folk-pop vocals',
+      'girl-next-door charm',
+      'natural unpolished tone',
+      'light nasal twang',
+    ],
+    description:
+      'An unpolished, natural voice with warm folk charm and a friendly girl-next-door lilt.',
+  },
+  {
+    id: 'pop-indie-power-pop-energetic',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Power-Pop Energetic Shout',
+    tags: [
+      'punchy power-pop vocals',
+      'energetic shouted hooks',
+      'driving upbeat tone',
+      'gang-vocal brightness',
+    ],
+    description:
+      'A punchy, high-energy voice that shouts hooks with driving power-pop enthusiasm.',
+  },
+  {
+    id: 'pop-indie-sultry-alto',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Sultry Pop Alto',
+    tags: [
+      'sultry low alto vocals',
+      'smoky chest tone',
+      'velvety slow-burn delivery',
+      'sensual pop timbre',
+    ],
+    description: 'A smoky, velvet-toned alto that simmers with slow-burn sensual pop delivery.',
+  },
+  {
+    id: 'pop-indie-androgynous-indie',
+    family: 'pop-indie',
+    familyLabel: 'Pop & Indie',
+    label: 'Androgynous Indie Voice',
+    tags: [
+      'androgynous indie vocals',
+      'gender-fluid tonal blend',
+      'cool detached indie delivery',
+      'subtle nasal edge',
+    ],
+    description:
+      'A cool, gender-ambiguous indie voice that blends soft and sharp tones with detached charm.',
+  },
+
+  /* --- Rock, Metal & Extreme --- */
+  {
+    id: 'rock-metal-raspy-baritone',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Raspy Rock Baritone',
+    tags: ['raspy baritone vocals', 'gravelly chest voice', 'rock grit'],
+    description: 'A gravel-edged low male voice with rough rasp on sustained notes.',
+  },
+  {
+    id: 'rock-metal-arena-wail',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Arena Rock Wail',
+    tags: ['soaring arena wail', 'powerful tenor belt', 'stadium rock vocals'],
+    description: 'A big, soaring tenor belt built to fill a stadium with a bright wail.',
+  },
+  {
+    id: 'rock-metal-grunge-growl',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Grunge Growl',
+    tags: ['grunge growl', 'distorted throaty vocals', 'angsty rasp'],
+    description: 'A throaty, distorted growl thick with angst and unpolished rasp.',
+  },
+  {
+    id: 'rock-metal-punk-snarl',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Punk Snarl',
+    tags: ['punk snarl', 'sneering shout vocals', 'raw nasal edge'],
+    description: 'A fast, sneering shout with a raw nasal edge and biting attitude.',
+  },
+  {
+    id: 'rock-metal-power-metal-tenor',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Power-Metal High Tenor',
+    tags: ['soaring high tenor', 'operatic metal belt', 'bright piercing vocals'],
+    description:
+      'A bright, operatic high tenor that soars over galloping riffs with heroic clarity.',
+  },
+  {
+    id: 'rock-metal-death-growl',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Death Growl',
+    tags: ['guttural death growl', 'subterranean roar', 'low gutter vocals'],
+    description: 'A subterranean, guttural roar scraped from the bottom of the throat.',
+  },
+  {
+    id: 'rock-metal-black-metal-shriek',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Black-Metal Shriek',
+    tags: ['rasping black-metal shriek', 'high frostbitten scream', 'tortured falsetto rasp'],
+    description: 'A cold, rasping high shriek that pierces through tremolo-picked static.',
+  },
+  {
+    id: 'rock-metal-doom-clean-chant',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Doom Clean Chant',
+    tags: ['solemn clean chant', 'slow ritual baritone', 'mournful drone vocals'],
+    description: 'A slow, mournful chant delivered in a solemn, ritualistic baritone drone.',
+  },
+  {
+    id: 'rock-metal-screamo',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Screamo Wail',
+    tags: ['raw screamo wail', 'cracked emotional scream', 'hoarse cathartic shout'],
+    description: 'A cracked, hoarse scream that breaks apart with raw emotional catharsis.',
+  },
+  {
+    id: 'rock-metal-metalcore-unclean',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Metalcore Unclean Bark',
+    tags: ['percussive unclean bark', 'chugging hardcore rasp', 'aggressive mid-range shout'],
+    description: 'A percussive, barked shout timed tight to chugging breakdown riffs.',
+  },
+  {
+    id: 'rock-metal-nu-metal-rap-rock',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Nu-Metal Rap-Rock Bark',
+    tags: ['rhythmic rap-rock bark', 'downtuned aggressive shout', 'staccato groove vocals'],
+    description: 'A staccato, rhythmic bark that snaps between rapped verses and shouted hooks.',
+  },
+  {
+    id: 'rock-metal-deathcore-pig-squeal',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Deathcore Pig Squeal',
+    tags: ['high pig squeal', 'strangled gutter shriek', 'extreme vocal fry'],
+    description:
+      'A strangled, high-pitched squeal that snaps between guttural lows and shrill highs.',
+  },
+  {
+    id: 'rock-metal-stoner-hazy-croon',
+    family: 'rock-metal',
+    familyLabel: 'Rock, Metal & Extreme',
+    label: 'Stoner Rock Hazy Croon',
+    tags: ['hazy laid-back croon', 'smoky reverb-soaked tenor', 'fuzzed-out drawl'],
+    description: 'A smoky, reverb-drenched croon drifting lazily over fuzzed-out riffs.',
+  },
+
+  /* --- Hip-Hop, Rap & Spoken --- */
+  {
+    id: 'hiphop-spoken-laidback-flow',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Laid-Back Flow MC',
+    tags: ['laid-back rap vocals', 'relaxed pocket cadence', 'warm low register'],
+    description:
+      'Smooth, unhurried rap delivery with a relaxed pocket cadence and low warm register.',
+  },
+  {
+    id: 'hiphop-spoken-double-time',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Double-Time Rapid Rapper',
+    tags: ['rapid-fire rap vocals', 'double-time cadence', 'tight syllable enunciation'],
+    description: 'Fast, tightly enunciated rap vocals stacking syllables at double-time speed.',
+  },
+  {
+    id: 'hiphop-spoken-mumble-melodic',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Mumble Melodic Rapper',
+    tags: ['melodic mumble rap vocals', 'hazy soft enunciation', 'light autotuned croon'],
+    description: 'Soft, hazy melodic rap with blurred consonants and a light autotuned croon.',
+  },
+  {
+    id: 'hiphop-spoken-drill',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Drill Delivery Vocalist',
+    tags: ['drill rap vocals', 'menacing low drawl', 'clipped triplet flow'],
+    description: 'Dark, clipped drill flow with a menacing low drawl riding triplet rhythms.',
+  },
+  {
+    id: 'hiphop-spoken-boom-bap',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Boom-Bap Classic MC',
+    tags: ['boom-bap rap vocals', 'gritty mid-range delivery', 'punchy syllable accents'],
+    description: 'Gritty, punchy old-school rap delivery built for boom-bap drum breaks.',
+  },
+  {
+    id: 'hiphop-spoken-word-poet',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Spoken Word Poet',
+    tags: ['spoken word vocals', 'unmetered cadence', 'emotive conversational tone'],
+    description: 'Free-flowing spoken word delivery with unmetered cadence and raw emotive tone.',
+  },
+  {
+    id: 'hiphop-spoken-asmr-whisper',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Whispered ASMR Narrator',
+    tags: ['whispered narration vocals', 'breathy close-mic tone', 'hushed intimate delivery'],
+    description:
+      'Barely-voiced whispered narration recorded close-mic for a hushed intimate feel.',
+  },
+  {
+    id: 'hiphop-spoken-hypeman-adlib',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Ad-Lib Hypeman',
+    tags: ['hypeman ad-lib vocals', 'shouted call-and-response', 'raspy exclamations'],
+    description: 'Energetic shouted ad-libs and raspy exclamations punctuating every bar.',
+  },
+  {
+    id: 'hiphop-spoken-trap-singsong',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Trap Singsong Vocalist',
+    tags: ['singsong trap vocals', 'autotuned melodic rap', 'bouncy triplet phrasing'],
+    description:
+      'Bouncy autotuned singsong rap with melodic triplet phrasing built for trap hooks.',
+  },
+  {
+    id: 'hiphop-spoken-storyteller',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Old-School Storyteller MC',
+    tags: ['narrative rap vocals', 'warm conversational baritone', 'steady storytelling cadence'],
+    description: 'Warm, conversational baritone rap delivery paced for narrative storytelling.',
+  },
+  {
+    id: 'hiphop-spoken-battle-aggressive',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Battle Rap Aggressor',
+    tags: ['aggressive rap vocals', 'snarling attack delivery', 'forceful projection'],
+    description:
+      'Forceful, snarling battle-rap delivery projected with aggressive attack on every line.',
+  },
+  {
+    id: 'hiphop-spoken-jazz-crooner',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Jazz-Rap Crooner',
+    tags: ['jazz-rap crooning vocals', 'smooth sung-spoken tone', 'silky low timbre'],
+    description:
+      'Smooth sung-spoken jazz-rap delivery with a silky low timbre gliding over the beat.',
+  },
+  {
+    id: 'hiphop-spoken-horrorcore-growl',
+    family: 'hiphop-spoken',
+    familyLabel: 'Hip-Hop, Rap & Spoken',
+    label: 'Horrorcore Growl MC',
+    tags: ['horrorcore growl vocals', 'raspy guttural rap', 'sinister low snarl'],
+    description:
+      'Raspy guttural rap vocals with a sinister low snarl for dark horrorcore tracks.',
+  },
+
+  /* --- Electronic & Processed --- */
+  {
+    id: 'electronic-processed-vocoder-choir',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Vocoder Choir',
+    tags: ['vocoder harmony vocals', 'robotic chorus', 'synthetic layered voice'],
+    description: 'Multiple robotic vocoder voices harmonize in tight synthetic chords.',
+  },
+  {
+    id: 'electronic-processed-talkbox-funk',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Talkbox Funk Voice',
+    tags: ['talkbox vocals', 'wah-inflected robotic voice', 'funk-processed lead'],
+    description:
+      'A guitar-driven talkbox mouth shapes syllables into a wah-toned robotic melody.',
+  },
+  {
+    id: 'electronic-processed-hard-tuned-lead',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Hard-Tuned Pop Lead',
+    tags: ['heavy autotune vocals', 'pitch-snapped lead', 'digital glide-free tone'],
+    description:
+      'Vocal pitch snaps instantly between notes with zero natural glide, fully quantized.',
+  },
+  {
+    id: 'electronic-processed-formant-alien',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Formant-Shifted Alien',
+    tags: ['formant-shifted vocals', 'alien vocal texture', 'inhuman pitched voice'],
+    description:
+      'Formants are shifted away from natural speech ranges, producing an otherworldly alien voice.',
+  },
+  {
+    id: 'electronic-processed-vocal-chop-science',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Chopped Vocal Science',
+    tags: ['chopped vocal stutters', 'glitch-edited syllables', 'stutter-sliced phrases'],
+    description: 'Vocal syllables are sliced and stuttered into rhythmic glitch patterns.',
+  },
+  {
+    id: 'electronic-processed-robotic-monotone',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Robotic Monotone Narrator',
+    tags: ['flat robotic monotone', 'emotionless synthetic delivery', 'deadpan machine voice'],
+    description: 'A flat, emotionless machine voice delivers lines in an unwavering monotone.',
+  },
+  {
+    id: 'electronic-processed-hyperpop-chipmunk',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Hyperpop Chipmunk Pitch-Up',
+    tags: ['pitched-up helium vocals', 'hyperpop squeaky lead', 'chipmunk-range voice'],
+    description: 'Vocals are pitched up into a squeaky helium-high hyperpop range.',
+  },
+  {
+    id: 'electronic-processed-granular-texture',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Granular Vocal Texture',
+    tags: ['granular vocal texture', 'smeared grain clouds', 'textural sound-design voice'],
+    description: 'The voice dissolves into shimmering granular clouds of smeared vocal grains.',
+  },
+  {
+    id: 'electronic-processed-radio-filtered',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Radio-Filtered Broadcast Voice',
+    tags: ['radio-filtered vocals', 'narrow bandpass tone', 'lo-fi broadcast crackle'],
+    description:
+      'A narrow bandpass filter and crackle make the vocal sound like an old radio broadcast.',
+  },
+  {
+    id: 'electronic-processed-bitcrushed-glitch',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Bitcrushed Glitch Vocal',
+    tags: ['bitcrushed vocals', 'lo-fi digital distortion', 'glitchy sample-rate crush'],
+    description:
+      'Reduced bit depth and sample rate crush the voice into crunchy digital artifacts.',
+  },
+  {
+    id: 'electronic-processed-ring-mod-robot',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Ring-Modulated Robot Voice',
+    tags: ['ring-modulated vocals', 'metallic robotic tone', 'clangorous synthetic timbre'],
+    description:
+      'Ring modulation adds metallic, bell-like inharmonic overtones to a robotic voice.',
+  },
+  {
+    id: 'electronic-processed-sidechain-pump',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Sidechain-Pumped Vocal',
+    tags: ['sidechain-pumped vocals', 'rhythmic gated pulsing', 'edm-processed voice'],
+    description: 'The vocal volume pulses and pumps in rhythm with a gated sidechain effect.',
+  },
+  {
+    id: 'electronic-processed-reversed-stretch',
+    family: 'electronic-processed',
+    familyLabel: 'Electronic & Processed',
+    label: 'Reversed Stretched Ambient Voice',
+    tags: ['time-stretched vocals', 'reversed ambient texture', 'ethereal smeared voice'],
+    description:
+      'Time-stretched and partially reversed, the voice smears into an ethereal ambient wash.',
+  },
+
+  /* --- Folk, World & Traditional --- */
+  {
+    id: 'folk-world-appalachian-high-lonesome',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Appalachian High Lonesome',
+    tags: ['high lonesome tenor vocals', 'nasal mountain twang', 'thin piercing timbre'],
+    description: 'A thin, nasal high-mountain tenor with a piercing, lonesome edge.',
+  },
+  {
+    id: 'folk-world-celtic-lilt',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Celtic Lilt Singer',
+    tags: ['lilting celtic vocals', 'warm lyrical tenor', 'ornamented folk phrasing'],
+    description:
+      'A warm, lyrical voice that lilts and ornaments phrases in a light folk dance rhythm.',
+  },
+  {
+    id: 'folk-world-fado-saudade',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Fado Saudade Voice',
+    tags: ['saudade-laden vocals', 'mournful vibrato', 'smoky torch timbre'],
+    description: 'A smoky, vibrato-laden voice heavy with longing and melancholic sway.',
+  },
+  {
+    id: 'folk-world-flamenco-cantaor',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Flamenco Cantaor',
+    tags: ['raw flamenco cante vocals', 'gravelly rasp', 'anguished melisma'],
+    description: 'A raw, gravelly voice that wails and twists through anguished melismatic runs.',
+  },
+  {
+    id: 'folk-world-tuvan-throat-singer',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Tuvan Throat Singer',
+    tags: ['tuvan overtone throat singing', 'droning undertone', 'whistling harmonic layer'],
+    description: 'A deep droning voice that splits into a whistling overtone floating above it.',
+  },
+  {
+    id: 'folk-world-bulgarian-womens-choir',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Bulgarian Open-Throat Choir Voice',
+    tags: ['open-throat choral vocals', 'piercing close-harmony', 'tense chest belt'],
+    description:
+      'A tense, piercing chest voice singing sharp close harmonies in open-throated style.',
+  },
+  {
+    id: 'folk-world-qawwali-lead',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Qawwali Lead Voice',
+    tags: ['qawwali devotional vocals', 'soaring melismatic call', 'hoarse ecstatic belt'],
+    description:
+      'A soaring, hoarse voice that builds through repeated devotional call-and-response melisma.',
+  },
+  {
+    id: 'folk-world-griot-storyteller',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Griot Storyteller',
+    tags: [
+      'griot praise-singing vocals',
+      'rhythmic spoken-sung delivery',
+      'resonant baritone warmth',
+    ],
+    description: 'A resonant baritone that half-speaks, half-sings rhythmic praise and story.',
+  },
+  {
+    id: 'folk-world-alpine-yodel',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Alpine Yodeler',
+    tags: ['yodeling vocal leaps', 'chest-to-falsetto break', 'bright open-air timbre'],
+    description:
+      'A bright voice that leaps rapidly between chest tone and falsetto in rolling breaks.',
+  },
+  {
+    id: 'folk-world-nordic-kulning',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Nordic Kulning Call',
+    tags: [
+      'kulning herding call vocals',
+      'extreme piercing head voice',
+      'wide open-field projection',
+    ],
+    description: 'An extremely high, piercing head-voice call built to carry across open fields.',
+  },
+  {
+    id: 'folk-world-sean-nos',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Sean-Nos Unaccompanied Voice',
+    tags: ['sean-nos unaccompanied vocals', 'heavily ornamented melisma', 'intimate nasal tone'],
+    description:
+      'An intimate, nasal solo voice winding through heavy unaccompanied ornamentation.',
+  },
+  {
+    id: 'folk-world-mongolian-long-song',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Mongolian Long Song Voice',
+    tags: ['mongolian long-song vocals', 'slow extended melisma', 'steppe-wide vibrato'],
+    description:
+      'A slow, breath-stretched voice with wide vibrato unfolding across long melismatic phrases.',
+  },
+  {
+    id: 'folk-world-andean-huayno',
+    family: 'folk-world',
+    familyLabel: 'Folk, World & Traditional',
+    label: 'Andean Huayno Voice',
+    tags: ['andean huayno vocals', 'high nasal female timbre', 'bright reedy projection'],
+    description: 'A high, nasal, reedy female voice with bright Andean mountain projection.',
+  },
+
+  /* --- Character & Texture --- */
+  {
+    id: 'character-texture-childlike-naive',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Childlike Naive Voice',
+    tags: ['childlike vocals', 'naive breathy tone', 'innocent sing-song delivery'],
+    description:
+      'Sounds like a young child singing sweetly and untrained, full of wide-eyed innocence.',
+  },
+  {
+    id: 'character-texture-elderly-weathered',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Elderly Weathered Voice',
+    tags: ['weathered elderly vocals', 'cracked aged rasp', 'trembling frail quiver'],
+    description:
+      'A frail, cracked voice quivering with the rasp and rough edges of advanced age.',
+  },
+  {
+    id: 'character-texture-ghostly-ethereal',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Ghostly Ethereal Whisper',
+    tags: ['ghostly ethereal vocals', 'airy spectral whisper', 'reverb-soaked breath tone'],
+    description:
+      'A faint, airy whisper that seems to float and dissolve like a spectral presence.',
+  },
+  {
+    id: 'character-texture-demonic-doubled',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Demonic Doubled Growl',
+    tags: ['demonic doubled vocals', 'guttural layered growl', 'menacing low harmony'],
+    description:
+      'A guttural growl doubled with a deep layered voice for a menacing, otherworldly effect.',
+  },
+  {
+    id: 'character-texture-chanted-crowd',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Chanted Crowd Voice',
+    tags: ['chanted crowd vocals', 'unison group chant', 'stadium call-and-response'],
+    description:
+      'A massed group chanting in rough unison, like a crowd shouting together in one voice.',
+  },
+  {
+    id: 'character-texture-lullaby-soft',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Lullaby Soft Croon',
+    tags: ['lullaby soft vocals', 'hushed breathy croon', 'gentle soothing warmth'],
+    description: 'A hushed, breathy croon sung softly as if soothing a baby to sleep.',
+  },
+  {
+    id: 'character-texture-drunken-slur',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Drunken Slur Character',
+    tags: ['drunken slurred vocals', 'wobbly pitch drawl', 'slouchy tavern mumble'],
+    description: 'A slurred, wobbly-pitched voice that drags and stumbles like a tipsy barfly.',
+  },
+  {
+    id: 'character-texture-carnival-barker',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Megaphone Carnival Barker',
+    tags: ['megaphone barker vocals', 'brash tinny shout', 'compressed carnival holler'],
+    description:
+      'A brash, tinny shout compressed as if blasted through an old carnival megaphone.',
+  },
+  {
+    id: 'character-texture-humming-wordless',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Wordless Humming Voice',
+    tags: ['wordless humming vocals', 'closed-mouth melody', 'soft nasal hum'],
+    description: 'A closed-mouth hum carrying the melody softly without ever forming any words.',
+  },
+  {
+    id: 'character-texture-robotic-monotone',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Robotic Monotone Drone',
+    tags: ['robotic monotone vocals', 'flat mechanical delivery', 'clipped digital edge'],
+    description:
+      'A flat, mechanical voice delivered in an emotionless monotone with clipped digital edges.',
+  },
+  {
+    id: 'character-texture-possessed-whisper-scream',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Possessed Whisper-Scream',
+    tags: ['possessed vocal fry', 'whisper-to-scream shift', 'unhinged shriek burst'],
+    description:
+      'A voice that snaps from a hoarse, rattling whisper into a sudden unhinged shriek.',
+  },
+  {
+    id: 'character-texture-sleepy-mumble',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Sleepy Mumble Voice',
+    tags: ['sleepy mumbled vocals', 'drowsy slurred murmur', 'half-asleep drawl'],
+    description:
+      'A drowsy, half-asleep mumble that slurs words together like talking in one\'s sleep.',
+  },
+  {
+    id: 'character-texture-feral-animalistic',
+    family: 'character-texture',
+    familyLabel: 'Character & Texture',
+    label: 'Feral Animalistic Snarl',
+    tags: ['feral animalistic vocals', 'primal guttural snarl', 'growling animal bark'],
+    description:
+      'A primal snarling bark with feral, animal-like guttural texture and raw aggression.',
+  },
+];
+
+/*
+ * Position -> weight for a persona's tags. The first tag NAMES the voice, so it
+ * carries the most weight; the textures behind it decorate that voice and are
+ * worth progressively less. A persona with more tags than this list has would
+ * repeat the last value rather than fall to 0 — a described texture is never
+ * worth nothing — but the registry is capped at four tags, so today the list
+ * covers every entry exactly.
+ */
+var VOCAL_TAG_WEIGHTS = [0.9, 0.7, 0.6, 0.5];
+
+/** Lazily built once: family order/rank, and the lowercased search haystacks. */
+var VOCAL_FAMILY_INDEX = null;
+var VOCAL_SEARCH_INDEX = null;
+
+/** The families in registry order, with the rank searchVocalRegistry sorts by. */
+function vocalFamilyIndex() {
+  if (VOCAL_FAMILY_INDEX) return VOCAL_FAMILY_INDEX;
+  var order = [];
+  var rank = {};
+  var counts = {};
+  for (var i = 0; i < VOCAL_REGISTRY.length; i += 1) {
+    var entry = VOCAL_REGISTRY[i];
+    if (!Object.prototype.hasOwnProperty.call(rank, entry.family)) {
+      rank[entry.family] = order.length;
+      order.push({ id: entry.family, label: entry.familyLabel, count: 0 });
+    }
+    counts[entry.family] = (counts[entry.family] || 0) + 1;
+  }
+  for (var f = 0; f < order.length; f += 1) order[f].count = counts[order[f].id];
+  VOCAL_FAMILY_INDEX = { order: order, rank: rank };
+  return VOCAL_FAMILY_INDEX;
+}
+
+/**
+ * The eight registry families, in the order the table declares them — which is
+ * the order the card groups by, so the list never reshuffles under a search.
+ *
+ * @returns {Array<{id:string, label:string, count:number}>} fresh copies
+ */
+function vocalRegistryFamilies() {
+  var source = vocalFamilyIndex().order;
+  var out = [];
+  for (var i = 0; i < source.length; i += 1) {
+    out.push({ id: source[i].id, label: source[i].label, count: source[i].count });
+  }
+  return out;
+}
+
+/** The lowercased text one entry is searched over: label, tags, family names. */
+function vocalSearchText(entry) {
+  return (
+    entry.label +
+    ' ' +
+    entry.tags.join(' ') +
+    ' ' +
+    entry.family +
+    ' ' +
+    entry.familyLabel
+  ).toLowerCase();
+}
+
+/**
+ * Case-insensitive substring search over label, tags and family — deliberately
+ * NOT over `description`, which is prose written for a human and would make
+ * "a" match half the table.
+ *
+ * An empty or whitespace-only query matches EVERYTHING: a search box that has
+ * been cleared is not a filter (the same rule filterHistoryRecords() follows).
+ *
+ * The order is deterministic and independent of the query: family in registry
+ * order, then label A-Z. Sorting by "relevance" would reshuffle the list under
+ * the user's cursor on every keystroke.
+ *
+ * @param {string} query
+ * @returns {Array<object>} the matching registry entries (the entries
+ *   themselves — the table is read-only by contract, never mutated in place)
+ */
+function searchVocalRegistry(query) {
+  if (!VOCAL_SEARCH_INDEX) {
+    VOCAL_SEARCH_INDEX = [];
+    for (var s = 0; s < VOCAL_REGISTRY.length; s += 1) {
+      VOCAL_SEARCH_INDEX.push(vocalSearchText(VOCAL_REGISTRY[s]));
+    }
+  }
+  var needle =
+    typeof query === 'string' ? query.toLowerCase().replace(/\s+/g, ' ').trim() : '';
+  var hits = [];
+  for (var i = 0; i < VOCAL_REGISTRY.length; i += 1) {
+    if (!needle || VOCAL_SEARCH_INDEX[i].indexOf(needle) !== -1) hits.push(VOCAL_REGISTRY[i]);
+  }
+  var rank = vocalFamilyIndex().rank;
+  hits.sort(function (a, b) {
+    if (rank[a.family] !== rank[b.family]) return rank[a.family] - rank[b.family];
+    var left = a.label.toLowerCase();
+    var right = b.label.toLowerCase();
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+  });
+  return hits;
+}
+
+/** @param {string} id @returns {object|null} the persona, or null if unknown */
+function vocalPersonaById(id) {
+  var wanted = typeof id === 'string' ? id : '';
+  for (var i = 0; i < VOCAL_REGISTRY.length; i += 1) {
+    if (VOCAL_REGISTRY[i].id === wanted) return VOCAL_REGISTRY[i];
+  }
+  return null;
+}
+
+/**
+ * A persona's tags as prompt-state seeds: section 'vocal', source
+ * 'vocal-persona', weight from POSITION (VOCAL_TAG_WEIGHTS).
+ *
+ * @param {object} persona
+ * @returns {Array<{section:string, tag:string, weight:number, source:string}>}
+ */
+function vocalPersonaSeeds(persona) {
+  var out = [];
+  if (!persona || !isArrayLike(persona.tags)) return out;
+  var last = VOCAL_TAG_WEIGHTS.length - 1;
+  for (var i = 0; i < persona.tags.length; i += 1) {
+    var raw = persona.tags[i];
+    var tag = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+    if (!tag) continue;
+    out.push({
+      section: VOCAL_SECTION,
+      tag: tag,
+      weight: VOCAL_TAG_WEIGHTS[i < last ? i : last],
+      source: VOCAL_PERSONA_SOURCE,
+    });
+  }
+  return out;
+}
+
+/**
+ * What a store is holding of one persona right now.
+ *
+ * `complete` is what the card renders as "Added" (aria-pressed="true"): a
+ * persona is only claimed by the draft when EVERY one of its tags is there. A
+ * persona whose texture word the user removed by hand from the draft chips
+ * reads as not-added again, which is the truth — half a persona is not the
+ * persona.
+ *
+ * @param {object} store a createPromptState() instance
+ * @param {object} persona
+ * @returns {{held:Array<{id:string, norm:string}>, missing:Array<object>,
+ *            complete:boolean}}
+ */
+function vocalPersonaHold(store, persona) {
+  var seeds = vocalPersonaSeeds(persona);
+  var held = [];
+  var missing = [];
+  var index = {};
+  var entries = store && typeof store.list === 'function' ? store.list(VOCAL_SECTION) : [];
+  for (var e = 0; e < entries.length; e += 1) {
+    index[normalizePromptTag(entries[e].tag)] = entries[e].id;
+  }
+  for (var i = 0; i < seeds.length; i += 1) {
+    var norm = normalizePromptTag(seeds[i].tag);
+    if (Object.prototype.hasOwnProperty.call(index, norm)) {
+      held.push({ id: index[norm], norm: norm });
+    } else {
+      missing.push(seeds[i]);
+    }
+  }
+  return { held: held, missing: missing, complete: seeds.length > 0 && missing.length === 0 };
+}
+
+/**
+ * Every persona the store currently holds in full, in registry order.
+ * @param {object} store
+ * @returns {Array<object>}
+ */
+function selectedVocalPersonas(store) {
+  var out = [];
+  for (var i = 0; i < VOCAL_REGISTRY.length; i += 1) {
+    if (vocalPersonaHold(store, VOCAL_REGISTRY[i]).complete) out.push(VOCAL_REGISTRY[i]);
+  }
+  return out;
+}
+
+/**
+ * Toggle one persona, atomically.
+ *
+ * Not-fully-held -> the missing tags are added (a persona half-present is
+ * COMPLETED rather than duplicated, because the store rejects a repeat anyway).
+ * Fully held     -> its tags are removed.
+ *
+ * THE SHARED-TAG RULE. The store holds one entry per (section, tag), so two
+ * personas that share a texture word — "smoky lower register" belongs to both
+ * the Velvet Mezzo-Soprano and the Sultry Jazz Alto — share ONE entry. Removing
+ * one of them therefore skips any tag another CURRENTLY COMPLETE persona still
+ * needs: taking one persona out must never quietly break the one beside it.
+ *
+ * Everything happens inside store.batch(), so a persona is one user action and
+ * one notification, never four half-states the draft repaints through.
+ *
+ * @param {object} store a createPromptState() instance
+ * @param {object} persona
+ * @returns {{state:'added'|'removed'|'noop', added:number, removed:number, kept:number}}
+ */
+function toggleVocalPersona(store, persona) {
+  var result = { state: 'noop', added: 0, removed: 0, kept: 0 };
+  if (!store || typeof store.batch !== 'function') return result;
+  var hold = vocalPersonaHold(store, persona);
+  if (!hold.held.length && !hold.missing.length) return result;
+
+  if (!hold.complete) {
+    result.state = 'added';
+    store.batch(function () {
+      for (var i = 0; i < hold.missing.length; i += 1) {
+        if (store.add(hold.missing[i]) !== null) result.added += 1;
+      }
+    });
+    return result;
+  }
+
+  var claimed = {};
+  var others = selectedVocalPersonas(store);
+  for (var o = 0; o < others.length; o += 1) {
+    if (others[o].id === persona.id) continue;
+    for (var t = 0; t < others[o].tags.length; t += 1) {
+      claimed[normalizePromptTag(others[o].tags[t])] = true;
+    }
+  }
+
+  result.state = 'removed';
+  store.batch(function () {
+    for (var h = 0; h < hold.held.length; h += 1) {
+      if (Object.prototype.hasOwnProperty.call(claimed, hold.held[h].norm)) {
+        result.kept += 1;
+        continue;
+      }
+      if (store.remove(hold.held[h].id)) result.removed += 1;
+    }
+  });
+  return result;
+}
+
+/**
+ * The registry's PRIMARY tags, as conflict-rule members for the #68
+ * instrumental-vs-vocals rule below.
+ *
+ * WHY ONLY tags[0]. The rule is "an instrumental-only directive cannot coexist
+ * with a NAMED VOCAL PART", and tags[0] is precisely the phrase that names the
+ * part ("raspy baritone vocals", "guttural death growl"). The textures behind
+ * it — "warm chest resonance", "rapid runs", "bright silvery tone" — describe
+ * how a sound behaves and can honestly belong to an instrument, so listing them
+ * here would have the resolver inventing contradictions it cannot prove
+ * (docs/ENGINEERING-STANDARD.md §1.1).
+ *
+ * Deriving the phrases from the table rather than re-typing a summary of it is
+ * the point: a persona added to VOCAL_REGISTRY is covered by the rule the same
+ * day, and no hand-written list can drift away from the data.
+ *
+ * @returns {string[]}
+ */
+function vocalPersonaConflictPhrases() {
+  var out = [];
+  for (var i = 0; i < VOCAL_REGISTRY.length; i += 1) {
+    var tag = VOCAL_REGISTRY[i].tags[0];
+    if (typeof tag === 'string' && tag) out.push(tag);
   }
   return out;
 }
@@ -8914,7 +10339,9 @@ function promptBudgetZone(length, max) {
  *
  *   1. genre, heaviest first (equal weights keep insertion order — the sort
  *      is stable by construction: ties fall back to the original index);
- *   2. mood, instrument, scene, era, custom, in PROMPT_SECTION_ORDER;
+ *   2. mood, vocal, instrument, scene, era, custom, in PROMPT_SECTION_ORDER
+ *      (the vocal section joined the order in 0.13.0 — see the long note on
+ *      PROMPT_SECTION_ORDER for why a named voice leads the instruments);
  *   3. the slider tags last, energy -> warmth -> density, matching
  *      draftText(); a slider-section tag from any other source follows them
  *      rather than going missing.
@@ -9090,6 +10517,17 @@ var TAG_CONFLICTS = [
     match: 'phrase',
     rule: 'an instrumental-only directive cannot coexist with a named vocal part',
     a: ['instrumental only', 'purely instrumental', 'no vocals', 'without vocals', 'instrumental version'],
+    /* The hand-written half is the generic vocabulary a user types; the
+     * concat() is every persona's naming tag from VOCAL_REGISTRY (FDD #65), so
+     * a persona the Vocal Persona card added is caught by the same rule.
+     *
+     * WHY NOT A BARE 'vocals' PHRASE, which would cover all of it in one word:
+     * side `a` holds "no vocals" and "without vocals", so a bare 'vocals' on
+     * side `b` would put those two tags on BOTH sides at once — and a tag
+     * matching both sides is ambiguous evidence that this resolver refuses to
+     * act on (see conflictSideIn). The one-word shortcut would therefore have
+     * switched the rule OFF for the two most obvious instrumental directives
+     * in it. Naming the parts is the honest way to keep both halves working. */
     b: [
       'lead vocal',
       'vocal hook',
@@ -9102,7 +10540,7 @@ var TAG_CONFLICTS = [
       'talkbox vocal',
       'male vocals',
       'female vocals',
-    ],
+    ].concat(vocalPersonaConflictPhrases()),
   },
   {
     id: 'tempo-slow-vs-fast',
@@ -14104,6 +15542,7 @@ function createRibbonRenderer(deps) {
     const SECTION_LABELS = {
       genre: 'Genre',
       mood: 'Mood',
+      vocal: 'Vocals',
       instrument: 'Instruments',
       scene: 'Scene',
       era: 'Era',
@@ -14879,6 +16318,182 @@ function createRibbonRenderer(deps) {
 
     renderExclusions();
     renderStylePrompt();
+
+    /* -- H. the Vocal Persona Selector (FDD #28) over the #65 registry -- */
+
+    const vocalSearch = $('vocal-search');
+    const vocalListEl = $('vocal-list');
+    const vocalChips = $('vocal-chips');
+    const vocalSelectedEmpty = $('vocal-selected-empty');
+    const vocalEmpty = $('vocal-empty');
+    const vocalCountOut = $('vocal-count');
+    const vocalStatus = $('vocal-status');
+
+    function setVocalStatus(text, tone) {
+      vocalStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      vocalStatus.textContent = text;
+    }
+
+    /**
+     * Add or remove one persona and say plainly which of the three things
+     * happened — added, removed, or removed-but-one-tag-stayed because another
+     * selected persona still claims it (see toggleVocalPersona).
+     */
+    function toggleVocalPersonaFromUi(persona) {
+      const outcome = toggleVocalPersona(promptState, persona);
+      if (outcome.state === 'removed') {
+        setVocalStatus(
+          '“' +
+            persona.label +
+            '” removed — ' +
+            plural(outcome.removed, 'tag') +
+            ' dropped' +
+            (outcome.kept
+              ? ', ' + plural(outcome.kept, 'tag') + ' kept for another selected persona.'
+              : '.')
+        );
+        return;
+      }
+      if (outcome.added > 0) {
+        setVocalStatus(
+          '“' + persona.label + '” added — ' + plural(outcome.added, 'tag') + ' in the Vocals group.'
+        );
+        return;
+      }
+      setVocalStatus('“' + persona.label + '” had nothing new to add.', 'warn');
+    }
+
+    /** One persona row. Fixed height by contract — see VIRTUAL_ROW_HEIGHT. */
+    function buildVocalRow(persona) {
+      const row = document.createElement('div');
+      row.className = 'vrow';
+
+      const main = document.createElement('div');
+      main.className = 'vrow-main';
+      const name = document.createElement('div');
+      name.className = 'vrow-name';
+      name.textContent = persona.label;
+      // The family travels on the ROW rather than in a sticky group header:
+      // a windowed list unmounts whatever scrolls away, headers included, so a
+      // header would vanish exactly when it was still needed.
+      const meta = document.createElement('div');
+      meta.className = 'vrow-meta';
+      meta.textContent = persona.familyLabel + ' · ' + persona.tags[0];
+      main.appendChild(name);
+      main.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'vrow-actions';
+      const added = vocalPersonaHold(promptState, persona).complete;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'btn-mini btn-persona';
+      toggle.setAttribute('data-focus-key', 'persona-toggle');
+      // aria-pressed IS the state: the styling reads it too, so the picture and
+      // the accessibility tree cannot drift apart.
+      toggle.setAttribute('aria-pressed', added ? 'true' : 'false');
+      toggle.textContent = added ? 'Added' : 'Add';
+      toggle.title = added
+        ? 'Remove the “' + persona.label + '” tags from the draft'
+        : 'Add ' + plural(persona.tags.length, 'tag') + ': ' + persona.tags.join(', ');
+      toggle.setAttribute('aria-label', toggle.title);
+      toggle.addEventListener('click', function () {
+        toggleVocalPersonaFromUi(persona);
+      });
+
+      actions.appendChild(toggle);
+      row.appendChild(main);
+      row.appendChild(actions);
+      return row;
+    }
+
+    const vocalView = createVirtualList({
+      container: vocalListEl,
+      rowHeight: VIRTUAL_ROW_HEIGHT,
+      overscan: VIRTUAL_OVERSCAN_DEFAULT,
+      label: 'Vocal personas',
+      renderRow: buildVocalRow,
+      keyOf: function (persona) {
+        return persona.id;
+      },
+    });
+
+    /**
+     * The single render path for the card, subscribed to the prompt store — so
+     * removing a vocal chip from the draft turns the matching row back to
+     * "Add" without this card having to be told.
+     */
+    function renderVocalCard() {
+      const query = vocalSearch.value;
+      const visible = searchVocalRegistry(query);
+      vocalView.setItems(visible);
+      vocalListEl.hidden = visible.length === 0;
+
+      // The honest empty state: it names what was searched for and what to try,
+      // rather than showing an empty box that looks like a broken list.
+      vocalEmpty.hidden = visible.length > 0;
+      vocalEmpty.textContent = visible.length
+        ? ''
+        : 'No persona matches “' +
+          query.replace(/\s+/g, ' ').trim() +
+          '” — try a family (choral, rap, metal), a timbre (raspy, breathy, vocoder), or clear the box for all ' +
+          VOCAL_REGISTRY.length +
+          '.';
+
+      const selected = selectedVocalPersonas(promptState);
+      // Same focus rescue as the shield's chip row: this runs FROM the click
+      // handler of a chip inside it, so the chip being clicked is destroyed
+      // mid-click and focus would otherwise fall back to <body>.
+      const before = Array.prototype.slice.call(vocalChips.children);
+      const focusedIndex = before.indexOf(document.activeElement);
+
+      vocalChips.textContent = '';
+      for (let i = 0; i < selected.length; i += 1) {
+        const persona = selected[i];
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip tag-chip';
+        chip.setAttribute('aria-pressed', 'true');
+        chip.title = 'Remove the “' + persona.label + '” tags from the draft';
+        chip.setAttribute('aria-label', chip.title);
+        const label = document.createElement('span');
+        label.textContent = persona.label;
+        const cross = document.createElement('span');
+        cross.className = 'tag-chip-x';
+        cross.setAttribute('aria-hidden', 'true');
+        cross.textContent = '×';
+        chip.appendChild(label);
+        chip.appendChild(cross);
+        chip.addEventListener('click', function () {
+          toggleVocalPersonaFromUi(persona);
+        });
+        vocalChips.appendChild(chip);
+      }
+      vocalSelectedEmpty.hidden = selected.length > 0;
+
+      if (focusedIndex !== -1) {
+        const rebuilt = vocalChips.children;
+        const target = rebuilt.length
+          ? rebuilt[Math.min(focusedIndex, rebuilt.length - 1)]
+          : vocalSearch;
+        if (target && typeof target.focus === 'function') target.focus();
+      }
+
+      vocalCountOut.textContent =
+        'showing ' +
+        visible.length +
+        ' of ' +
+        VOCAL_REGISTRY.length +
+        ' · ' +
+        vocalRegistryFamilies().length +
+        ' families · ' +
+        selected.length +
+        ' selected';
+    }
+
+    vocalSearch.addEventListener('input', renderVocalCard);
+    promptState.subscribe(renderVocalCard);
+    renderVocalCard();
 
     /* ---------------- song structure builder (FDD Domain D) ---------------- */
 
@@ -16507,18 +18122,23 @@ function createRibbonRenderer(deps) {
     );
 
     /*
-     * Repaint both windowed lists against a REAL viewport.
+     * Repaint every windowed list against a REAL viewport.
      *
      * Boot paints them while #view-editor is still [hidden], and a hidden
      * element has no layout at all: clientHeight reads 0, so virtualWindow()
      * has nothing to size a window from and renders the overscan alone. The
      * view manager calls this on every switch INTO the editor, which is the
-     * first moment the scroller has a height to measure. Cheap enough to be
+     * first moment a scroller has a height to measure. Cheap enough to be
      * unconditional: it is one windowed repaint of at most ~20 rows.
+     *
+     * The Vocal Persona list joins them here rather than growing its own hook:
+     * it is populated at boot (the registry is static), so it is the ONE list
+     * guaranteed to have painted blind.
      */
     function refreshPersistenceLists() {
       historyView.refresh();
       presetsView.refresh();
+      vocalView.refresh();
     }
 
     renderStorageStatus();
