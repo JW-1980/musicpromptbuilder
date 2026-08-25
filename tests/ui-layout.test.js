@@ -58,16 +58,18 @@ const TOKEN_BLOCK_SELECTORS = [
   '.theme-abyssal-bloom {',
   '.high-contrast {',
 ];
-/* CONSCIOUSLY UPDATED IN 0.18.0: was '0.17.0' (the on-device-model release).
- * This constant and the title of the test that reads it are the only two
- * things in this file that a version bump is allowed to touch, and both moved
- * together — the assertion itself is unchanged. The bump follows the
- * one-release-per-task cadence PROGRESS.md records for 0.10.0 through 0.17.0;
- * 0.18.0 is the expanded-production-eras release (FDD #66): the 124-signature
- * var ERA_REGISTRY and the Production Era & Signature card built over it. If
- * the owner prefers it held back, index.html:APP_VERSION and this line revert
- * together and nothing else in the suite moves. */
-const EXPECTED_VERSION = '0.18.0';
+/* CONSCIOUSLY UPDATED IN 0.19.0: was '0.18.0' (the expanded-production-eras
+ * release). This constant and the title of the test that reads it are the only
+ * two things in this file that a version bump is allowed to touch, and both
+ * moved together — the assertion itself is unchanged. The bump follows the
+ * one-release-per-task cadence PROGRESS.md records for 0.10.0 through 0.18.0;
+ * 0.19.0 is the PWA release (FDD #89/#92): var PWA_MANIFEST encoded into the
+ * data: URI on <link rel="manifest">, the FEATURE-MECHANICS §6.6 share reader
+ * parseSharedLyrics, and an install control that appears only when the engine
+ * fires beforeinstallprompt. If the owner prefers it held back,
+ * index.html:APP_VERSION and this line revert together and nothing else in the
+ * suite moves. */
+const EXPECTED_VERSION = '0.19.0';
 /* The Prompt Editor's four workflow zones, in the order they must be read. */
 const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
 /* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
@@ -914,7 +916,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the expanded-production-eras release (124-signature ERA_REGISTRY, the Production Era & Signature card, era tags weighted into the existing era group)`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the PWA release (var PWA_MANIFEST as an inline data: manifest, the §6.6 share-target reader, an install control gated on a real beforeinstallprompt)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });

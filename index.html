@@ -4,6 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark">
+<!--
+  FDD #89 — the inline web app manifest. The href is DELIBERATELY absent here:
+  it is a data:application/manifest+json URI built at boot from `var
+  PWA_MANIFEST` in #app-main, and rebuilt by applyThemeState() every time the
+  theme changes, because theme_color has to name the colour the page is
+  actually painted in. An href-less link is inert, so a browser that never
+  runs the script simply has no manifest rather than a wrong one.
+  tests/verify-single-file.js rule 6 holds this link to "no href, or a data:
+  one" — a remote manifest is a boot-time network dependency and a relative
+  one is a second file, and this app ships as neither.
+-->
+<link rel="manifest">
 <title>SunoPrompt Studio</title>
 <!--
   SunoPrompt Studio — single-file, zero-dependency prompt builder for Suno v5.5.
@@ -53,7 +65,13 @@
     7. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
        the pure mesh/level/colour helpers (buildRibbonGeometry, downsampleBuffer,
        valenceToColor, pushRibbonRow, perspectiveMatrix4) plus createRibbonRenderer
-    8. the boot IIFE
+    8. the PWA layer (FDD #89/#92) — var PWA_MANIFEST and the pure builders
+       that encode it into the data: URI on <link rel="manifest"> above
+       (percentEncodeUri, svgDataUri, pwaManifestFor, manifestDataUri),
+       updateManifestLink which applyThemeState() calls, the pure
+       FEATURE-MECHANICS §6.6 share reader parseSharedLyrics, and
+       createInstallCapability — the beforeinstallprompt state machine
+    9. the boot IIFE
 -->
 <style>
   /* ==========================================================================
@@ -482,6 +500,19 @@
     align-items: center;
     gap: 12px;
   }
+
+  /* The install offer (FDD #89). It is [hidden] in the markup and the ONLY
+     thing that ever un-hides it is a real `beforeinstallprompt` from the
+     engine — so on file://, in Firefox and in Safari this rule never paints
+     anything. `display: flex` would otherwise beat the UA's [hidden] rule,
+     hence the explicit override below it. */
+  .install-affordance {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .install-affordance[hidden] { display: none; }
 
   /* --- View tab switcher -------------------------------------------------- */
 
@@ -3044,6 +3075,18 @@
       </div>
       <button type="button" id="btn-contrast" class="btn-toggle" aria-pressed="false"
               aria-label="High-contrast code mode">Code mode</button>
+      <!-- Install capability (FDD #89). Starts [hidden] and stays hidden
+           unless the engine fires `beforeinstallprompt`, which is its way of
+           saying the page really is installable right now. There is no
+           fallback button and no "how to install" explainer: on file://, in
+           Firefox and in Safari the event never fires, so nothing is offered,
+           because nothing could be delivered. See createInstallCapability. -->
+      <div id="install-affordance" class="install-affordance" hidden>
+        <button type="button" id="btn-install" class="btn-toggle"
+                aria-label="Install SunoPrompt Studio as an app">Install as app</button>
+        <button type="button" id="btn-install-dismiss" class="btn-mini"
+                aria-label="Dismiss the install offer">Not now</button>
+      </div>
     </div>
   </header>
   <div class="status-line">
@@ -3747,6 +3790,16 @@
         oldest beyond that.
       </p>
       <p id="history-persistence" class="storage-note" role="status" hidden></p>
+      <!-- FDD #89, stated honestly and permanently rather than only when
+           something is wrong: this is a fact about the platform, not a fault
+           condition, so it is a .panel-note and not an amber .storage-note. -->
+      <p id="install-note" class="panel-note">
+        Installing this page as an app needs it served over <strong>http(s)</strong> —
+        a web app manifest cannot be installed from a <code>file://</code> URL, and no
+        single HTML file can register a service worker. Nothing here depends on either:
+        opened straight from the file, every feature still works with no network at all,
+        and what you save still lives in this browser.
+      </p>
 
       <div class="history-controls">
         <span class="field field-grow">
@@ -5654,7 +5707,7 @@ if (typeof self !== 'undefined') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.18.0';
+const APP_VERSION = '0.19.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -19147,6 +19200,14 @@ function applyThemeState(prefs, doc) {
     typeof doc.querySelector === 'function' ? doc.querySelector('meta[name="color-scheme"]') : null;
   if (meta && typeof meta.setAttribute === 'function') meta.setAttribute('content', theme);
 
+  // FDD #89 — the inline manifest's theme_color is a THEME token, so it is
+  // rebuilt on this same hook rather than growing a second one that could fall
+  // out of step with it. The classes and inline properties above are already
+  // on the element, so the colour updateManifestLink() reads back is the one
+  // this call just installed. It is a no-op in every document that has no
+  // <link rel="manifest"> — which is every DOM-free sandbox.
+  updateManifestLink(doc);
+
   return { theme: theme, themeId: entry.id, highContrast: highContrast, applied: applied };
 }
 
@@ -20327,6 +20388,538 @@ function createRibbonRenderer(deps) {
     },
     gl: function () {
       return gl;
+    },
+  };
+}
+
+/* ==========================================================================
+ * PWA LAYER — inline manifest, share-target parsing, install capability
+ * docs/FDD.md #89 (offline manifest) and #92 (share target),
+ * docs/FEATURE-MECHANICS.md §6.6.
+ *
+ * WHAT A SINGLE FILE CANNOT DO. Stated first, because the honest answer is
+ * narrower than "home-screen install capability" sounds, and because every
+ * line of UI copy below had to be written to match it.
+ *
+ *   - It cannot ship a manifest.json. A second file is a second file, and
+ *     index.html is one self-contained document (ENGINEERING-STANDARD.md).
+ *   - It cannot register a service worker. A service-worker script has to be
+ *     fetched from a same-origin http(s) URL; data:, blob: and file: are all
+ *     refused by every engine. So there is NO offline cache layer in this app
+ *     and none is claimed anywhere in the UI. This app works offline because
+ *     it never asks the network for anything — which is the stronger property,
+ *     and the only one that also holds on file://.
+ *
+ * WHAT IT CAN DO, and does:
+ *   1. Declare the manifest INLINE. <link rel="manifest"> accepts a data: URI,
+ *      and PWA_MANIFEST is what gets encoded into one — at boot, and again on
+ *      every theme change, through applyThemeState().
+ *   2. Parse the §6.6 share intent out of location.search. That is the half of
+ *      "share into the app" which is pure application code, so it works from
+ *      ANY URL carrying the parameters: an OS share sheet, a bookmark, a link
+ *      somebody typed by hand.
+ *   3. Offer an install control ONLY when the engine has fired
+ *      `beforeinstallprompt`, i.e. only when it has already decided the page is
+ *      installable. Never on speculation, and never a lookalike button.
+ *
+ * KNOWN LIMITS OF A data: MANIFEST, so nobody has to rediscover them:
+ *   - Relative URLs inside one cannot be resolved: there is no directory for
+ *     them to be relative TO. The spec's fallbacks then quietly take over
+ *     (start_url becomes the document URL) and share_target, whose `action`
+ *     has no fallback, is dropped entirely. pwaManifestFor() therefore
+ *     rewrites start_url, scope and share_target.action to the document's own
+ *     URL before the manifest is encoded.
+ *   - Engines differ on whether a data: manifest satisfies their installability
+ *     criteria at all. When it does not, nothing here breaks and nothing is
+ *     shown: `beforeinstallprompt` simply never fires, which is the same path
+ *     file:// already takes.
+ * ========================================================================== */
+
+/*
+ * THE APP MARK, drawn here rather than fetched — five level bars on the studio
+ * ground, which is the Hum Studio meter this app is built around.
+ *
+ * Its two colours are LITERALS on purpose, and they are the only two colour
+ * literals outside the stylesheet's token blocks. An installed icon is baked
+ * into the OS launcher the moment the app is installed: it cannot re-theme
+ * later, so a token that CAN change is the wrong source for it. theme_color,
+ * which the UA re-reads, does track the live theme — see readManifestColors().
+ * Kept to ASCII so the encoded URI is ASCII too.
+ */
+var PWA_ICON_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">' +
+  '<rect width="512" height="512" rx="96" fill="#0A0A0C"/>' +
+  '<g fill="#00F0FF">' +
+  '<rect x="100" y="216" width="40" height="80" rx="20"/>' +
+  '<rect x="168" y="160" width="40" height="192" rx="20"/>' +
+  '<rect x="236" y="104" width="40" height="304" rx="20"/>' +
+  '<rect x="304" y="176" width="40" height="160" rx="20"/>' +
+  '<rect x="372" y="232" width="40" height="48" rx="20"/>' +
+  '</g></svg>';
+
+/** encodeURIComponent's unreserved set, spelled out so the two agree exactly. */
+var URI_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()";
+var URI_HEX_DIGITS = '0123456789ABCDEF';
+
+/** One byte as %XX, upper-case like every platform encoder emits. */
+function percentEncodeByte(byte) {
+  return '%' + URI_HEX_DIGITS.charAt((byte >> 4) & 0x0f) + URI_HEX_DIGITS.charAt(byte & 0x0f);
+}
+
+/**
+ * Percent-encode text (as UTF-8) for use inside a data: URI.
+ *
+ * WHY NOT encodeURIComponent. PWA_MANIFEST is built at the TOP LEVEL of this
+ * script, and the DOM-free node:vm sandboxes the test suites evaluate this file
+ * in carry the language built-ins and nothing else. A top-level call to a host
+ * global would make the whole file unloadable in every one of them. Everything
+ * used below — String, charCodeAt, indexOf — is a language built-in.
+ *
+ * It is held to the platform's behaviour rather than to "looks encoded":
+ * tests/pwa.test.js round-trips it against encodeURIComponent over a hostile
+ * battery of inputs, including astral-plane characters.
+ *
+ * ONE DELIBERATE DIFFERENCE: encodeURIComponent THROWS a URIError on a lone
+ * surrogate. This encodes it as U+FFFD instead. A malformed character in a
+ * description must not be able to take the boot sequence down, and U+FFFD is
+ * precisely what "this was not a character" is spelled as.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function percentEncodeUri(text) {
+  var input = String(text === undefined || text === null ? '' : text);
+  var out = '';
+  for (var i = 0; i < input.length; i += 1) {
+    var ch = input.charAt(i);
+    if (URI_UNRESERVED.indexOf(ch) !== -1) {
+      out += ch;
+      continue;
+    }
+    var code = input.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < input.length) {
+      var low = input.charCodeAt(i + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        code = (code - 0xd800) * 0x400 + (low - 0xdc00) + 0x10000;
+        i += 1;
+      }
+    }
+    if (code >= 0xd800 && code <= 0xdfff) code = 0xfffd;
+    if (code < 0x80) {
+      out += percentEncodeByte(code);
+    } else if (code < 0x800) {
+      out += percentEncodeByte(0xc0 | (code >> 6));
+      out += percentEncodeByte(0x80 | (code & 0x3f));
+    } else if (code < 0x10000) {
+      out += percentEncodeByte(0xe0 | (code >> 12));
+      out += percentEncodeByte(0x80 | ((code >> 6) & 0x3f));
+      out += percentEncodeByte(0x80 | (code & 0x3f));
+    } else {
+      out += percentEncodeByte(0xf0 | (code >> 18));
+      out += percentEncodeByte(0x80 | ((code >> 12) & 0x3f));
+      out += percentEncodeByte(0x80 | ((code >> 6) & 0x3f));
+      out += percentEncodeByte(0x80 | (code & 0x3f));
+    }
+  }
+  return out;
+}
+
+/**
+ * An inline SVG document as a data: URI.
+ * Percent-encoded rather than base64: the payload stays readable in DevTools,
+ * and it survives being embedded as a JSON string inside the manifest's own
+ * data: URI without a second round of escaping.
+ */
+function svgDataUri(svg) {
+  return 'data:image/svg+xml,' + percentEncodeUri(svg);
+}
+
+/**
+ * THE MANIFEST (FDD #89). A complete, valid manifest object — every member
+ * below is one the spec defines, and tests/pwa.test.js decodes the URI this
+ * turns into and JSON.parses it back.
+ */
+var PWA_MANIFEST = {
+  name: 'SunoPrompt Studio',
+  short_name: 'SunoPrompt',
+  description:
+    'Offline single-file prompt builder for Suno v5.5: hum a melody, shape a vibe, ' +
+    'compile a prompt. Everything runs in this tab.',
+  /* '.' is "this document", which is what FDD #89 asks for and what a served
+     copy would ship. It is also the one member a data: URI cannot resolve, so
+     pwaManifestFor() replaces it with the real document URL before encoding.
+     The DECLARATION stays relative: it is the thing that would be correct in a
+     manifest.json, and the rewrite is the data:-URI workaround, not the
+     design. */
+  start_url: '.',
+  scope: '.',
+  display: 'standalone',
+  orientation: 'any',
+  lang: 'en',
+  dir: 'ltr',
+  categories: ['music', 'productivity', 'utilities'],
+  /* ONE icon, purpose 'any'. No 'maskable' variant is declared: a maskable
+     icon has to be drawn inside a 40%-radius safe circle, and claiming the
+     purpose without redrawing the mark for it ships a logo Android crops. One
+     honest icon beats two when one of them is a lie. */
+  icons: [
+    { src: svgDataUri(PWA_ICON_SVG), sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+  ],
+  /* FDD #92 / FEATURE-MECHANICS §6.6. `params.text: 'lyrics'` IS the feature:
+     the OS hands the shared TEXT to the query parameter named here, so a share
+     arrives as ?lyrics=… — verbatim the parameter §6.6 tells the boot script
+     to read. GET rather than POST because a POST share target can only be
+     received by a service worker or a server, and this app has neither. */
+  share_target: {
+    action: '.',
+    method: 'GET',
+    enctype: 'application/x-www-form-urlencoded',
+    params: { title: 'title', text: 'lyrics', url: 'url' },
+  },
+};
+
+/**
+ * Split a document URL into the two things the manifest needs.
+ *
+ * The query and the fragment are REMOVED, and that is not tidiness: a share
+ * arrives at `?lyrics=…`, and a start_url carrying one would re-import the
+ * same text every single time the installed app is launched.
+ *
+ * @param {*} href typically location.href
+ * @returns {{url:string, dir:string}|null} null for anything unusable, which
+ *   leaves the declared '.' in place rather than inventing a location
+ */
+function manifestDocumentUrl(href) {
+  if (typeof href !== 'string') return null;
+  var url = href.split('#')[0].split('?')[0];
+  // A manifest URL has to be absolute to be resolvable at all; anything
+  // without a scheme is not something to guess about.
+  if (!url || url.indexOf(':') === -1) return null;
+  var slash = url.lastIndexOf('/');
+  return { url: url, dir: slash === -1 ? url : url.slice(0, slash + 1) };
+}
+
+/**
+ * A colour for theme_color / background_color, or null.
+ * Runs through normalizeColorValue — the SAME validator standing between a
+ * stored preference and an inline custom property — so the manifest can never
+ * carry a string this app would refuse to paint with.
+ */
+function normalizeManifestColor(value) {
+  if (typeof value !== 'string') return null;
+  return normalizeColorValue(value.trim());
+}
+
+/**
+ * The manifest as it will actually be encoded: relative members resolved
+ * against the document's own URL, colours filled in from the live theme.
+ *
+ * A member whose colour is unknown is OMITTED rather than guessed. A manifest
+ * that names the wrong theme_color paints the UA's toolbar the wrong colour on
+ * every launch; a manifest with no theme_color simply lets the UA choose.
+ *
+ * @param {{href?:string, themeColor?:string, backgroundColor?:string}} [options]
+ * @returns {object} a fresh object — PWA_MANIFEST is never mutated
+ */
+function pwaManifestFor(options) {
+  var o = options || {};
+  // Plain serialisable data in, plain serialisable data out; the manifest is
+  // JSON by definition, so JSON is a complete deep copy of it.
+  var manifest = JSON.parse(JSON.stringify(PWA_MANIFEST));
+
+  var doc = manifestDocumentUrl(o.href);
+  if (doc) {
+    manifest.start_url = doc.url;
+    manifest.scope = doc.dir;
+    if (manifest.share_target) manifest.share_target.action = doc.url;
+  }
+
+  var theme = normalizeManifestColor(o.themeColor);
+  var background = normalizeManifestColor(o.backgroundColor);
+  if (theme) manifest.theme_color = theme;
+  if (background) manifest.background_color = background;
+  return manifest;
+}
+
+/**
+ * The manifest as a data: URI, which is the only shape a single file can serve
+ * one in. `;charset=utf-8` because the percent-encoded octets are UTF-8 and a
+ * data: URI's default charset is US-ASCII.
+ */
+function manifestDataUri(manifest) {
+  return 'data:application/manifest+json;charset=utf-8,' + percentEncodeUri(JSON.stringify(manifest));
+}
+
+/**
+ * The colour the page is ACTUALLY painted in right now, read back out of the
+ * cascade rather than mirrored in a JS table — a second copy of the palette is
+ * a second thing to drift, and this one would drift silently.
+ *
+ * theme_color paints the UA's toolbar and background_color the splash behind
+ * the app before it renders. Both are the app's ground, so both are --bg: two
+ * different values would make every launch flash.
+ *
+ * @returns {{themeColor:string|null, backgroundColor:string|null}} nulls when
+ *   the document cannot be measured, and the manifest then omits both members
+ */
+function readManifestColors(doc) {
+  var none = { themeColor: null, backgroundColor: null };
+  if (!doc || !doc.documentElement) return none;
+  var view = doc.defaultView;
+  if (!view || typeof view.getComputedStyle !== 'function') return none;
+  var raw;
+  try {
+    raw = view.getComputedStyle(doc.documentElement).getPropertyValue('--bg');
+  } catch (err) {
+    // getComputedStyle throws on a detached document. Nothing measured,
+    // nothing claimed.
+    return none;
+  }
+  var color = normalizeManifestColor(String(raw === undefined || raw === null ? '' : raw));
+  return { themeColor: color, backgroundColor: color };
+}
+
+/**
+ * Rebuild the inline manifest and hand it to <link rel="manifest">.
+ *
+ * applyThemeState() calls this — the same hook that already tells the UA which
+ * way to paint through meta[color-scheme] — because theme_color is a theme
+ * token, and a manifest still naming the previous theme's colour is simply
+ * wrong. Everything is guarded: a document with no querySelector (the DOM-free
+ * sandboxes) and a document with no manifest link both mean "nothing to do".
+ *
+ * @param {Document} doc
+ * @returns {string|null} the data: URI now on the link, or null if there was
+ *   no link to update
+ */
+function updateManifestLink(doc) {
+  if (!doc || typeof doc.querySelector !== 'function') return null;
+  var link = doc.querySelector('link[rel="manifest"]');
+  if (!link || typeof link.setAttribute !== 'function') return null;
+  var colors = readManifestColors(doc);
+  var href = manifestDataUri(
+    pwaManifestFor({
+      href: doc.location && typeof doc.location.href === 'string' ? doc.location.href : null,
+      themeColor: colors.themeColor,
+      backgroundColor: colors.backgroundColor,
+    })
+  );
+  link.setAttribute('href', href);
+  return href;
+}
+
+/* --- FDD #92 / FEATURE-MECHANICS §6.6 — the share intent ------------------ */
+
+/* The parameter §6.6 names verbatim, and the one PWA_MANIFEST maps the shared
+   TEXT onto. They are the same string on purpose. */
+var SHARE_PARAM_LYRICS = 'lyrics';
+/* Honoured as a fallback because `text` is what a hand-written deep link and
+   every OTHER app's share target use. Costs one lookup and means a link that
+   was not built for this app still works. */
+var SHARE_PARAM_TEXT = 'text';
+var SHARE_PARAM_TITLE = 'title';
+var SHARE_PARAM_URL = 'url';
+
+/* A share arrives through a URL, and a URL is attacker-supplied. 4,000
+   characters is far more than any verse and far less than a payload that would
+   stall the autosave; past it the text is CUT, and the cut is REPORTED in the
+   toast rather than hidden. */
+var SHARE_LYRICS_MAX = 4000;
+/* Title and URL are shown in a toast and never stored, so they only need to be
+   short enough that the toast stays a toast. */
+var SHARE_CREDIT_MAX = 120;
+
+/**
+ * A title or a URL as it will be SHOWN: one line, trimmed, length-capped.
+ *
+ * Never parsed, never linkified, never turned into markup. The toast host sets
+ * `textContent`, so a title consisting entirely of `<script>` is displayed as
+ * the characters `<script>` and is nothing else, anywhere, ever.
+ */
+function shareCredit(value) {
+  if (typeof value !== 'string') return '';
+  var flat = value.replace(/\s+/g, ' ').trim();
+  if (flat.length <= SHARE_CREDIT_MAX) return flat;
+  return flat.slice(0, SHARE_CREDIT_MAX - 1) + '…';
+}
+
+/**
+ * PURE. Read the FEATURE-MECHANICS §6.6 share intent out of a query string.
+ *
+ * Nothing here touches the DOM or the clock, so the CALLER decides when a
+ * share is applied — which matters, and the reasoning lives beside
+ * applySharedIntent() in the boot sequence.
+ *
+ * `lyrics` wins over `text` whenever both carry text, because `lyrics` is the
+ * parameter this app's own manifest asks the OS to use. `source` reports which
+ * ones carried something, so a caller can tell a native share from a link.
+ *
+ * A share holding only a title or only a URL returns present:true with an
+ * empty `lyrics`. That is not a failure to parse: the user really did choose
+ * this app from a share sheet, but a page title is a name and not a lyric, and
+ * writing one into a lyric box would be inventing content. The caller says so
+ * out loud instead.
+ *
+ * @param {string} search location.search, with or without its leading '?'
+ * @returns {{present:boolean, lyrics:string, title:string, url:string,
+ *            source:'lyrics'|'text'|'both'|'credit-only'|'none',
+ *            truncated:boolean}}
+ */
+function parseSharedLyrics(search) {
+  var empty = { present: false, lyrics: '', title: '', url: '', source: 'none', truncated: false };
+  if (typeof search !== 'string' || !search) return empty;
+
+  var query = search.charAt(0) === '?' ? search.slice(1) : search;
+  if (!query) return empty;
+  // URLSearchParams, exactly as §6.6 prescribes. It is also the only decoder
+  // that gets `+` right: a GET share target is form-encoded, so every space in
+  // the shared text arrives as a plus sign.
+  var params = new URLSearchParams(query);
+
+  // lyricBody() is the same normaliser the lyric boxes use, so shared text and
+  // typed text are stored in exactly one shape.
+  var fromLyrics = lyricBody(params.get(SHARE_PARAM_LYRICS) || '');
+  var fromText = lyricBody(params.get(SHARE_PARAM_TEXT) || '');
+  var title = shareCredit(params.get(SHARE_PARAM_TITLE));
+  var url = shareCredit(params.get(SHARE_PARAM_URL));
+
+  var body = fromLyrics || fromText;
+  var truncated = body.length > SHARE_LYRICS_MAX;
+  if (truncated) body = lyricBody(body.slice(0, SHARE_LYRICS_MAX));
+
+  if (!body) {
+    if (!title && !url) return empty;
+    return { present: true, lyrics: '', title: title, url: url, source: 'credit-only', truncated: false };
+  }
+
+  var source = fromLyrics && fromText ? 'both' : fromLyrics ? 'lyrics' : 'text';
+  return { present: true, lyrics: body, title: title, url: url, source: source, truncated: truncated };
+}
+
+/**
+ * PURE. What the toast says about a share, including where it came from.
+ *
+ * The result is displayed as TEXT (createToastHost sets textContent), which is
+ * why a hostile title needs no escaping here and must never be given any: an
+ * escaped title would be displayed WITH its escapes, which is its own small
+ * lie about what the user shared.
+ *
+ * @param {object} share a parseSharedLyrics() result
+ * @param {string} tag the compiled tag of the block it landed in, e.g. '[Verse]'
+ */
+function shareToastMessage(share, tag) {
+  if (!share || !share.present) return '';
+  if (!share.lyrics) {
+    return 'That share carried no text — only a title or a link — so nothing was added.';
+  }
+  var label = typeof tag === 'string' && tag ? tag : 'the first block';
+  var parts = ['Added shared text to ' + label + '.'];
+  var credit = share.title || share.url;
+  if (credit) parts.push('Shared from: ' + credit);
+  if (share.truncated) {
+    parts.push('It was longer than ' + SHARE_LYRICS_MAX + ' characters, so the rest was cut.');
+  }
+  return parts.join(' ');
+}
+
+/* --- FDD #89 — install capability ----------------------------------------- */
+
+/**
+ * The install affordance's whole state machine, DOM-free.
+ *
+ * `beforeinstallprompt` is Chromium-only and fires ONLY once the engine has
+ * decided the page is installable. That is the entire honesty contract: no
+ * event, no affordance. On file://, in Firefox and in Safari the event never
+ * fires, available() stays false, and the caller renders nothing — there is no
+ * install this button could perform, and a button that opens an explanation of
+ * why it cannot work is worse than no button at all.
+ *
+ * @param {{window?:object, onChange?:Function}} [deps]
+ * @returns {{listen:Function, available:Function, prompt:Function,
+ *            dismiss:Function, deferredEvent:Function}}
+ */
+function createInstallCapability(deps) {
+  var d = deps || {};
+  var win = d.window || null;
+  var onChange = typeof d.onChange === 'function' ? d.onChange : null;
+  var deferred = null;
+  var dismissed = false;
+  var installed = false;
+
+  function available() {
+    return !!deferred && !dismissed && !installed;
+  }
+
+  function publish() {
+    if (onChange) onChange(available());
+  }
+
+  function onBeforeInstallPrompt(event) {
+    // Without preventDefault Chromium shows its own mini-infobar and the
+    // deferred event can never be prompt()ed later.
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    deferred = event || null;
+    publish();
+  }
+
+  function onAppInstalled() {
+    installed = true;
+    deferred = null;
+    publish();
+  }
+
+  return {
+    /** @returns {boolean} true if there was a window to listen on */
+    listen: function () {
+      if (!win || typeof win.addEventListener !== 'function') return false;
+      win.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+      win.addEventListener('appinstalled', onAppInstalled);
+      return true;
+    },
+
+    available: available,
+
+    /**
+     * Show the browser's own install dialog.
+     *
+     * The deferred event is SINGLE USE — Chromium refuses a second prompt() on
+     * the same one — so it is dropped here whatever the user answers, and the
+     * affordance goes with it rather than becoming a button that silently does
+     * nothing on the second click.
+     *
+     * @returns {object|null} the browser's user-choice promise, or null when
+     *   there was nothing to prompt with
+     */
+    prompt: function () {
+      if (!available()) return null;
+      var event = deferred;
+      deferred = null;
+      publish();
+      if (typeof event.prompt !== 'function') return null;
+      var outcome = event.prompt();
+      // The current API resolves prompt(); the original one resolved
+      // event.userChoice. Either is a promise of {outcome}.
+      if (outcome && typeof outcome.then === 'function') return outcome;
+      return event.userChoice && typeof event.userChoice.then === 'function' ? event.userChoice : null;
+    },
+
+    /**
+     * The user said "not now". Nothing is persisted: this is a decision about
+     * this session, and storing it would mean the offer never returns on a
+     * machine where the user later changed their mind.
+     *
+     * @returns {boolean} true if this call is what dismissed it
+     */
+    dismiss: function () {
+      if (dismissed) return false;
+      dismissed = true;
+      publish();
+      return true;
+    },
+
+    /** Introspection for tests: the event currently held, if any. */
+    deferredEvent: function () {
+      return deferred;
     },
   };
 }
@@ -25148,38 +25741,168 @@ function createRibbonRenderer(deps) {
      * is no flash of a half-built state, and a restore that fails leaves a
      * clean boot rather than a partial one.
      */
-    ignoreRejection(
-      idb.ready().then(function () {
-        renderStorageStatus();
-        return idb.get(IDB_SESSION, AUTOSAVE_ID).then(
-          function (record) {
-            if (!record) return;
-            restoringSession = true;
-            let outcome;
-            try {
-              outcome = restoreWorkspace(record, workspaceRegistry);
-            } finally {
-              restoringSession = false;
-            }
-            if (!outcome.ok) {
-              toastHost.show(
-                'Could not restore your last session (' + outcome.reason + ') — starting clean.',
-                'warn'
-              );
-              return;
-            }
-            if (!outcome.applied.tags && !outcome.applied.exclusions && !outcome.applied.blocks) {
-              // An empty autosave is not worth announcing.
-              return;
-            }
-            showRestoredToast(outcome.applied);
+    const sessionRestore = idb.ready().then(function () {
+      renderStorageStatus();
+      return idb.get(IDB_SESSION, AUTOSAVE_ID).then(
+        function (record) {
+          if (!record) return;
+          restoringSession = true;
+          let outcome;
+          try {
+            outcome = restoreWorkspace(record, workspaceRegistry);
+          } finally {
+            restoringSession = false;
+          }
+          if (!outcome.ok) {
+            toastHost.show(
+              'Could not restore your last session (' + outcome.reason + ') — starting clean.',
+              'warn'
+            );
+            return;
+          }
+          if (!outcome.applied.tags && !outcome.applied.exclusions && !outcome.applied.blocks) {
+            // An empty autosave is not worth announcing.
+            return;
+          }
+          showRestoredToast(outcome.applied);
+        },
+        function () {
+          toastHost.show('Could not read your last session — starting clean.', 'warn');
+        }
+      );
+    });
+
+    /*
+     * -- E. SHARED-IN LYRICS (FDD #92, FEATURE-MECHANICS §6.6) --
+     *
+     * THE ORDERING DECISION, and why it is not "as early as possible".
+     *
+     * The obvious home for a share is the first line of boot(). It is the
+     * WRONG home. The session autosave is restored one task later — contract F
+     * above: IndexedDB is asynchronous and no amount of wishing makes it
+     * synchronous — and restoreWorkspace() replaces the entire song flow. A
+     * share applied first would be silently overwritten by the draft the user
+     * left behind, which is precisely the failure this feature exists to
+     * prevent.
+     *
+     * So the two halves are split:
+     *
+     *   READ, synchronously, right here. location.search is captured as it was
+     *   at boot, before anything (including the URL tidy-up below) can edit it
+     *   out from under us. parseSharedLyrics is pure, so reading costs nothing
+     *   and commits to nothing.
+     *
+     *   APPLY, once the restore has SETTLED — on its success path and on its
+     *   failure path alike, so a database that will not open cannot swallow
+     *   the user's share. The user's deliberate, just-now gesture therefore
+     *   beats the draft it landed on BY CONSTRUCTION rather than by winning a
+     *   race, and everything the restore brought back is kept: a share writes
+     *   one block's lyrics, never the workspace.
+     */
+    const sharedIntent = readSharedIntent();
+
+    function readSharedIntent() {
+      if (typeof window === 'undefined' || !window.location) return null;
+      try {
+        return parseSharedLyrics(String(window.location.search || ''));
+      } catch (err) {
+        // A URL this browser cannot parse is not worth taking the boot down.
+        return null;
+      }
+    }
+
+    /*
+     * The share has been consumed, so the parameters come off the address bar.
+     * Not tidiness: leaving ?lyrics= there means a RELOAD re-imports the
+     * original text over whatever the user has since typed into that block.
+     * Guarded because replaceState is refused on some file:// origins, and a
+     * URL that cannot be tidied is cosmetic where a lost edit is not.
+     */
+    function clearShareParams() {
+      try {
+        if (window.history && typeof window.history.replaceState === 'function') {
+          window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+        }
+      } catch (err) {
+        /* the import already happened; the URL is the only thing left stale */
+      }
+    }
+
+    /** Where a share lands: the first block's lyric box, or a new [Verse]. */
+    function applySharedIntent() {
+      if (!sharedIntent || !sharedIntent.present) return;
+      if (!sharedIntent.lyrics) {
+        // A title-only or link-only share. Say so rather than inventing a
+        // lyric out of a page title.
+        toastHost.show(shareToastMessage(sharedIntent, ''), 'warn');
+        clearShareParams();
+        return;
+      }
+
+      let targetId = null;
+      // One undo step for one import: Ctrl+Z takes the shared text back out.
+      asOneStep(function () {
+        const list = structure.blocks();
+        targetId = list.length ? list[0].id : structure.addBlock('Verse');
+        structure.setLyrics(targetId, sharedIntent.lyrics);
+      });
+
+      // setLyrics changes no block ORDER, and the list only rebuilds when the
+      // order changes (structureSignature is the id list). Without an explicit
+      // repaint the store would hold the shared text while the textarea on
+      // screen still showed what was there before.
+      renderStructure();
+
+      const found = blockAt(targetId);
+      toastHost.show(
+        shareToastMessage(
+          sharedIntent,
+          found ? formatStructureTag(found.block.section, found.block.number, found.block.modifiers) : ''
+        )
+      );
+      clearShareParams();
+    }
+
+    ignoreRejection(sessionRestore.then(applySharedIntent, applySharedIntent));
+
+    /* -- F. Install capability (FDD #89) -- */
+
+    const installAffordance = $('install-affordance');
+    const installBtn = $('btn-install');
+    const installDismissBtn = $('btn-install-dismiss');
+
+    const installCapability = createInstallCapability({
+      window: typeof window !== 'undefined' ? window : null,
+      onChange: function (availableNow) {
+        // The one and only thing that ever un-hides this control.
+        installAffordance.hidden = !availableNow;
+      },
+    });
+    installCapability.listen();
+
+    installBtn.addEventListener('click', function () {
+      const choice = installCapability.prompt();
+      if (!choice || typeof choice.then !== 'function') return;
+      ignoreRejection(
+        choice.then(
+          function (result) {
+            if (result && result.outcome === 'accepted') return;
+            toastHost.show('Install cancelled — nothing changed, and everything here still works in the tab.');
           },
           function () {
-            toastHost.show('Could not read your last session — starting clean.', 'warn');
+            // The engine declined to show its dialog. There is nothing to add
+            // that the absent dialog has not already said.
           }
-        );
-      })
-    );
+        )
+      );
+    });
+
+    installDismissBtn.addEventListener('click', function () {
+      installCapability.dismiss();
+      // The control the user was standing on has just been hidden; leaving
+      // focus on a hidden element strands the keyboard on <body>.
+      if (typeof themeBtn.focus === 'function') themeBtn.focus();
+    });
 
     /** The one toast contract F asks for, with a real dismiss control on it. */
     function showRestoredToast(applied) {

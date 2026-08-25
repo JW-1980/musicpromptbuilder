@@ -48,6 +48,7 @@ const path = require('node:path');
 const assert = require('node:assert');
 const { suite } = require('./lib/runner.js');
 const { loadAppSandbox, fakeEl, fakeStorage, cssBlock, stripCssComments } = require('./ui-layout.test.js');
+const { stripScriptBodies } = require('./lib/extract.js');
 
 const INDEX = path.resolve(__dirname, '..', 'index.html');
 const PREFS_KEY = 'suno_ui_prefs';
@@ -2451,8 +2452,16 @@ s.test('the theme switcher is a menu button whose accessible name carries its vi
     /id="theme-glyph-sun"[\s\S]{0,400}hidden>/.test(html),
     'the sun glyph must start hidden — the app boots into a dark-based theme'
   );
+  /* CONSCIOUSLY NARROWED IN 0.19.0: this used to scan the whole file. It now
+   * scans the MARKUP, because 0.19.0 added an SVG that is not markup — the PWA
+   * icon (FDD #89), which is a STANDALONE SVG document inside a data: URI in
+   * #app-main and does not parse without an xmlns. The assertion's actual
+   * subject is unchanged and still enforced: an <svg> ELEMENT in this HTML
+   * needs no namespace, and one carrying an absolute URL would be a URL in a
+   * resource-loading position. The icon's namespace is allowed by
+   * tests/verify-single-file.js rule 7, exact-match, with its own negatives. */
   assert.ok(
-    !/<svg[^>]*xmlns=/.test(html),
+    !/<svg[^>]*xmlns=/.test(stripScriptBodies(html)),
     'inline SVG needs no xmlns in HTML, and an absolute URL would trip the single-file scan'
   );
 });

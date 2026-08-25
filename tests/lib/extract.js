@@ -174,4 +174,30 @@ function loadWorkerSandbox(htmlPath, opts) {
   };
 }
 
-module.exports = { extractScriptById, loadWorkerSandbox, listScripts, parseAttributes };
+/**
+ * Blank out every <script> BODY, keeping the tags and every newline so line
+ * numbers survive.
+ *
+ * "Is this MARKUP?" and "is this anywhere in the file?" are different
+ * questions, and several assertions want the first one. #app-main documents
+ * the app's own DOM by quoting tags — `<link rel="manifest">`, `<svg xmlns=…>`
+ * — and a tag named in a comment is prose, not an element in the document.
+ * Callers that genuinely mean "anywhere in the file" simply do not use this.
+ *
+ * @param {string} html
+ * @returns {string} the same length in lines, with script bodies spaced out
+ */
+function stripScriptBodies(html) {
+  return String(html).replace(
+    /(<script\b(?:[^>"']|"[^"]*"|'[^']*')*>)([\s\S]*?)(<\/script\s*>)/gi,
+    (whole, open, body, close) => open + body.replace(/[^\n]/g, ' ') + close
+  );
+}
+
+module.exports = {
+  extractScriptById,
+  loadWorkerSandbox,
+  listScripts,
+  parseAttributes,
+  stripScriptBodies,
+};

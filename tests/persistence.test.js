@@ -2290,14 +2290,25 @@ s.test('the autosave is debounced, subscribed to all three stores and flushed on
 
 s.test('every IndexedDB call in the boot code handles its own rejection', () => {
   const source = app.source;
-  /* Every call site must do ONE of three things with the promise it gets:
+  /* Every call site must do ONE of four things with the promise it gets:
    *   - hand it to ignoreRejection(), which attaches a catch;
    *   - `return` it, so the caller owns the outcome;
    *   - push it into an array that is later handed to Promise.all() and
-   *     handled there.
+   *     handled there;
+   *   - BIND it to a name that is itself handed to ignoreRejection() somewhere
+   *     in the same source (see below).
    * Anything else is a promise nobody is watching, which is exactly the
-   * unhandled rejection ENGINEERING-STANDARD §2.3 forbids. */
+   * unhandled rejection ENGINEERING-STANDARD §2.3 forbids.
+   *
+   * CONSCIOUSLY EXTENDED IN 0.19.0 with the fourth shape. The session restore
+   * became a NAMED promise because FDD #92's shared-lyrics import has to run
+   * when it has settled — `sessionRestore.then(apply, apply)` — and the
+   * chain, not the raw call, is what gets the catch. The guarantee is not
+   * weakened: the binding only counts when this same file really does pass
+   * that name to ignoreRejection, so a promise bound to a name and then
+   * forgotten still fails exactly as before. */
   const allowed = /(?:ignoreRejection\(\s*|return\s+|\.push\(\s*)$/;
+  const bound = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/;
   const call = /idb\.(?:put|get|getAll|delete|count|clear|ready)\(/g;
   const unguarded = [];
   let found = 0;
@@ -2305,7 +2316,10 @@ s.test('every IndexedDB call in the boot code handles its own rejection', () => 
   while ((m = call.exec(source)) !== null) {
     found += 1;
     const before = source.slice(Math.max(0, m.index - 40), m.index);
-    if (!allowed.test(before)) unguarded.push(`…${before.slice(-24).replace(/\s+/g, ' ')}${m[0]}`);
+    if (allowed.test(before)) continue;
+    const binding = bound.exec(before);
+    if (binding && new RegExp(`ignoreRejection\\(\\s*${binding[1]}\\b`).test(source)) continue;
+    unguarded.push(`…${before.slice(-24).replace(/\s+/g, ' ')}${m[0]}`);
   }
   assert.ok(found >= 8, `only ${found} idb calls found — the wiring is missing`);
   deepEqual(unguarded, [], `an idb call is issued without handling its rejection:\n  ${unguarded.join('\n  ')}`);

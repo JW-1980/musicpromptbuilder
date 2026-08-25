@@ -54,6 +54,32 @@
  *      code fetched at runtime is only as trustworthy as the digest in front
  *      of it.
  *
+ * ---------------------------------------------------------------------------
+ * URL POLICY v3 — two rules added CONSCIOUSLY for the inline PWA manifest
+ * (FDD #89/#92, APP_VERSION 0.19.0). Both NARROW the file rather than widen
+ * it: rule 6 catches a class of single-file breakage rule 1 never could, and
+ * rule 7 is an exact-match allowance for two strings that are names rather
+ * than addresses.
+ *
+ *   6. INLINE MANIFEST — a <link rel="manifest"> may carry NO href at all (the
+ *      boot script fills one in) or a `data:` URI, and nothing else.
+ *      A remote manifest is a network dependency at boot, which rule 1 already
+ *      catches. A RELATIVE one — href="manifest.json" — is a SECOND FILE, and
+ *      rule 1 does NOT catch it, because rule 1 only ever looked for absolute
+ *      URLs. Shipping index.html to somebody who does not also get
+ *      manifest.json is exactly the failure the single-file promise exists to
+ *      prevent, so it gets a rule of its own.
+ *
+ *   7. XML NAMESPACE IDENTIFIERS — the exact literals
+ *      'http://www.w3.org/2000/svg' and 'http://www.w3.org/1999/xlink' are
+ *      allowed as string literals anywhere rule 2 governs. An XML namespace is
+ *      a NAME, not an address: no engine has ever fetched one, and a
+ *      standalone SVG document (the manifest's inline icon) does not parse
+ *      without the first of them. The allowance is EXACT-MATCH — one extra
+ *      path segment and it is an ordinary unregistered URL again — and it does
+ *      NOT extend to rule 3: handing a namespace to fetch() is still a network
+ *      call and still fails.
+ *
  * `scanSingleFile(htmlPath)` is exported so other harnesses (and the negative
  * tests at the bottom of this file) can point it at an arbitrary file.
  * ---------------------------------------------------------------------------
@@ -65,7 +91,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { suite } = require('./lib/runner.js');
-const { listScripts, parseAttributes } = require('./lib/extract.js');
+const { listScripts, parseAttributes, stripScriptBodies } = require('./lib/extract.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const INDEX = path.join(ROOT, 'index.html');
@@ -86,6 +112,12 @@ const PRESET_REGISTRY = 'CLOUD_API_PRESETS';
 const GOVERNED_SCRIPT_IDS = ['app-main', 'dsp-worker-src', 'ai-worker-src'];
 /** Hosts a data call may legitimately hard-code. */
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0'];
+/**
+ * Rule 7. XML namespace NAMES, matched exactly and never by prefix. These two
+ * identify a vocabulary; nothing dereferences them. The SVG one is required by
+ * any standalone SVG document, which is what the PWA icon is.
+ */
+const XML_NAMESPACE_URIS = ['http://www.w3.org/2000/svg', 'http://www.w3.org/1999/xlink'];
 
 /**
  * Strip HTML comments so commented-out examples (and the doc block at the top
@@ -95,6 +127,16 @@ const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0'];
 function stripComments(html) {
   return html.replace(/<!--[\s\S]*?-->/g, '');
 }
+
+/*
+ * stripScriptBodies() comes from tests/lib/extract.js. The structural <link>
+ * walk below reads MARKUP, and the inside of a script element is not markup:
+ * #app-main's own documentation quotes the tag `<link rel="manifest">` three
+ * times while explaining the inline manifest, and a prose mention is not a
+ * fourth link element in the document. Only the rules that genuinely mean
+ * "anywhere in the file" (rule 1's src/href scan, the fetch scan, the
+ * string-literal rules) keep seeing script bodies.
+ */
 
 /**
  * Is this URL pointed at the machine the browser is running on?
@@ -111,6 +153,17 @@ function isLoopbackUrl(url) {
   else host = host.slice(0, host.indexOf(']') + 1) || host;
   if (LOOPBACK_HOSTS.indexOf(host) !== -1) return true;
   return /\.localhost$/.test(host);
+}
+
+/**
+ * Rule 7. Is this literal one of the two XML namespace names, EXACTLY?
+ * Exact-match on purpose: 'http://www.w3.org/2000/svg/steal.js' is a URL that
+ * merely starts like a namespace, and it must still fail.
+ *
+ * @param {string} url
+ */
+function isXmlNamespaceUri(url) {
+  return XML_NAMESPACE_URIS.indexOf(String(url)) !== -1;
 }
 
 /**
@@ -266,7 +319,7 @@ function findRegistrySpans(source, lex) {
  *
  * @param {string} source one inline script's JavaScript
  * @returns {Array<{url:string, index:number, loopback:boolean, inRegistry:boolean,
- *                  registry:string|null}>}
+ *                  registry:string|null, namespace:boolean}>}
  */
 function listUrlLiterals(source) {
   const lex = lexJs(source);
@@ -284,6 +337,7 @@ function listUrlLiterals(source) {
         loopback: isLoopbackUrl(m[0]),
         inRegistry: !!home,
         registry: home ? home.name : null,
+        namespace: isXmlNamespaceUri(m[0]),
       });
     }
   }
@@ -383,6 +437,7 @@ function listUnpinnedCodeSources(source) {
  *   scriptIds: string[], workerScriptType: string|null,
  *   registryScriptIds: string[], modelRegistryScriptIds: string[],
  *   registriesFound: string[], urlLiterals: Array<object>,
+ *   manifestLinks: Array<{href: string|null}>,
  *   violations: Array<{rule: string, line: number, excerpt: string}>
  * }}
  */
@@ -399,6 +454,7 @@ function scanSingleFile(htmlPath) {
     modelRegistryScriptIds: [],
     registriesFound: [],
     urlLiterals: [],
+    manifestLinks: [],
     violations: [],
   };
   if (!report.exists) return report;
@@ -467,12 +523,23 @@ function scanSingleFile(htmlPath) {
   // <link rel="stylesheet"> of ANY kind — even a relative sibling .css file
   // breaks single-file distribution. Parsed structurally rather than by regex
   // so quoted attribute values can never confuse the match.
+  //
+  // Rule 6 rides along in the same walk: <link rel="manifest"> may have no
+  // href (the boot script writes a data: one) or a data: href, and nothing
+  // else. A RELATIVE manifest href is the case rule 1 cannot see — it is not
+  // an absolute URL, it is a second file.
+  const markup = stripScriptBodies(html);
   const linkRe = /<link\b((?:[^>"']|"[^"]*"|'[^']*')*)\/?>/gi;
   let lm;
-  while ((lm = linkRe.exec(html)) !== null) {
+  while ((lm = linkRe.exec(markup)) !== null) {
     const attrs = parseAttributes(lm[1]);
     const rel = (attrs.rel || '').toLowerCase().split(/\s+/);
     if (rel.includes('stylesheet')) add('link-stylesheet', lm[0]);
+    if (rel.includes('manifest')) {
+      report.manifestLinks.push({ href: attrs.href === undefined ? null : String(attrs.href) });
+      const href = attrs.href === undefined ? '' : String(attrs.href).trim();
+      if (href && !/^data:/i.test(href)) add('manifest-href', lm[0]);
+    }
   }
 
   // Rules 2 and 5 — string literals inside the governed inline scripts.
@@ -496,8 +563,9 @@ function scanSingleFile(htmlPath) {
         loopback: hit.loopback,
         inRegistry: hit.inRegistry,
         registry: hit.registry,
+        namespace: hit.namespace,
       });
-      if (hit.loopback || hit.inRegistry) continue;
+      if (hit.loopback || hit.inRegistry || hit.namespace) continue;
       add('unregistered-url-literal', `${id}: ${hit.url}`);
     }
     for (const unpinned of listUnpinnedCodeSources(script.source)) {
@@ -516,23 +584,39 @@ function describe(violations) {
 /* Negative-test scaffolding — scratch copies in the OS temp dir              */
 /* -------------------------------------------------------------------------- */
 
-const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'suno-verify-'));
+/*
+ * Created on FIRST USE, not at import time. tests/pwa.test.js requires this
+ * module for scanSingleFile(), and a module that mkdtemps on import would
+ * leave an empty directory behind on every run of a suite that never writes a
+ * fixture.
+ */
+let SCRATCH = null;
 const scratchFiles = [];
+
+function scratchDir() {
+  if (SCRATCH === null) SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'suno-verify-'));
+  return SCRATCH;
+}
 
 /** Write an HTML fixture and return its path. */
 function scratch(name, html) {
-  const file = path.join(SCRATCH, name);
+  const file = path.join(scratchDir(), name);
   fs.writeFileSync(file, html, 'utf8');
   scratchFiles.push(file);
   return file;
 }
 
-/** Minimal but structurally valid single-file app, with an injected body. */
-function fixture(appMainBody) {
+/**
+ * Minimal but structurally valid single-file app, with an injected body and
+ * (since rule 6) an optional extra chunk of <head>.
+ */
+function fixture(appMainBody, headExtra) {
   return [
     '<!DOCTYPE html>',
     '<html lang="en"><head><meta charset="UTF-8"><title>fixture</title>',
-    '<style>body { background: #0A0A0C; }</style></head><body>',
+    '<style>body { background: #0A0A0C; }</style>',
+    headExtra || '',
+    '</head><body>',
     '<script id="dsp-worker-src" type="text/js-worker">',
     "'use strict';",
     'self.onmessage = function () {};',
@@ -668,7 +752,11 @@ s.test(`var ${PRESET_REGISTRY} exists in #app-main and owns the remote endpoints
       `no \`var ${PRESET_REGISTRY} = { ... }\` declaration found in #app-main — the URL policy has nowhere to allow-list`
     );
   }
-  const remote = scan.urlLiterals.filter((u) => !u.loopback);
+  // CONSCIOUSLY AMENDED IN 0.19.0 (rule 7): XML namespace names are excluded
+  // here for the same reason they are excluded from the violation list — they
+  // are not endpoints, so demanding a registry own them would be demanding
+  // that the SVG icon's `xmlns` be declared as an inference endpoint.
+  const remote = scan.urlLiterals.filter((u) => !u.loopback && !u.namespace);
   if (!remote.length) throw new Error('the preset registry declares no remote endpoint at all');
   const stray = remote.filter((u) => !u.inRegistry);
   if (stray.length) {
@@ -947,10 +1035,170 @@ s.test('lexer: a regex literal holding backticks does not desync literal scannin
   }
 });
 
+/* --- URL POLICY v3: the inline manifest (rule 6) and namespaces (rule 7) --- */
+
+const MANIFEST_DATA_HREF = 'data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%22x%22%7D';
+
+s.test('rule 6: index.html ships exactly one manifest link, and it carries no href in source', () => {
+  if (scan.manifestLinks.length !== 1) {
+    throw new Error(
+      `expected exactly 1 <link rel="manifest">, found ${scan.manifestLinks.length} — the inline ` +
+        'manifest is one link whose href the boot script writes'
+    );
+  }
+  const href = scan.manifestLinks[0].href;
+  if (href !== null && href.trim() !== '') {
+    throw new Error(
+      `the manifest link ships with href="${href}"; it must be empty in source so the only manifest ` +
+        'that ever exists is the data: URI built from var PWA_MANIFEST at boot'
+    );
+  }
+});
+
+s.test('rule 7: the SVG namespace is the ONLY non-registry, non-loopback literal', () => {
+  const namespaces = scan.urlLiterals.filter((u) => u.namespace);
+  if (!namespaces.length) {
+    throw new Error(
+      'no XML namespace literal found — the PWA icon is a standalone SVG document and cannot ' +
+        'parse without one, so its absence means the icon is gone'
+    );
+  }
+  for (const hit of namespaces) {
+    if (XML_NAMESPACE_URIS.indexOf(hit.url) === -1) {
+      throw new Error(`"${hit.url}" was tagged as a namespace but is not one of the two allowed names`);
+    }
+  }
+  const unaccounted = scan.urlLiterals.filter((u) => !u.loopback && !u.inRegistry && !u.namespace);
+  if (unaccounted.length) {
+    throw new Error(`literals answering to no rule: ${unaccounted.map((u) => u.url).join(', ')}`);
+  }
+});
+
+s.test('NEGATIVE: rule 6 — a data: manifest href scans clean, an absent one too', () => {
+  for (const [name, link] of [
+    ['absent href', '<link rel="manifest">'],
+    ['empty href', '<link rel="manifest" href="">'],
+    ['data href', `<link rel="manifest" href="${MANIFEST_DATA_HREF}">`],
+    ['multi-token rel', `<link rel="manifest alternate" href="${MANIFEST_DATA_HREF}">`],
+  ]) {
+    const r = scanSingleFile(scratch(`manifest-ok-${name.replace(/\s/g, '-')}.html`, fixture(REGISTRY_FIXTURE, link)));
+    if (r.violations.length) {
+      throw new Error(`"${name}" must scan clean, got:\n${describe(r.violations)}`);
+    }
+    if (r.manifestLinks.length !== 1) throw new Error(`"${name}": the link was not seen at all`);
+  }
+});
+
+s.test('NEGATIVE: rule 6 — a REMOTE manifest href still fails, on two rules at once', () => {
+  for (const [name, href] of [
+    ['https', 'https://cdn.example.com/manifest.json'],
+    ['http', 'http://cdn.example.com/manifest.json'],
+    ['protocol-relative', '//cdn.example.com/manifest.json'],
+  ]) {
+    const link = `<link rel="manifest" href="${href}">`;
+    const r = scanSingleFile(scratch(`manifest-remote-${name}.html`, fixture(REGISTRY_FIXTURE, link)));
+    const rules = r.violations.map((v) => v.rule);
+    if (rules.indexOf('manifest-href') === -1) {
+      throw new Error(`"${name}": rule 6 did not fire; saw: ${rules.join(', ') || '(none)'}`);
+    }
+    // Rule 1 has always caught this shape, and it must keep catching it: a
+    // remote manifest is a boot-time network dependency whatever else it is.
+    if (rules.indexOf('external-src-or-href') === -1) {
+      throw new Error(`"${name}": rule 1 stopped firing on a remote href; saw: ${rules.join(', ')}`);
+    }
+  }
+
+  // Loopback is NOT a licence here. A manifest served off localhost is still a
+  // file this bundle does not contain.
+  const loopback = scanSingleFile(
+    scratch('manifest-loopback.html', fixture(REGISTRY_FIXTURE, '<link rel="manifest" href="http://localhost:8080/manifest.json">'))
+  );
+  if (!loopback.violations.some((v) => v.rule === 'manifest-href')) {
+    throw new Error(`a loopback manifest slipped through:\n${describe(loopback.violations)}`);
+  }
+});
+
+s.test('NEGATIVE: rule 6 — a RELATIVE manifest href fails, which is the whole point of the rule', () => {
+  for (const href of ['manifest.json', './manifest.json', '/manifest.webmanifest', '../app/manifest.json']) {
+    const link = `<link rel="manifest" href="${href}">`;
+    const r = scanSingleFile(scratch(`manifest-rel-${href.replace(/[^a-z]/gi, '')}.html`, fixture(REGISTRY_FIXTURE, link)));
+    const hits = r.violations.filter((v) => v.rule === 'manifest-href');
+    if (hits.length !== 1) {
+      throw new Error(
+        `href="${href}" is a sibling file and must be flagged; got ${hits.length}:\n${describe(r.violations)}`
+      );
+    }
+    // …and prove rule 1 really could not see it, so the new rule is not
+    // duplicating one that already existed.
+    if (r.violations.some((v) => v.rule === 'external-src-or-href')) {
+      throw new Error(`href="${href}" was caught by rule 1 after all — rule 6 would be redundant`);
+    }
+  }
+});
+
+s.test('NEGATIVE: a <link> QUOTED inside a script is prose, a real one beside it is not', () => {
+  // #app-main documents the inline manifest by naming the tag. That must not
+  // register as a second link element…
+  const body = `${REGISTRY_FIXTURE}\n/* the boot script fills in <link rel="manifest"> and <link rel="stylesheet"> */`;
+  const quoted = scanSingleFile(scratch('link-in-script.html', fixture(body)));
+  if (quoted.manifestLinks.length) throw new Error('a mention inside a script was counted as a link element');
+  if (quoted.violations.length) throw new Error(`prose must scan clean:\n${describe(quoted.violations)}`);
+
+  // …while a real one in the head is still seen, so the blanking cannot be
+  // used to smuggle a link past the walk.
+  const real = scanSingleFile(
+    scratch('link-real.html', fixture(body, '<link rel="stylesheet" href="theme.css">\n<link rel="manifest" href="manifest.json">'))
+  );
+  const rules = real.violations.map((v) => v.rule);
+  for (const expected of ['link-stylesheet', 'manifest-href']) {
+    if (rules.indexOf(expected) === -1) throw new Error(`"${expected}" did not fire; saw: ${rules.join(', ') || '(none)'}`);
+  }
+  if (real.manifestLinks.length !== 1) throw new Error(`expected 1 manifest link, saw ${real.manifestLinks.length}`);
+});
+
+s.test('NEGATIVE: rule 7 — the two namespace names pass, a lookalike does not', () => {
+  const allowed = XML_NAMESPACE_URIS.map((ns) => `var NS_${ns.length} = '${ns}';`).join('\n');
+  const clean = scanSingleFile(scratch('ns-ok.html', fixture(`${REGISTRY_FIXTURE}\n${allowed}`)));
+  if (clean.violations.length) {
+    throw new Error(`the namespace names must scan clean:\n${describe(clean.violations)}`);
+  }
+  if (clean.urlLiterals.filter((u) => u.namespace).length !== XML_NAMESPACE_URIS.length) {
+    throw new Error('not every namespace literal was recognised');
+  }
+
+  for (const lookalike of [
+    'http://www.w3.org/2000/svg/steal.js',
+    'https://www.w3.org/2000/svg',
+    'http://www.w3.org/2000/',
+    'http://evil.example.com/http://www.w3.org/2000/svg',
+  ]) {
+    const body = `${REGISTRY_FIXTURE}\nvar SNEAKY = '${lookalike}';`;
+    const r = scanSingleFile(scratch(`ns-bad-${lookalike.replace(/[^a-z]/gi, '').slice(0, 24)}.html`, fixture(body)));
+    const hits = r.violations.filter((v) => v.rule === 'unregistered-url-literal');
+    if (hits.length !== 1) {
+      throw new Error(`"${lookalike}" must not inherit the namespace allowance; got:\n${describe(r.violations)}`);
+    }
+  }
+});
+
+s.test('NEGATIVE: rule 7 does not extend to rule 3 — fetching a namespace is still a fetch', () => {
+  const body = `${REGISTRY_FIXTURE}\nfunction ns() { return fetch('http://www.w3.org/2000/svg'); }`;
+  const r = scanSingleFile(scratch('ns-fetch.html', fixture(body)));
+  const hits = r.violations.filter((v) => v.rule === 'network-fetch-url');
+  if (hits.length !== 1) {
+    throw new Error(`a fetch() to a namespace must still be a network call; got:\n${describe(r.violations)}`);
+  }
+  // The literal itself is still allowed — it is the CALL that is refused.
+  if (r.violations.some((v) => v.rule === 'unregistered-url-literal')) {
+    throw new Error('the namespace literal must not be double-reported');
+  }
+});
+
 s.test('scratch fixtures are cleaned up', () => {
   for (const file of scratchFiles) {
     if (fs.existsSync(file)) fs.unlinkSync(file);
   }
+  if (SCRATCH === null) throw new Error('no scratch directory was ever created — no fixture ran');
   fs.rmSync(SCRATCH, { recursive: true, force: true });
   if (fs.existsSync(SCRATCH)) throw new Error(`scratch dir survived: ${SCRATCH}`);
 });
@@ -958,6 +1206,7 @@ s.test('scratch fixtures are cleaned up', () => {
 module.exports = {
   scanSingleFile,
   stripComments,
+  stripScriptBodies,
   lexJs,
   findDeclarationSpan,
   findRegistrySpans,
@@ -965,10 +1214,12 @@ module.exports = {
   listUrlLiterals,
   listUnpinnedCodeSources,
   isLoopbackUrl,
+  isXmlNamespaceUri,
   PRESET_REGISTRY,
   MODEL_REGISTRY,
   ALLOWED_URL_REGISTRIES,
   GOVERNED_SCRIPT_IDS,
+  XML_NAMESPACE_URIS,
 };
 
 if (require.main === module) {
