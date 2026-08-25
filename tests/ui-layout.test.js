@@ -62,7 +62,7 @@ const TOKEN_BLOCK_SELECTORS = [
  * things in this file a version bump may touch, and they move together.
  * Convention since the v1.1.0 release audit: per-task bumps between releases,
  * and the release commit aligns APP_VERSION, package.json and the git tag. */
-const EXPECTED_VERSION = '1.1.0'; // CONSCIOUSLY UPDATED IN 1.1.0: release-audit version reconciliation — APP_VERSION, package.json and the git tag align at release time; per-task bumps continue between releases.
+const EXPECTED_VERSION = '1.2.0'; // CONSCIOUSLY UPDATED IN 1.2.0: FDD #49/#81/#83 (Pure Instrumental Mode Lock, Tag Clutter Warning, Prompt Synergy Score) — a per-task bump between releases.
 /* The Prompt Editor's four workflow zones, in the order they must be read. */
 const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
 /* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
@@ -918,7 +918,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the studio-keyboard release (FDD #90's var STUDIO_KEYBINDS matched by the pure matchStudioKeybind behind ONE capture-phase dispatcher, plus FDD #16's Spotlight-style command palette over buildPaletteIndex / paletteMatch)`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the compiler-intelligence release (FDD #49's Pure Instrumental Mode Lock over compileStylePrompt's instrumentalLock branch, FDD #81's Tag Clutter Warning over isInstrumentClutter, and FDD #83's Prompt Synergy Score over computeSynergyScore)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });
@@ -1170,6 +1170,48 @@ s.test('the token blocks are the only place a hex colour appears', () => {
       `${hit.hex} on line ${hit.line} is declared outside ${TOKEN_BLOCK_SELECTORS.join(' / ')}`
     );
   }
+});
+
+/*
+ * OVERLAP GUARD (this task's brief, section OVERLAP). A concurrent session
+ * owns .btn-mini, .btn-record and .theme-switching's own bodies (plus
+ * repaintTheme() and two other CSS ranges this file does not touch) — this
+ * task's new CSS is additive selectors only, never a change to these three.
+ * Byte-identical golden copies, re-anchored by SELECTOR TEXT rather than a
+ * line number so a rebase onto their tree cannot silently stale this out.
+ */
+s.test('the concurrent session\'s .btn-mini, .btn-record and .theme-switching bodies are untouched, byte-for-byte', () => {
+  const css = readStyle();
+
+  const btnMini = cssBlock(css, '.btn-mini {');
+  assert.ok(btnMini, '.btn-mini rule is missing');
+  assert.strictEqual(
+    btnMini.body,
+    '\n    padding: 7px 15px;\n    font: inherit;\n    font-size: 0.72rem;\n    letter-spacing: 0.06em;\n' +
+      '    text-transform: uppercase;\n    color: var(--text-dim);\n    background: var(--surface);\n' +
+      '    border: 1px solid var(--surface-border);\n    border-radius: 999px;\n    cursor: pointer;\n' +
+      '    transition: color 140ms ease, border-color 140ms ease;\n  ',
+    '.btn-mini\'s own body must not change under this task'
+  );
+
+  const btnRecord = cssBlock(css, '.btn-record {');
+  assert.ok(btnRecord, '.btn-record rule is missing');
+  assert.strictEqual(
+    btnRecord.body,
+    '\n    display: inline-flex;\n    align-items: center;\n    gap: 10px;\n    padding: 10px 20px;\n' +
+      '    font: inherit;\n    font-size: 0.9rem;\n    color: var(--text);\n    background: var(--surface);\n' +
+      '    border: 1px solid var(--surface-border);\n    border-radius: 999px;\n    cursor: pointer;\n' +
+      '    transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;\n  ',
+    '.btn-record\'s own body must not change under this task'
+  );
+
+  const themeSwitching = cssBlock(css, '.theme-switching');
+  assert.ok(themeSwitching, '.theme-switching rule is missing');
+  assert.strictEqual(
+    themeSwitching.body,
+    '\n    transition: none !important;\n  ',
+    '.theme-switching\'s body (the Chrome freeze-fix kill class) must not change under this task'
+  );
 });
 
 /* -------------------------------------------------------------------------- */

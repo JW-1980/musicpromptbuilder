@@ -1953,6 +1953,18 @@
      flattening are already right. Only the things this card adds are below. */
   .vocal-panel { margin-top: 24px; }
 
+  /* FDD #49's lock button sits beside the heading. Own rule, not appended to
+     .style-head (:2304) — the two cards' headers just happen to want the
+     same flex shape, the way .btn-instrument's pressed state (:2178) is its
+     own rule rather than a share. */
+  .vocal-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
   .vocal-row {
     margin-top: 16px;
     display: flex;
@@ -1985,6 +1997,18 @@
     color: var(--accent-cyan);
     background: var(--tint-cyan);
     border-color: var(--tint-cyan-border);
+  }
+
+  /* FDD #49's lock, pressed. The exclude shield's exact accent trio (:1923),
+     not the cyan every ADD toggle wears above: this button REMOVES vocal
+     tags rather than adding anything, the same direction .exclude-chip's
+     crimson already signals. Deliberately NO transition — the measured Chrome
+     freeze .instrument-badge's own rule documents (:2134): a colour
+     transition here would be a third instance of the same bug. */
+  .btn-lock[aria-pressed="true"] {
+    color: var(--danger-crimson);
+    background: var(--tint-crimson);
+    border-color: var(--tint-crimson-border);
   }
 
   /* --- Production Era & Signature (FDD #66) over the era registry --------- */
@@ -2417,6 +2441,13 @@
   }
 
   .style-conflicts[hidden] { display: none; }
+
+  /* --- Prompt Synergy Score (FDD #83) -------------------------------------
+     The shell (.style-gauge-head), the caveat note (.style-zone-note) and the
+     deductions list (.style-conflicts) are all reused as-is — see A7 in the
+     implementation notes. The one genuinely new rule is the low-score colour
+     below; .style-count itself is untouched, on purpose. */
+  .style-synergy-score.is-warn { color: var(--warning-amber); }
 
   .style-conflicts li + li { margin-top: 4px; }
 
@@ -3376,6 +3407,7 @@
   .high-contrast .style-meter,
   .high-contrast .exclude-chip[aria-pressed="true"],
   .high-contrast .btn-persona[aria-pressed="true"],
+  .high-contrast .btn-lock[aria-pressed="true"],
   .high-contrast .view-tab[aria-selected="true"] {
     background: var(--bg);
   }
@@ -3391,8 +3423,10 @@
   /* The shield's pressed state is a colour on a translucent wash, and Code
      Mode has just flattened the wash. The crimson border becomes the whole
      signal, so it has to be the accent rather than the neutral hairline the
-     rule above would otherwise give it. */
-  .high-contrast .exclude-chip[aria-pressed="true"] {
+     rule above would otherwise give it. The instrumental lock shares the
+     exact same wash, so it needs the exact same override. */
+  .high-contrast .exclude-chip[aria-pressed="true"],
+  .high-contrast .btn-lock[aria-pressed="true"] {
     border: 1px solid var(--danger-crimson);
   }
 
@@ -4170,7 +4204,16 @@
          the case that rule exists for, so it reuses the same .vlist scroller
          the history and preset cards use rather than mounting 104 rows. -->
     <section class="view-col vibe-card vocal-panel" aria-labelledby="vocal-heading">
-      <h4 id="vocal-heading" class="panel-heading">Vocal persona</h4>
+      <div class="vocal-head">
+        <h4 id="vocal-heading" class="panel-heading">Vocal persona</h4>
+        <!-- FDD #49's Pure Instrumental Mode Lock. A compile-time switch, not
+             another persona: pressed, the compiler drops every vocal-section
+             tag (whatever this card added) and writes ONE instrumental-only
+             directive instead — see compileStylePrompt()'s instrumentalLock
+             branch. -->
+        <button type="button" id="btn-instrumental-lock" class="btn-mini btn-lock"
+                aria-pressed="false">Lock to instrumental</button>
+      </div>
       <p class="panel-note">
         Pick the voice, not the singer. Every persona is a generic, copyright-safe
         timbre description — search by family (choral, rap, metal), by timbre
@@ -4192,6 +4235,11 @@
         No persona picked yet — the prompt carries no vocal timbre.
       </p>
       <div id="vocal-chips" class="vocal-chips"></div>
+      <!-- FDD #49. Shown ONLY while the lock is on AND it actually had a vocal
+           tag to drop — the same "kept, not deleted" idiom #exclude-model-note
+           carries: nothing here is destroyed, the store still holds it, and
+           unlocking compiles it again. -->
+      <p id="vocal-lock-note" class="style-trimmed" role="status" aria-live="polite" hidden></p>
 
       <p id="vocal-empty" class="draft-empty" hidden></p>
       <div id="vocal-list" class="vlist" tabindex="0" aria-label="Vocal personas"></div>
@@ -4237,6 +4285,10 @@
       </p>
       <div id="instrument-badges" class="instrument-badges" role="group"
            aria-label="Stacked instrument blocks"></div>
+      <!-- FDD #81's Tag Clutter Warning. Counts BLOCKS (selectedInstrumentBlocks
+           .length, the same number the footer below prints as "N stacked"),
+           never counts().sections.instrument, which counts tags. -->
+      <p id="instrument-clutter-note" class="style-trimmed" role="status" aria-live="polite" hidden></p>
 
       <p id="instrument-empty" class="draft-empty" hidden></p>
       <div id="instrument-list" class="vlist" tabindex="0" aria-label="Instrument blocks"></div>
@@ -4459,6 +4511,22 @@
         <p id="style-zone-note" class="style-zone-note" role="status" aria-live="polite">
           Plenty of room — 850 characters or fewer.
         </p>
+      </div>
+
+      <!-- Prompt Synergy Score (docs/FDD.md #83, FEATURE-MECHANICS.md §5.1).
+           Base 100, docked once for instrument clutter and once, flat, for
+           any real tag conflict — see computeSynergyScore()'s docblock for
+           the flat-once reasoning on both deductions and for why the
+           lyrics-cadence rule stays unscored. rulesScored/rulesTotal/unscored
+           are DATA, always in the score text below, so a clean draft's "100"
+           never reads as a more complete verdict than it is. -->
+      <div class="style-synergy style-block">
+        <div class="style-gauge-head">
+          <span class="style-gauge-label" id="style-synergy-label">Prompt synergy</span>
+          <span id="style-synergy-score" class="style-synergy-score"></span>
+        </div>
+        <p id="style-synergy-note" class="style-zone-note" role="status" aria-live="polite" hidden></p>
+        <ul id="style-synergy-deductions" class="style-conflicts" hidden></ul>
       </div>
 
       <p id="style-empty" class="draft-empty style-block">
@@ -6488,7 +6556,7 @@ if (typeof self !== 'undefined') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -8390,8 +8458,7 @@ var DISSECTOR_MODES = ['auto', 'local-llm', 'local', 'cloud', 'ollama'];
 /** Token budget for one on-device generation, and its wall-clock ceiling. */
 var LOCAL_LLM_MAX_TOKENS = 256;
 var LOCAL_LLM_TIMEOUT_MS = 20000;
-/** Dissector output caps, keeping local results focused. (Not FDD #81 — the
-    user-facing >15-instrument Tag Clutter Warning remains unimplemented.) */
+/** Dissector output caps, keeping local results focused. */
 var LOCAL_MAX_TOKENS = 18;
 var LOCAL_MAX_LIST = 12;
 
@@ -15671,6 +15738,25 @@ function selectedInstrumentBlocks(store) {
   return out;
 }
 
+/*
+ * FDD #81's Tag Clutter Warning threshold. Read against
+ * selectedInstrumentBlocks(promptState).length — the same count the badge
+ * row's footer prints as "N stacked" — never against counts().sections
+ * .instrument, which would count individual TAGS rather than BLOCKS and could
+ * cross this line on one dense block long before the arrangement is actually
+ * crowded.
+ *
+ * SYNERGY_CLUTTER_THRESHOLD (section E, the compiler) is declared beside this
+ * one deliberately: both read this exact same count, as two different
+ * questions of it — see that constant's comment for the split.
+ */
+var INSTRUMENT_CLUTTER_THRESHOLD = 15;
+
+/** @param {number} n @returns {boolean} */
+function isInstrumentClutter(n) {
+  return typeof n === 'number' && n > INSTRUMENT_CLUTTER_THRESHOLD;
+}
+
 /**
  * Toggle one block, atomically, under the same shared-tag rule
  * toggleVocalPersona and toggleEraSignature apply: removing a block skips any
@@ -18326,6 +18412,16 @@ function weightTokens(entries) {
  * A tag matching BOTH sides of a rule is treated as matching neither: it is
  * ambiguous evidence, and ambiguous evidence must not drop anybody's tag.
  */
+
+/*
+ * FDD #49's Pure Instrumental Mode Lock (section E) emits exactly this one
+ * tag. Named here, above the table it feeds, so the literal exists in ONE
+ * place: the lock's own compiler step and the 'instrumental-vs-vocals' rule
+ * below both read this constant rather than two copies of the same string
+ * that could drift apart.
+ */
+var INSTRUMENTAL_LOCK_TAG = 'instrumental only';
+
 var TAG_CONFLICTS = [
   {
     /* FEATURE-MECHANICS.md §5.1's own worked example, verbatim: "known
@@ -18408,7 +18504,7 @@ var TAG_CONFLICTS = [
     id: 'instrumental-vs-vocals',
     match: 'phrase',
     rule: 'an instrumental-only directive cannot coexist with a named vocal part',
-    a: ['instrumental only', 'purely instrumental', 'no vocals', 'without vocals', 'instrumental version'],
+    a: [INSTRUMENTAL_LOCK_TAG, 'purely instrumental', 'no vocals', 'without vocals', 'instrumental version'],
     /* The hand-written half is the generic vocabulary a user types; the
      * concat() is every persona's naming tag from VOCAL_REGISTRY (FDD #65), so
      * a persona the Vocal Persona card added is caught by the same rule.
@@ -18853,6 +18949,74 @@ function createExclusionState() {
 /* E. THE COMPILER                                                            */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The Pure Instrumental Mode Lock's store (FDD #49). A single boolean rather
+ * than a slot in createPromptState(): the lock is a COMPILE-TIME instruction
+ * ("drop every vocal tag, say one instrumental-only tag instead"), not a
+ * prompt ingredient competing for a place in the string, so it does not
+ * belong beside genre/mood/instrument the way a vocal persona tag does.
+ *
+ * Subscriber mechanics copied verbatim from createExclusionState() above: a
+ * snapshot of the subscriber list so a subscriber added or removed mid-notify
+ * cannot skip or double-fire, and a broken subscriber cannot break the store.
+ *
+ * @param {boolean} [initial]
+ * @returns {{get: () => boolean, set: (boolean) => boolean,
+ *            toggle: () => boolean, subscribe: (fn: Function) => () => void}}
+ */
+function createInstrumentalLockState(initial) {
+  var value = !!initial;
+  /** @type {Array<{fn: Function}>} */
+  var subscribers = [];
+
+  function notify() {
+    var snapshot = subscribers.slice();
+    for (var i = 0; i < snapshot.length; i += 1) {
+      try {
+        snapshot[i].fn(value);
+      } catch (err) {
+        // A broken subscriber is the subscriber's problem, not the store's.
+      }
+    }
+  }
+
+  return {
+    get: function () {
+      return value;
+    },
+
+    /** @returns {boolean} the value AFTER the set; coerced via !!, so a
+     *  truthy/falsy caller can never leave the store holding a non-boolean */
+    set: function (next) {
+      var coerced = !!next;
+      if (coerced === value) return value;
+      value = coerced;
+      notify();
+      return value;
+    },
+
+    /** @returns {boolean} the value AFTER the toggle */
+    toggle: function () {
+      value = !value;
+      notify();
+      return value;
+    },
+
+    /** @returns {() => void} unsubscribe; idempotent */
+    subscribe: function (fn) {
+      if (typeof fn !== 'function') {
+        return function () {};
+      }
+      var record = { fn: fn };
+      subscribers.push(record);
+      return function () {
+        var i = subscribers.indexOf(record);
+        if (i !== -1) subscribers.splice(i, 1);
+      };
+    },
+  };
+}
+
 /** Accept either a live prompt store or a plain array of its entries. */
 function promptEntriesOf(source) {
   if (source && typeof source.list === 'function') return source.list();
@@ -18885,7 +19049,30 @@ function promptEntriesOf(source) {
  *            modelId:string, excludeOmitted:boolean}}}
  */
 function compileStylePrompt(promptState, exclusions, options) {
-  var ordered = weightTokens(promptEntriesOf(promptState));
+  var entries = promptEntriesOf(promptState);
+  var instrumentalLock = !!(options && options.instrumentalLock);
+  var vocalOmittedCount = 0;
+
+  // FDD #49. Every vocal-section entry is pulled OUT (each one counted, not
+  // just dropped silently) and replaced by ONE instrumental-only directive —
+  // never left in place alongside it, which is what would hand the resolver
+  // below a same-section contradiction it has no business inventing on its
+  // own. PROMPT_SECTION_ORDER already seats 'vocal' between mood and
+  // instrument, so the one substitute tag lands exactly there for free.
+  if (instrumentalLock) {
+    var kept = [];
+    for (var e = 0; e < entries.length; e += 1) {
+      if (entries[e] && entries[e].section === VOCAL_SECTION) {
+        vocalOmittedCount += 1;
+      } else {
+        kept.push(entries[e]);
+      }
+    }
+    kept.push({ section: VOCAL_SECTION, tag: INSTRUMENTAL_LOCK_TAG });
+    entries = kept;
+  }
+
+  var ordered = weightTokens(entries);
   var resolved = resolveConflicts(ordered);
   var terms = normalizeExclusionList(exclusions);
   var model = resolveSunoModel(options && options.modelId);
@@ -18906,6 +19093,8 @@ function compileStylePrompt(promptState, exclusions, options) {
       excludeBlock: block,
       modelId: model.id,
       excludeOmitted: terms.length > 0 && !excludeSupported,
+      instrumentalLock: instrumentalLock,
+      vocalOmittedCount: vocalOmittedCount,
     },
   };
 }
@@ -19158,6 +19347,111 @@ function buildFinalPrompt(promptState, exclusions, options) {
     exclusions: compiled.meta.exclusions,
     modelId: compiled.meta.modelId,
     excludeOmitted: compiled.meta.excludeOmitted,
+    instrumentalLock: compiled.meta.instrumentalLock,
+    vocalOmittedCount: compiled.meta.vocalOmittedCount,
+  };
+}
+
+/*
+ * SYNERGY_CLUTTER_THRESHOLD is a SECOND reading of the exact same instrument
+ * count INSTRUMENT_CLUTTER_THRESHOLD (section G, selectedInstrumentBlocks())
+ * reads — one count, two questions asked of it: "too many blocks to skim"
+ * (15) is not the same question as "enough blocks stacked to start crowding
+ * each other in the mix" (5), so the same number gets two named thresholds
+ * rather than one threshold serving two unrelated warnings.
+ */
+var SYNERGY_CLUTTER_THRESHOLD = 5;
+
+/**
+ * FDD #83's Prompt Synergy Score (FEATURE-MECHANICS.md §5.1) — a single
+ * 0-100 read on how well the current draft's ingredients cooperate.
+ *
+ * SCORING POLICY, per the §5.1 ruling on both deductions:
+ *   - Base 100.
+ *   - -20 ONCE when instrumentCount exceeds SYNERGY_CLUTTER_THRESHOLD — not
+ *     per instrument past the line, because a 0-100 gauge is a verdict, not a
+ *     running tally of how far over a bar something is.
+ *   - -30 ONCE, FLAT, when at least one conflict.id in the resolver's output
+ *     is not 'duplicate' — deliberately NOT per conflicting pair. A per-pair
+ *     penalty would floor any draft with four real conflicts at 0 exactly as
+ *     hard as a draft with one, collapsing a 0-100 gauge into a binary
+ *     "clean / not clean" signal. The flat penalty keeps the gauge meaningful
+ *     while every individual conflict still lists on its own line in
+ *     #style-conflicts — this deduction is about the SCORE, not about hiding
+ *     which tags were actually dropped.
+ *   - Floor 0.
+ *
+ * THE THIRD §5.1 RULE THIS DELIBERATELY DOES NOT SCORE. §5.1 also asks for a
+ * lyrics-cadence check (a words-per-line rhythm proxy). FDD #43 (stored
+ * lyrics) and #51 (stored BPM) do not exist in this build — the Structure
+ * Builder's own header already refuses to fake either — and no BPM is ever
+ * held outside a live hum session. Simulating one to feed a proxy rule would
+ * be exactly the "simulated data presented as real" ENGINEERING-STANDARD.md
+ * §1.1 forbids, so the rule is left OUT of the score rather than faked. That
+ * omission is reported as DATA — rulesScored/rulesTotal/unscored — never
+ * smoothed into a bare "N/100" that would read as a complete verdict.
+ *
+ * @param {{instrumentCount?: number, conflicts?: Array<{id?: string}>}} [input]
+ * @returns {{score: number, deductions: Array<{id: string, points: number, reason: string}>,
+ *            rulesScored: number, rulesTotal: number,
+ *            unscored: Array<{id: string, reason: string}>}}
+ */
+function computeSynergyScore(input) {
+  var opts = input || {};
+  var instrumentCount =
+    typeof opts.instrumentCount === 'number' && isFinite(opts.instrumentCount) && opts.instrumentCount > 0
+      ? opts.instrumentCount
+      : 0;
+  var conflicts = isArrayLike(opts.conflicts) ? opts.conflicts : [];
+
+  var deductions = [];
+  var score = 100;
+
+  if (instrumentCount > SYNERGY_CLUTTER_THRESHOLD) {
+    deductions.push({
+      id: 'instrument-clutter',
+      points: 20,
+      reason:
+        instrumentCount +
+        ' instrument blocks stacked — past ' +
+        SYNERGY_CLUTTER_THRESHOLD +
+        ' they start crowding each other out of the mix.',
+    });
+    score -= 20;
+  }
+
+  var hasRealConflict = false;
+  for (var i = 0; i < conflicts.length; i += 1) {
+    if (conflicts[i] && conflicts[i].id !== 'duplicate') {
+      hasRealConflict = true;
+      break;
+    }
+  }
+  if (hasRealConflict) {
+    deductions.push({
+      id: 'tag-conflict',
+      points: 30,
+      reason: 'At least one tag conflict was resolved by dropping a tag — see the list below for which.',
+    });
+    score -= 30;
+  }
+
+  if (score < 0) score = 0;
+
+  return {
+    score: score,
+    deductions: deductions,
+    rulesScored: 2,
+    rulesTotal: 3,
+    unscored: [
+      {
+        id: 'lyrics-cadence',
+        reason:
+          "§5.1's lyrics-cadence rule needs stored lyrics and a stored BPM that FDD #43/#51 don't provide in " +
+          'this build — a words-per-line proxy without them would be simulated data, not a real signal ' +
+          '(ENGINEERING-STANDARD.md §1.1), so it is left unscored rather than faked.',
+      },
+    ],
   };
 }
 
@@ -20891,7 +21185,15 @@ function serializeWorkspace(registry, options) {
     prompt: [],
     exclusions: [],
     structure: { version: STRUCTURE_STATE_VERSION, blocks: [] },
+    instrumentalLock: false,
   };
+
+  // FDD #49. ALWAYS a boolean — never undefined, even when the registry
+  // carries no lock store at all — because persistence.test.js's key-list
+  // assertion and every consumer of a restored snapshot treat this field as
+  // present, not optional.
+  var lock = r.instrumentalLock;
+  out.instrumentalLock = !!(lock && lock.get && lock.get());
 
   for (var a = 0; a < SLIDER_AXES.length; a += 1) {
     out.sliders[SLIDER_AXES[a]] = readSliderValue(r.sliders, SLIDER_AXES[a]);
@@ -20959,7 +21261,7 @@ function validateWorkspaceSnapshot(data) {
     };
   }
 
-  var plan = { sliders: {}, prompt: [], exclusions: [], structure: null };
+  var plan = { sliders: {}, prompt: [], exclusions: [], structure: null, instrumentalLock: false };
   var i;
 
   /* --- sliders: absent is fine (neutral), malformed is not --- */
@@ -21062,6 +21364,21 @@ function validateWorkspaceSnapshot(data) {
     plan.structure = { version: STRUCTURE_STATE_VERSION, blocks: [] };
   }
 
+  /* --- instrumentalLock (FDD #49) --- */
+  // OPTIONAL: a snapshot written before 0.24.0 has no such field at all, and
+  // that is not malformed — it just means the lock was off, same as every
+  // other pre-#49 workspace. Present-but-wrong-typed IS malformed, same rule
+  // every other field here follows: the whole restore fails rather than
+  // silently coercing a broken value into a guess.
+  if (data.instrumentalLock !== undefined && data.instrumentalLock !== null) {
+    if (typeof data.instrumentalLock !== 'boolean') {
+      return { ok: false, reason: 'instrumentalLock must be a boolean' };
+    }
+    plan.instrumentalLock = data.instrumentalLock;
+  } else {
+    plan.instrumentalLock = false;
+  }
+
   return { ok: true, plan: plan };
 }
 
@@ -21104,6 +21421,17 @@ function restoreWorkspace(data, registry) {
   if (r.structure && typeof r.structure.fromJSON === 'function') {
     r.structure.fromJSON(plan.structure);
     applied.blocks = plan.structure.blocks.length;
+  }
+
+  // FDD #49. Covers presets, history, autosave and the #75 share hash — every
+  // caller that restores through THIS function — but deliberately NOT
+  // Workspace Profiles (#77): profileFromWorkspace() below has its own
+  // {sliders, genres, metatags} shape that never reads or writes this
+  // registry key at all, per FEATURE-MECHANICS.md §6.2. A profile is a
+  // reusable starting point for a NEW song, and a lock left on from
+  // whichever song last saved it is not part of that starting point.
+  if (r.instrumentalLock && typeof r.instrumentalLock.set === 'function') {
+    r.instrumentalLock.set(plan.instrumentalLock);
   }
 
   // Sliders LAST: setting one republishes that axis's tags through the normal
@@ -21712,6 +22040,14 @@ function createProfileStore(deps) {
  * Snapshot the profile subset of the workspace: slider positions, the GENRE
  * section's tags and the structure card's section metatags. Deliberately not
  * the whole workspace — that is what a preset is for (FDD #86).
+ *
+ * FDD #49's instrumental lock is deliberately absent from this shape, and
+ * that is correct per FEATURE-MECHANICS.md §6.2: a profile is a reusable
+ * starting point for a NEW song's vibe (its sliders, its genre pull, its
+ * section metatags), not a snapshot of one song's in-progress state. The lock
+ * belongs to the workspace serializeWorkspace()/restoreWorkspace() round-trip
+ * (presets, history, autosave, the #75 share hash) — see restoreWorkspace()'s
+ * comment on the same split.
  *
  * @param {string} name
  * @param {object} registry
@@ -27667,6 +28003,14 @@ function createInstallCapability(deps) {
 
     const exclusions = createExclusionState();
 
+    /* FDD #49's Pure Instrumental Mode Lock. Declared here, beside exclusions,
+     * because both are compile-time options renderStylePrompt()/copyStylePrompt()
+     * merge onto activeModelOptions() — not draft ingredients, and not a slot
+     * in promptState. The button that flips it lives in the Vocal Persona
+     * card below (section H); this is the store both that button and the
+     * compiler read. */
+    const instrumentalLock = createInstrumentalLockState();
+
     const excludePresetHost = $('exclude-presets');
     const excludeInput = $('exclude-input');
     const excludeAddBtn = $('btn-exclude-add');
@@ -27807,6 +28151,10 @@ function createInstallCapability(deps) {
     const modelSelect = $('style-model');
     const modelNote = $('style-model-note');
     const excludeModelNote = $('exclude-model-note');
+    const vocalLockNote = $('vocal-lock-note');
+    const styleSynergyScore = $('style-synergy-score');
+    const styleSynergyNote = $('style-synergy-note');
+    const styleSynergyDeductions = $('style-synergy-deductions');
 
     /* -- G1. the Suno model selector (FDD #69) --
      *
@@ -27934,7 +28282,14 @@ function createInstallCapability(deps) {
      * change — never an estimate, never the ingredient count.
      */
     function renderStylePrompt() {
-      const final = buildFinalPrompt(promptState, exclusions.list(), activeModelOptions());
+      // FDD #49. The ONLY place instrumentalLock rides on top of
+      // activeModelOptions() rather than inside it — activeModelOptions()
+      // stays the Suno-model-options builder the structure sheet also shares,
+      // and this merge is the compile-only extra copyStylePrompt() mirrors below.
+      const compileOptions = Object.assign({}, activeModelOptions(), {
+        instrumentalLock: instrumentalLock.get(),
+      });
+      const final = buildFinalPrompt(promptState, exclusions.list(), compileOptions);
       const zoneClass = final.zone === 'safe' ? '' : ' is-' + final.zone;
 
       styleMeterFill.style.width = Math.min(100, (final.length / final.limit) * 100).toFixed(2) + '%';
@@ -28017,11 +28372,62 @@ function createInstallCapability(deps) {
           DEFAULT_MODEL_LABEL +
           ' and it compiles again.'
         : '';
+
+      // FDD #49. The compiled string already reflects the lock; this is the
+      // honest note about what got left out to make that happen — the
+      // shield-note idiom (#exclude-model-note above), reused for the card
+      // the lock itself lives in (section H, below).
+      const vocalOmitted = final.vocalOmittedCount || 0;
+      const lockNoteOn = !!final.instrumentalLock && vocalOmitted > 0;
+      vocalLockNote.hidden = !lockNoteOn;
+      vocalLockNote.textContent = lockNoteOn
+        ? 'Locked to instrumental only — ' +
+          plural(vocalOmitted, 'vocal tag') +
+          ' left out of the compiled prompt.'
+        : '';
+
+      // FDD #83's Prompt Synergy Score. Read over the SAME resolved
+      // conflicts the list above just painted (no second conflict pass) and
+      // the SAME instrument-block count #81's clutter note reads (see
+      // SYNERGY_CLUTTER_THRESHOLD's comment for why two thresholds share it).
+      const synergy = computeSynergyScore({
+        instrumentCount: selectedInstrumentBlocks(promptState).length,
+        conflicts: final.conflicts,
+      });
+      const synergyWarn = synergy.score < 70;
+      styleSynergyScore.textContent =
+        synergy.score +
+        ' / 100 · ' +
+        synergy.rulesScored +
+        ' of ' +
+        synergy.rulesTotal +
+        ' §5.1 rules scored';
+      styleSynergyScore.className = 'style-synergy-score' + (synergyWarn ? ' is-warn' : '');
+
+      styleSynergyDeductions.textContent = '';
+      for (let d = 0; d < synergy.deductions.length; d += 1) {
+        const deduction = synergy.deductions[d];
+        const item = document.createElement('li');
+        item.textContent = '-' + deduction.points + ' — ' + deduction.reason;
+        styleSynergyDeductions.appendChild(item);
+      }
+      styleSynergyDeductions.hidden = synergy.deductions.length === 0;
+
+      // R1: the 2-of-3 caveat is DATA (rulesScored/rulesTotal), always in the
+      // score text above. This note adds the WHY, from unscored[].reason, and
+      // only when the score is the thing that most needs explaining.
+      const unscoredReasons = [];
+      for (let u = 0; u < synergy.unscored.length; u += 1) {
+        unscoredReasons.push(synergy.unscored[u].reason);
+      }
+      styleSynergyNote.hidden = !(synergyWarn && unscoredReasons.length > 0);
+      styleSynergyNote.textContent = styleSynergyNote.hidden ? '' : unscoredReasons.join(' ');
     }
 
     promptState.subscribe(renderStylePrompt);
     exclusions.subscribe(renderExclusions);
     exclusions.subscribe(renderStylePrompt);
+    instrumentalLock.subscribe(renderStylePrompt);
 
     /**
      * THE one style-prompt copy. A named declaration since 0.22.0 because FDD
@@ -28031,8 +28437,14 @@ function createInstallCapability(deps) {
     function copyStylePrompt() {
       // Recompiled rather than read from a cached render: the pipeline is
       // deterministic, so this is the same string the panel is showing, and
-      // there is no cached copy that could ever go stale behind it.
-      const final = buildFinalPrompt(promptState, exclusions.list(), activeModelOptions());
+      // there is no cached copy that could ever go stale behind it. The
+      // instrumentalLock merge mirrors renderStylePrompt()'s, so the copied
+      // string can never disagree with what the panel just showed.
+      const final = buildFinalPrompt(
+        promptState,
+        exclusions.list(),
+        Object.assign({}, activeModelOptions(), { instrumentalLock: instrumentalLock.get() })
+      );
       if (!final.text) {
         toastHost.show('Nothing to copy yet — the style prompt is empty.', 'warn');
         return;
@@ -28141,6 +28553,25 @@ function createInstallCapability(deps) {
     renderStylePrompt();
 
     /* -- H. the Vocal Persona Selector (FDD #28) over the #65 registry -- */
+
+    /* FDD #49's Pure Instrumental Mode Lock. The store (instrumentalLock) was
+     * created back in section F beside `exclusions`, since renderStylePrompt
+     * reads it before this section exists; this is only the button that
+     * flips it and the note that says what flipping it cost. */
+    const btnInstrumentalLock = $('btn-instrumental-lock');
+
+    btnInstrumentalLock.addEventListener('click', function () {
+      instrumentalLock.toggle();
+    });
+
+    // aria-pressed carries the state — both the styling and the
+    // accessibility tree read it, so they cannot drift apart. Subscribed
+    // rather than set inline in the click handler above so a restored
+    // workspace (preset, history, autosave, the #75 share hash) repaints the
+    // button too, not only a direct click.
+    instrumentalLock.subscribe(function (on) {
+      btnInstrumentalLock.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
 
     const vocalSearch = $('vocal-search');
     const vocalListEl = $('vocal-list');
@@ -28323,6 +28754,7 @@ function createInstallCapability(deps) {
     const instrumentFamiliesEl = $('instrument-families');
     const instrumentBadges = $('instrument-badges');
     const instrumentSelectedEmpty = $('instrument-selected-empty');
+    const instrumentClutterNote = $('instrument-clutter-note');
     const instrumentEmpty = $('instrument-empty');
     const instrumentCountOut = $('instrument-count');
     const instrumentStatus = $('instrument-status');
@@ -28495,6 +28927,19 @@ function createInstallCapability(deps) {
       }
 
       const selected = selectedInstrumentBlocks(promptState);
+
+      // FDD #81's Tag Clutter Warning. Read against the exact same count the
+      // footer below writes out as "N stacked" — never counts().sections
+      // .instrument, which counts TAGS rather than BLOCKS.
+      const clutter = isInstrumentClutter(selected.length);
+      instrumentClutterNote.hidden = !clutter;
+      instrumentClutterNote.textContent = clutter
+        ? selected.length +
+          ' instrument blocks stacked — past ' +
+          INSTRUMENT_CLUTTER_THRESHOLD +
+          ', Suno tends to blur them together rather than render every one distinctly.'
+        : '';
+
       // Same focus rescue as the vocal and era chip rows: this runs FROM the
       // click handler of a badge inside it, so the badge being clicked is
       // destroyed mid-click and focus would otherwise fall back to <body>.
@@ -29666,6 +30111,7 @@ function createInstallCapability(deps) {
       promptState: promptState,
       exclusions: exclusions,
       structure: structure,
+      instrumentalLock: instrumentalLock,
       sliders: {
         get: function (axis) {
           const at = SLIDER_AXES.indexOf(axis);

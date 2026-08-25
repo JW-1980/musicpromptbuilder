@@ -762,7 +762,10 @@ s.test('the model is NOT part of a workspace — it describes the machine, not t
   const snapshot = serializeWorkspace(populate(makeRegistry()), { savedAt: 1 });
   deepEqual(
     Object.keys(realm(snapshot)).sort(),
-    ['exclusions', 'prompt', 'savedAt', 'sliders', 'structure', 'workspaceVersion'],
+    // FDD #49 consciously added 'instrumentalLock' here (see
+    // tests/persistence.test.js's own key-list test for the full contract);
+    // this list still proves no 'modelId'/'model' field ever joined it.
+    ['exclusions', 'instrumentalLock', 'prompt', 'savedAt', 'sliders', 'structure', 'workspaceVersion'],
     'the snapshot shape must not have grown a model field'
   );
   const decoded = decodeWorkspaceHash(encodeWorkspaceHash(snapshot));
@@ -1265,15 +1268,26 @@ s.test('there is exactly ONE reader of the active model, and every compile goes 
   );
   assert.ok(/function activeModelOptions\(\) \{\s*return sunoModelOptions\(themePrefs\.getModelId\(\)\);/.test(source));
 
-  // Every live compile call site takes the options.
-  const styleCalls = html.match(/buildFinalPrompt\(promptState, exclusions\.list\(\)[^)]*\)\)?/g) || [];
-  assert.ok(styleCalls.length >= 2, 'the render and the copy must both compile');
-  for (const call of styleCalls) {
+  // Every live compile call site takes the options. FDD #49 (CONSCIOUSLY
+  // UPDATED) now merges instrumentalLock onto activeModelOptions() rather
+  // than passing it bare, so this checks the whole FUNCTION BODY rather than
+  // a single-line call shape — the property under test (a live compile never
+  // forgets the model options) still holds either way.
+  let liveCompileCount = 0;
+  for (const fnName of ['renderStylePrompt', 'copyStylePrompt']) {
+    const body = new RegExp('function ' + fnName + '\\(\\) \\{([\\s\\S]*?)\\n    \\}\\n').exec(html);
+    assert.ok(body, `${fnName} not found`);
     assert.ok(
-      /activeModelOptions\(\)/.test(call),
-      `a live compile forgot the model options: ${call}`
+      /buildFinalPrompt\(\s*promptState,\s*exclusions\.list\(\)/.test(body[1]),
+      `${fnName} must compile promptState/exclusions through buildFinalPrompt`
     );
+    assert.ok(
+      /activeModelOptions\(\)/.test(body[1]),
+      `${fnName} forgot the model options: a live compile must still read activeModelOptions()`
+    );
+    liveCompileCount += 1;
   }
+  assert.strictEqual(liveCompileCount, 2, 'the render and the copy must both compile');
   // The structure sheet is model-scoped in both the preview and the copy.
   const sheetCalls = source.match(/structure\.compile\([^)]*\)/g) || [];
   assert.ok(sheetCalls.length >= 2, 'the preview and the copy must both compile the sheet');

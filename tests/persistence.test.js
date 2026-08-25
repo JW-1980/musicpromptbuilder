@@ -132,6 +132,7 @@ const {
   createPromptState,
   createExclusionState,
   createStructureState,
+  createInstrumentalLockState,
   buildFinalPrompt,
   DEFAULT_PROFILES,
   PROFILES_KEY,
@@ -649,6 +650,7 @@ function makeRegistry(initialSliders) {
     promptState: createPromptState(),
     exclusions: createExclusionState(),
     structure: createStructureState(),
+    instrumentalLock: createInstrumentalLockState(),
     sliders: {
       get(axis) {
         return sliders[axis];
@@ -1140,18 +1142,62 @@ s.test('a populated workspace round-trips to an identical serialization', () => 
   assert.strictEqual(target.sliders.get('density'), 74);
 });
 
-s.test('the snapshot carries its version and exactly the documented fields', () => {
+s.test('the snapshot carries its version and exactly the documented fields (FDD #49 key consciously added)', () => {
   const snapshot = serializeWorkspace(populate(makeRegistry()));
   assert.strictEqual(snapshot.workspaceVersion, WORKSPACE_VERSION);
   deepEqual(
     Object.keys(snapshot).sort(),
-    ['exclusions', 'prompt', 'savedAt', 'sliders', 'structure', 'workspaceVersion'],
+    ['exclusions', 'instrumentalLock', 'prompt', 'savedAt', 'sliders', 'structure', 'workspaceVersion'],
     'the snapshot grew or lost a top-level field'
   );
+  assert.strictEqual(typeof snapshot.instrumentalLock, 'boolean', 'instrumentalLock must always be a boolean, never undefined');
   deepEqual(Object.keys(snapshot.sliders).sort(), ['density', 'energy', 'warmth']);
   for (const entry of snapshot.prompt) {
     assert.strictEqual(entry.id, undefined, 'store-internal ids must not be serialized');
   }
+});
+
+s.test('instrumentalLock round-trips through serialize -> validate -> restore, and survives a missing registry store', () => {
+  const on = makeRegistry();
+  on.instrumentalLock.set(true);
+  const snapshot = serializeWorkspace(on);
+  assert.strictEqual(snapshot.instrumentalLock, true);
+
+  const verdict = validateWorkspaceSnapshot(snapshot);
+  assert.ok(verdict.ok, 'a boolean instrumentalLock must validate');
+  assert.strictEqual(verdict.plan.instrumentalLock, true);
+
+  const target = makeRegistry();
+  assert.strictEqual(target.instrumentalLock.get(), false);
+  const outcome = restoreWorkspace(snapshot, target);
+  assert.ok(outcome.ok);
+  assert.strictEqual(target.instrumentalLock.get(), true, 'restore must actually flip the target store');
+
+  // A registry with NO instrumentalLock store at all (an older caller, or a
+  // test double that never wired one) must not throw.
+  const bareRegistry = { promptState: createPromptState() };
+  assert.doesNotThrow(() => restoreWorkspace(snapshot, bareRegistry));
+});
+
+s.test('instrumentalLock is OPTIONAL on a snapshot: absent reads as false, a non-boolean fails validation', () => {
+  const base = serializeWorkspace(populate(makeRegistry()));
+
+  const withoutField = Object.assign({}, base);
+  delete withoutField.instrumentalLock;
+  const verdictAbsent = validateWorkspaceSnapshot(withoutField);
+  assert.ok(verdictAbsent.ok, 'a pre-#49 snapshot with no instrumentalLock field at all must still load');
+  assert.strictEqual(verdictAbsent.plan.instrumentalLock, false);
+
+  // 'true'/1/0/{}/[] must all be REJECTED — only a real boolean or absent/null
+  // (handled above and below) is acceptable.
+  for (const bad of ['true', 1, 0, {}, []]) {
+    const verdict = validateWorkspaceSnapshot(Object.assign({}, base, { instrumentalLock: bad }));
+    assert.strictEqual(verdict.ok, false, `instrumentalLock: ${JSON.stringify(bad)} must fail validation`);
+  }
+
+  const withNull = validateWorkspaceSnapshot(Object.assign({}, base, { instrumentalLock: null }));
+  assert.ok(withNull.ok, 'null is treated the same as absent, not as a type error');
+  assert.strictEqual(withNull.plan.instrumentalLock, false);
 });
 
 s.test('NO key material can reach a snapshot — the serializer is never handed one', () => {
@@ -1766,6 +1812,31 @@ s.test('a profile round-trips through the store and back into a workspace', () =
     { e: 86, w: 32, d: 74 }
   );
 });
+
+s.test(
+  'a Workspace Profile deliberately does NOT carry FDD #49\'s instrumental lock — it is a reusable starting ' +
+    'point for a NEW song (sliders/genres/metatags per §6.2), not a snapshot of one song\'s in-progress state',
+  () => {
+    const source = populate(makeRegistry());
+    source.instrumentalLock.set(true);
+    const profile = profileFromWorkspace('Locked source', source);
+    assert.ok(profile, 'profileFromWorkspace returned nothing');
+    deepEqual(
+      Object.keys(profile).sort(),
+      ['genres', 'metatags', 'name', 'savedAt', 'sliders'],
+      'the profile shape must stay exactly {name, sliders, genres, metatags, savedAt} — no lock field'
+    );
+
+    // And applying a profile to a workspace that HAS the lock on must leave
+    // it exactly as it was: applyProfileToWorkspace touches genres, sliders
+    // and structure metatags only.
+    const target = makeRegistry();
+    target.instrumentalLock.set(true);
+    const applied = applyProfileToWorkspace(profile, target);
+    assert.strictEqual(applied.ok, true, applied.reason);
+    assert.strictEqual(target.instrumentalLock.get(), true, 'applying a profile must not touch the lock at all');
+  }
+);
 
 s.test('loading a profile REPLACES the genre section rather than merging into it', () => {
   const registry = populate(makeRegistry());

@@ -114,6 +114,15 @@ const {
   PROMPT_CHAR_LIMIT,
   PROMPT_ZONE_SAFE_MAX,
   PROMPT_ZONE_WARN_MAX,
+  // FDD #49 Pure Instrumental Mode Lock.
+  createInstrumentalLockState,
+  INSTRUMENTAL_LOCK_TAG,
+  // FDD #81 Tag Clutter Warning.
+  isInstrumentClutter,
+  INSTRUMENT_CLUTTER_THRESHOLD,
+  // FDD #83 Prompt Synergy Score.
+  computeSynergyScore,
+  SYNERGY_CLUTTER_THRESHOLD,
 } = app.sandbox;
 
 function readIndex() {
@@ -186,6 +195,10 @@ s.test('every compiler entry point is a reachable top-level declaration', () => 
     'normalizeExclusion',
     'normalizeExclusionList',
     'createExclusionState',
+    // FDD #49 / #81 / #83 additions.
+    'createInstrumentalLockState',
+    'isInstrumentClutter',
+    'computeSynergyScore',
   ]) {
     assert.strictEqual(fresh.evaluate(`typeof ${name}`), 'function', `${name} is not reachable`);
   }
@@ -200,6 +213,10 @@ s.test('every compiler entry point is a reachable top-level declaration', () => 
     'PROMPT_CHAR_LIMIT',
     'PROMPT_ZONE_SAFE_MAX',
     'PROMPT_ZONE_WARN_MAX',
+    // FDD #49 / #81 / #83 additions.
+    'INSTRUMENTAL_LOCK_TAG',
+    'INSTRUMENT_CLUTTER_THRESHOLD',
+    'SYNERGY_CLUTTER_THRESHOLD',
   ]) {
     assert.ok(fresh.sandbox[name] !== undefined, `${name} must be a var binding tests can read`);
   }
@@ -753,19 +770,26 @@ s.test('buildFinalPrompt reports the whole truth: length, zone, trims, drops and
    * this growth is deliberate and is what keeps the model-scoped omission of
    * the [Exclude: …] block REPORTED rather than silent, which is the same
    * "nothing is ever dropped quietly" rule droppedTags already serves.
-   * tests/model-deeplink.test.js asserts what both fields mean. */
+   * tests/model-deeplink.test.js asserts what both fields mean.
+   *
+   * CONSCIOUSLY UPDATED AGAIN for FDD #49: 'instrumentalLock' and
+   * 'vocalOmittedCount' joined the result too, for the exact same reason —
+   * the lock's own omission (every dropped vocal tag) reported here rather
+   * than left for the UI to reconstruct. */
   deepEqual(Object.keys(final).sort(), [
     'conflicts',
     'droppedExclusions',
     'droppedTags',
     'excludeOmitted',
     'exclusions',
+    'instrumentalLock',
     'length',
     'limit',
     'modelId',
     'tags',
     'text',
     'trimmed',
+    'vocalOmittedCount',
     'zone',
   ]);
   assert.strictEqual(final.modelId, 'v5-5', 'no options means the default model, as it always did');
@@ -930,18 +954,25 @@ s.test('the gauge is a SUBSCRIBER of both stores — it can never show a stale c
   /* CONSCIOUSLY UPDATED IN 0.21.0: the call now carries the FDD #69 model
    * options. The contract is stronger than before, not weaker — the ceiling
    * and the exclusion block are model-scoped, so a call site that compiled
-   * without them would show a gauge for a model the user has not selected. */
-  assert.ok(
-    /buildFinalPrompt\(promptState, exclusions\.list\(\), activeModelOptions\(\)\)/.test(html),
-    'the panel must compile from live state, for the selected model'
-  );
-  // Both call sites — the render and the copy — must agree about the model.
-  assert.strictEqual(
-    (html.match(/buildFinalPrompt\(promptState, exclusions\.list\(\)/g) || []).length,
-    (html.match(/buildFinalPrompt\(promptState, exclusions\.list\(\), activeModelOptions\(\)\)/g) || [])
-      .length,
-    'a buildFinalPrompt call over the live stores must never omit the model options'
-  );
+   * without them would show a gauge for a model the user has not selected.
+   *
+   * CONSCIOUSLY UPDATED AGAIN for FDD #49: activeModelOptions() is now merged
+   * with instrumentalLock rather than passed bare, so both call sites are
+   * checked by FUNCTION BODY (every buildFinalPrompt(promptState, …) call
+   * still reads activeModelOptions() somewhere in the same function) rather
+   * than by one literal call shape. */
+  for (const fnName of ['renderStylePrompt', 'copyStylePrompt']) {
+    const body = new RegExp('function ' + fnName + '\\(\\) \\{([\\s\\S]*?)\\n    \\}\\n').exec(html);
+    assert.ok(body, `${fnName} not found`);
+    assert.ok(
+      /buildFinalPrompt\(\s*promptState,\s*exclusions\.list\(\)/.test(body[1]),
+      `${fnName} must compile promptState/exclusions through buildFinalPrompt`
+    );
+    assert.ok(
+      /activeModelOptions\(\)/.test(body[1]),
+      `${fnName} must compile from live state, for the selected model`
+    );
+  }
   assert.ok(
     /styleCount\.textContent = final\.length \+ ' \/ ' \+ final\.limit;/.test(html),
     'the displayed count must be the real compiled length'
@@ -983,12 +1014,339 @@ s.test('Code Mode flattens the gauge track and keeps the shield’s pressed stat
     'a toggled exclusion is a tinted chip; Code Mode must flatten it'
   );
   assert.ok(
-    /\.high-contrast \.exclude-chip\[aria-pressed="true"\]\s*\{[^}]*var\(--danger-crimson\)/.test(contrast),
+    // CONSCIOUSLY UPDATED for FDD #49: the crimson-border override became a
+    // two-selector list (the lock shares the exact same wash), so a comma and
+    // a second selector may now sit between the chip and its rule's `{`.
+    /\.high-contrast \.exclude-chip\[aria-pressed="true"\][^{}]*\{[^}]*var\(--danger-crimson\)/.test(contrast),
     'flattening the wash must leave the crimson border as the pressed signal, not a neutral hairline'
   );
   assert.ok(
     /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.style-meter-fill\s*\{\s*transition:\s*none/.test(css),
     'the gauge animates its width; reduced motion must switch that off'
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* J. FDD #49 — Pure Instrumental Mode Lock                                   */
+/* -------------------------------------------------------------------------- */
+
+s.test('createInstrumentalLockState: get/set/toggle, coerced via !!, notifies only on real change', () => {
+  const store = createInstrumentalLockState();
+  assert.strictEqual(store.get(), false, 'default is false with no initial value given');
+
+  let calls = 0;
+  let lastValue;
+  const unsubscribe = store.subscribe((value) => {
+    calls += 1;
+    lastValue = value;
+  });
+
+  assert.strictEqual(store.set(true), true);
+  assert.strictEqual(store.get(), true);
+  assert.strictEqual(calls, 1);
+  assert.strictEqual(lastValue, true);
+
+  // Setting to the SAME value must not notify — this is the "notifies only
+  // on change" half of the contract.
+  store.set(true);
+  assert.strictEqual(calls, 1, 'setting the same value again must not re-notify');
+
+  // Truthy/falsy coercion, not strict boolean identity.
+  store.set(0);
+  assert.strictEqual(store.get(), false);
+  assert.strictEqual(calls, 2);
+  store.set('yes');
+  assert.strictEqual(store.get(), true);
+  assert.strictEqual(calls, 3);
+
+  const afterToggle = store.toggle();
+  assert.strictEqual(afterToggle, false);
+  assert.strictEqual(store.get(), false);
+  assert.strictEqual(calls, 4);
+
+  unsubscribe();
+  store.toggle();
+  assert.strictEqual(calls, 4, 'unsubscribe must be honoured');
+});
+
+s.test('createInstrumentalLockState(initial) seeds the store, and a broken subscriber cannot break another', () => {
+  const seeded = createInstrumentalLockState(true);
+  assert.strictEqual(seeded.get(), true);
+
+  const store = createInstrumentalLockState();
+  let sawIt = false;
+  store.subscribe(() => {
+    throw new Error('a broken subscriber');
+  });
+  store.subscribe(() => {
+    sawIt = true;
+  });
+  assert.doesNotThrow(() => store.set(true));
+  assert.ok(sawIt, 'a throwing subscriber must not stop the next one from running');
+});
+
+s.test('the lock drops every vocal entry, substitutes ONE instrumental-only tag, and counts what it dropped', () => {
+  const entries = [
+    { section: 'genre', tag: 'french electro', weight: 1 },
+    { section: 'mood', tag: 'nocturnal', weight: 0.5 },
+    { section: 'vocal', tag: 'raspy male vocals', weight: 0.9 },
+    { section: 'vocal', tag: 'gospel choir', weight: 0.8 },
+    { section: 'instrument', tag: 'analog bass', weight: 0.4 },
+  ];
+
+  const locked = compileStylePrompt(entries, [], { instrumentalLock: true });
+  assert.strictEqual(locked.meta.instrumentalLock, true);
+  assert.strictEqual(locked.meta.vocalOmittedCount, 2, 'both vocal entries must be counted as dropped');
+  assert.strictEqual(
+    locked.meta.tags.filter((t) => t === 'raspy male vocals' || t === 'gospel choir').length,
+    0,
+    'no original vocal tag may survive into the compiled output'
+  );
+  assert.strictEqual(
+    locked.meta.tags.filter((t) => t === INSTRUMENTAL_LOCK_TAG).length,
+    1,
+    'exactly ONE instrumental-only tag must be written, never one per dropped vocal'
+  );
+
+  // PROMPT_SECTION_ORDER seats 'vocal' between mood and instrument, so the
+  // substitute tag must land there too.
+  const moodAt = locked.meta.tags.indexOf('nocturnal');
+  const lockAt = locked.meta.tags.indexOf(INSTRUMENTAL_LOCK_TAG);
+  const instrumentAt = locked.meta.tags.indexOf('analog bass');
+  assert.ok(moodAt < lockAt && lockAt < instrumentAt, 'the lock tag must sit after mood and before instrument');
+
+  const unlocked = compileStylePrompt(entries, [], { instrumentalLock: false });
+  assert.strictEqual(unlocked.meta.instrumentalLock, false);
+  assert.strictEqual(unlocked.meta.vocalOmittedCount, 0);
+  assert.ok(unlocked.meta.tags.indexOf('raspy male vocals') !== -1, 'without the lock, vocal tags compile normally');
+
+  const noOption = compileStylePrompt(entries, []);
+  assert.strictEqual(noOption.meta.instrumentalLock, false, 'omitting the option must default to off, not undefined');
+  assert.strictEqual(noOption.meta.vocalOmittedCount, 0);
+});
+
+s.test('the lock with no vocal entries at all still writes the tag, with a zero omitted count', () => {
+  const entries = [{ section: 'genre', tag: 'techno', weight: 1 }];
+  const locked = compileStylePrompt(entries, [], { instrumentalLock: true });
+  assert.strictEqual(locked.meta.vocalOmittedCount, 0);
+  assert.ok(locked.meta.tags.indexOf(INSTRUMENTAL_LOCK_TAG) !== -1);
+});
+
+s.test('buildFinalPrompt bubbles instrumentalLock and vocalOmittedCount beside excludeOmitted', () => {
+  const entries = [{ section: 'vocal', tag: 'sung vocal', weight: 1 }];
+  const final = buildFinalPrompt(entries, [], { instrumentalLock: true });
+  assert.strictEqual(final.instrumentalLock, true);
+  assert.strictEqual(final.vocalOmittedCount, 1);
+});
+
+s.test("INSTRUMENTAL_LOCK_TAG is the literal 'instrumental only', and it is TAG_CONFLICTS' own a[0]", () => {
+  assert.strictEqual(INSTRUMENTAL_LOCK_TAG, 'instrumental only');
+  const rule = TAG_CONFLICTS.find((r) => r.id === 'instrumental-vs-vocals');
+  assert.ok(rule, 'the instrumental-vs-vocals rule must still exist');
+  assert.strictEqual(rule.a[0], INSTRUMENTAL_LOCK_TAG, 'the rule must read the constant, not a second copy of the string');
+});
+
+s.test('the conflict rule still fires under the lock, against a vocal phrase OUTSIDE the vocal section', () => {
+  // A custom-typed tag is not the Vocal Persona card, so the lock's filter
+  // (section === VOCAL_SECTION only) never touches it — exactly the case
+  // that proves the resolver, not the lock, is what is supposed to catch it.
+  const entries = [
+    { section: 'custom', tag: 'male vocals', weight: 0.9 },
+    { section: 'genre', tag: 'techno', weight: 1 },
+  ];
+  const locked = compileStylePrompt(entries, [], { instrumentalLock: true });
+  assert.ok(locked.meta.tags.indexOf(INSTRUMENTAL_LOCK_TAG) !== -1);
+  assert.strictEqual(
+    locked.meta.tags.indexOf('male vocals'),
+    -1,
+    'the surviving custom vocal phrase must lose the conflict to the lock tag'
+  );
+  const hit = locked.meta.conflicts.find((c) => c.rule && c.id === 'instrumental-vs-vocals');
+  assert.ok(hit, 'the instrumental-vs-vocals conflict must be reported, not silently resolved');
+});
+
+/* -------------------------------------------------------------------------- */
+/* K. FDD #81 — Tag Clutter Warning                                          */
+/* -------------------------------------------------------------------------- */
+
+s.test('isInstrumentClutter: > 15 only, 15 itself is not clutter', () => {
+  assert.strictEqual(INSTRUMENT_CLUTTER_THRESHOLD, 15);
+  assert.strictEqual(isInstrumentClutter(15), false);
+  assert.strictEqual(isInstrumentClutter(16), true);
+  assert.strictEqual(isInstrumentClutter(0), false);
+  assert.strictEqual(isInstrumentClutter(100), true);
+});
+
+/* -------------------------------------------------------------------------- */
+/* L. FDD #83 — Prompt Synergy Score                                         */
+/* -------------------------------------------------------------------------- */
+
+s.test('computeSynergyScore: base 100, no deductions, and the R1 2-of-3 caveat is always present', () => {
+  const result = computeSynergyScore({ instrumentCount: 3, conflicts: [] });
+  assert.strictEqual(result.score, 100);
+  deepEqual(result.deductions, []);
+  assert.strictEqual(result.rulesScored, 2);
+  assert.strictEqual(result.rulesTotal, 3);
+  assert.strictEqual(result.unscored.length, 1);
+  assert.strictEqual(result.unscored[0].id, 'lyrics-cadence');
+  assert.ok(result.unscored[0].reason && result.unscored[0].reason.length > 0, 'the omission must carry a real reason, not a placeholder');
+});
+
+s.test('computeSynergyScore: -20 once for clutter, regardless of how far past the threshold', () => {
+  assert.strictEqual(SYNERGY_CLUTTER_THRESHOLD, 5);
+  const atThreshold = computeSynergyScore({ instrumentCount: 5, conflicts: [] });
+  assert.strictEqual(atThreshold.score, 100, 'exactly at the threshold is not clutter');
+  const justOver = computeSynergyScore({ instrumentCount: 6, conflicts: [] });
+  assert.strictEqual(justOver.score, 80);
+  assert.strictEqual(justOver.deductions.length, 1);
+  assert.strictEqual(justOver.deductions[0].points, 20);
+  const wayOver = computeSynergyScore({ instrumentCount: 40, conflicts: [] });
+  assert.strictEqual(wayOver.score, 80, 'far past the threshold must not deduct more than once');
+});
+
+s.test('computeSynergyScore (R2): -30 flat for any number of real conflicts, never per-pair', () => {
+  const oneConflict = computeSynergyScore({
+    instrumentCount: 0,
+    conflicts: [{ id: 'lofi-texture-vs-clean-master', kept: 'a', dropped: 'b' }],
+  });
+  assert.strictEqual(oneConflict.score, 70);
+
+  const fourConflicts = computeSynergyScore({
+    instrumentCount: 0,
+    conflicts: [
+      { id: 'lofi-texture-vs-clean-master', kept: 'a', dropped: 'b' },
+      { id: 'tempo-slow-vs-fast', kept: 'c', dropped: 'd' },
+      { id: 'dry-vs-drenched', kept: 'e', dropped: 'f' },
+      { id: 'mono-vs-wide-stereo', kept: 'g', dropped: 'h' },
+    ],
+  });
+  assert.strictEqual(
+    fourConflicts.score,
+    70,
+    'four real conflicts must deduct exactly as much as one — flat, not per-pair (R2)'
+  );
+  assert.strictEqual(fourConflicts.deductions.filter((d) => d.points === 30).length, 1, 'exactly one conflict deduction entry');
+});
+
+s.test('computeSynergyScore: a duplicate-only conflict list does not trigger the conflict deduction', () => {
+  const onlyDuplicates = computeSynergyScore({
+    instrumentCount: 0,
+    conflicts: [
+      { id: 'duplicate', kept: 'a', dropped: 'a' },
+      { id: 'duplicate', kept: 'b', dropped: 'b' },
+    ],
+  });
+  assert.strictEqual(onlyDuplicates.score, 100);
+  deepEqual(onlyDuplicates.deductions, []);
+});
+
+s.test('computeSynergyScore floors at 0 and is defensive against junk input', () => {
+  const worst = computeSynergyScore({
+    instrumentCount: 40,
+    conflicts: [{ id: 'tempo-slow-vs-fast', kept: 'a', dropped: 'b' }],
+  });
+  assert.strictEqual(worst.score, 50);
+
+  const junk = computeSynergyScore();
+  assert.strictEqual(junk.score, 100);
+  const junk2 = computeSynergyScore({ instrumentCount: 'lots', conflicts: 'nope' });
+  assert.strictEqual(junk2.score, 100);
+});
+
+/* -------------------------------------------------------------------------- */
+/* M. Static markup + CSS contracts for #49 / #81 / #83                       */
+/* -------------------------------------------------------------------------- */
+
+s.test('the lock button is wired into its own .vocal-head, never appended onto .style-head', () => {
+  const markup = readEditorMarkup();
+  const head = /<div class="vocal-head">([\s\S]*?)<\/div>/.exec(markup);
+  assert.ok(head, '.vocal-head wrapper is missing');
+  assert.ok(/id="vocal-heading"/.test(head[1]), 'the heading must live INSIDE .vocal-head');
+  const button = /<button[^>]*id="btn-instrumental-lock"[^>]*>/.exec(head[1]);
+  assert.ok(button, '#btn-instrumental-lock must live inside .vocal-head');
+  assert.ok(/class="btn-mini btn-lock"/.test(button[0]), 'the lock button must carry both btn-mini and btn-lock');
+  assert.ok(/aria-pressed="false"/.test(button[0]), 'the lock button must ship un-pressed');
+
+  const css = readStyleRaw();
+  assert.ok(!/\.style-head\s*,\s*\n?\s*\.vocal-head/.test(css), '.vocal-head must be its OWN rule, not appended to .style-head\'s selector');
+});
+
+s.test('#vocal-lock-note follows the #exclude-model-note idiom exactly', () => {
+  const markup = readEditorMarkup();
+  const note = /<p id="vocal-lock-note"[^>]*>/.exec(markup);
+  assert.ok(note, '#vocal-lock-note is missing');
+  assert.ok(/class="style-trimmed"/.test(note[0]));
+  assert.ok(/role="status"/.test(note[0]));
+  assert.ok(/aria-live="polite"/.test(note[0]));
+  assert.ok(/hidden/.test(note[0]), 'the note must ship hidden');
+});
+
+s.test('.btn-lock[aria-pressed="true"] reuses .exclude-chip\'s exact accent trio and carries no transition', () => {
+  const css = readStyleRaw();
+  const start = css.indexOf('.btn-lock[aria-pressed="true"] {');
+  assert.ok(start !== -1, '.btn-lock[aria-pressed="true"] rule is missing');
+  const body = css.slice(start, css.indexOf('}', start));
+  assert.ok(/color:\s*var\(--danger-crimson\)/.test(body));
+  assert.ok(/background:\s*var\(--tint-crimson\)/.test(body));
+  assert.ok(/border-color:\s*var\(--tint-crimson-border\)/.test(body));
+  assert.ok(!/transition/.test(body), 'no transition — the measured Chrome freeze this file already documents on .instrument-badge');
+});
+
+s.test('.btn-lock[aria-pressed="true"] is added to BOTH high-contrast lists', () => {
+  const css = readStyleRaw();
+  const contrast = css.slice(css.indexOf('.high-contrast'));
+  assert.ok(
+    /\.high-contrast \.btn-lock\[aria-pressed="true"\][\s\S]{0,200}background:\s*var\(--bg\)/.test(contrast) ||
+      /\.high-contrast \.exclude-chip\[aria-pressed="true"\],[\s\S]*?\.high-contrast \.btn-lock\[aria-pressed="true"\][\s\S]*?background:\s*var\(--bg\)/.test(
+        contrast
+      ),
+    'the wash-flattening list (background: var(--bg)) must include the lock'
+  );
+  assert.ok(
+    /\.high-contrast \.exclude-chip\[aria-pressed="true"\],\s*\n\s*\.high-contrast \.btn-lock\[aria-pressed="true"\][\s\S]{0,120}border:\s*1px solid var\(--danger-crimson\)/.test(
+      contrast
+    ),
+    'the crimson-border override list must include the lock, right beside the shield chip it copies'
+  );
+});
+
+s.test('#instrument-clutter-note sits between #instrument-badges and #instrument-list', () => {
+  const markup = readEditorMarkup();
+  const badgesAt = markup.indexOf('id="instrument-badges"');
+  const noteAt = markup.indexOf('id="instrument-clutter-note"');
+  const listAt = markup.indexOf('id="instrument-list"');
+  assert.ok(badgesAt !== -1 && noteAt !== -1 && listAt !== -1, 'one of the three anchors is missing');
+  assert.ok(badgesAt < noteAt && noteAt < listAt, 'the clutter note must sit between the badges and the list');
+  const note = /<p id="instrument-clutter-note"[^>]*>/.exec(markup);
+  assert.ok(/class="style-trimmed"/.test(note[0]) && /role="status"/.test(note[0]) && /hidden/.test(note[0]));
+});
+
+s.test('.style-synergy sits after .style-gauge closes and before #style-empty, holding all three new ids', () => {
+  const markup = readEditorMarkup();
+  const gaugeCloseAt = markup.indexOf('<div id="style-meter-fill"');
+  const synergyAt = markup.indexOf('class="style-synergy');
+  const emptyAt = markup.indexOf('id="style-empty"');
+  assert.ok(gaugeCloseAt !== -1 && synergyAt !== -1 && emptyAt !== -1);
+  assert.ok(gaugeCloseAt < synergyAt && synergyAt < emptyAt, '.style-synergy must sit between the gauge and #style-empty');
+  for (const id of ['style-synergy-score', 'style-synergy-note', 'style-synergy-deductions']) {
+    assert.ok(markup.indexOf('id="' + id + '"') !== -1, `#${id} is missing`);
+  }
+  assert.ok(/<div class="style-gauge-head">\s*<span class="style-gauge-label" id="style-synergy-label"/.test(markup), 'the score must sit in a .style-gauge-head shell');
+});
+
+s.test('.style-synergy-score.is-warn is the only new synergy CSS rule, and it is token-only', () => {
+  const css = readStyle();
+  const start = css.indexOf('.style-synergy-score.is-warn');
+  assert.ok(start !== -1, '.style-synergy-score.is-warn rule is missing');
+  const body = css.slice(start, css.indexOf('}', start) + 1);
+  assert.ok(/var\(--warning-amber\)/.test(body));
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b|\brgba?\(/.test(body), 'no hard-coded colour literal');
+  // .style-count itself must be untouched by this feature.
+  assert.ok(
+    /\.style-count\s*\{\s*font-family:\s*var\(--font-mono\);\s*font-size:\s*0\.8rem;\s*color:\s*var\(--accent-cyan\);\s*font-variant-numeric:\s*tabular-nums;\s*\}/.test(
+      css
+    ),
+    '.style-count must not have been edited'
   );
 });
 

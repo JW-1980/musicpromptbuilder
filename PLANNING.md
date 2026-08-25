@@ -2,14 +2,10 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] *(queue exhausted — v1.1.0 tagged; audited next-queue below awaits owner direction)*
+- [ ] #76 Batch Variation Matrix + #82 Credit Estimator + #57 Prompt Diff Viewer — paired iteration B (brief banked: brief-b-variation-diff.txt).
 
 ## NEXT
 *v1.1.0 audit recommendations, by value × leverage on existing engines:*
-- [ ] #49 Pure Instrumental Mode Lock (the conflict rule already exists, currently unreachable — one toggle activates it).
-- [ ] #81 Tag Clutter Warning (>15 instruments; counts already tracked; in-code marker names it unimplemented).
-- [ ] #83 Prompt Synergy Score (§5.1 spec; every input already computed by #73/#68).
-- [ ] #76 Batch Variation Matrix (reuse createSeededRng over the deterministic compiler).
 - [ ] #57 Prompt Diff Viewer (pure compiler + history bank already stores both sides).
 - [ ] #45 Duet & Multi-Vocalist Cues (joins the 104-persona registry to the structure sheet).
 - [ ] #12 Visual BPM Metronome (the last user-visible payoff of the onset/BPM tracker).
@@ -20,6 +16,7 @@
 *Runners-up:* #46 solo cues, #19 onboarding tour, #72 A/B splitter.
 
 ## DONE
+- [x] #49 Pure Instrumental Mode Lock + #81 Tag Clutter Warning + #83 Prompt Synergy Score (Sonnet implement/review pipeline; clean on round 1, no Opus escalation needed).
 - [x] Re-verify: theme-swap freeze re-reported against a pre-Task-23 revision — confirmed already fixed at HEAD in real Chrome (headless CDP, dark→light `.btn-record`/`.btn-midi` acceptance pass, no reload); regression coverage hardened in tests/theming.test.js (kill class must be armed before `applyThemeState`, which must keep its single call site).
 - [x] #90 Studio Shortcut Keybinds + #16 Command Palette (central dispatcher, 537-entry palette over the real toggle paths, cheat sheet; auto-repeat + a11y review fixes).
 - [x] Fix: theme-swap transition freeze — pattern-level `.theme-switching` kill class in repaintTheme (Tasks 11/14 diagnosis closed).
