@@ -2,11 +2,9 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Theme suite via Stitch Pro (owner request): use the Stitch MCP **Pro model** for design references; ship as selectable themes — dark (Obsidian), light (Daylight), a colorblind-safe theme, a high-contrast theme (fold/reconcile with existing Code Mode), plus 3 original themes of our own design. All through the existing token layer with WCAG verification. *(Judged spec banked: theme-spec.json — Studio ColorSafe, Studio Code, Tape Deck, Null Signal, Abyssal Bloom; Stitch Pro usage verified GEMINI_3_1_PRO/PRO_AGENT.)*
-
+- [ ] Local AI as default (owner request 2026-08-25): make Mode 1 (local, in-browser) the default dissector mode and upgrade it to the most powerful of the FDD-named local models — Qwen2.5-0.5B via WebGPU with WASM fallback (lazy opt-in weight download with progress bar per FDD §3; the embedded taxonomy engine stays as the instant/offline fallback). *Note: this owner request relaxes the earlier "no runtime downloads" reading for Mode 1 — record the decision in ASSUMPTIONS.md when implementing.*
 ## NEXT
 *Owner requests (2026-08-25), in order:*
-- [ ] Local AI as default (owner request 2026-08-25): make Mode 1 (local, in-browser) the default dissector mode and upgrade it to the most powerful of the FDD-named local models — Qwen2.5-0.5B via WebGPU with WASM fallback (lazy opt-in weight download with progress bar per FDD §3; the embedded taxonomy engine stays as the instant/offline fallback). *Note: this owner request relaxes the earlier "no runtime downloads" reading for Mode 1 — record the decision in ASSUMPTIONS.md when implementing.*
 - [ ] API key persistence + provider focus (owner request 2026-08-25): keep offering cloud APIs; add opt-in "remember key on this device" so users never re-enter keys — encrypted at rest via WebCrypto (AES-GCM), with honest UI copy about what browser storage can and cannot protect. Providers: OpenAI-compatible endpoints (generic base-URL + model) and OpenRouter as the first-class presets; per-provider key slots.
 
 *Post-1.0 recommendations from the release audit, in order:*
@@ -23,6 +21,7 @@
 - [ ] Consider: Code Mode violet accent at 3.52:1 on black (noted in Task 7).
 
 ## DONE
+- [x] Theme suite via Stitch Pro (owner request): 7 selectable themes — Obsidian, Daylight, Studio ColorSafe (CVD-verified), Tape Deck, Null Signal, Abyssal Bloom, Studio Code (Code Mode reconciled); registry + accessible picker + dual-field persistence; AA enforced incl. the new --ink-violet text token.
 - [x] Build out the 'Prompt Editor' view (owner request): zoned workspace — shape column + sticky compile rail, jump nav, heading hierarchy, primary-weight style card, focus management.
 - [x] Refine the waveform visualization (owner request): honesty-gated twist, perceptual amplitude curve, settle-on-stop, 60fps row interpolation, analytic lighting + fog, DPR-correct sizing, vignette/footlight.
 - [x] #65 Expanded Vocal Registries (104 timbres) + #28 Vocal Persona Selector.

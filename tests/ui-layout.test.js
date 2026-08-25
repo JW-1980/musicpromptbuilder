@@ -39,19 +39,35 @@ const { suite } = require('./lib/runner.js');
 const { extractScriptById } = require('./lib/extract.js');
 
 const INDEX = path.resolve(__dirname, '..', 'index.html');
-/* The blocks allowed to hold a raw colour literal, in stylesheet order. The
- * two palettes must come before the Code Mode override, which wins on equal
- * specificity purely by sitting last. */
-const TOKEN_BLOCK_SELECTORS = [':root {', '.theme-light {', '.high-contrast {'];
-/* CONSCIOUSLY UPDATED IN 0.15.0: was '0.14.0' (the ribbon-refinement release).
- * This constant and the title of the test that reads it are the only two things
- * in this file that a version bump is allowed to touch, and both moved together
- * — the assertion itself is unchanged. The bump follows the one-release-per-task
- * cadence PROGRESS.md records for 0.10.0 through 0.14.0; the design plan for
- * this task listed a bump as "not required", not as forbidden, so if the owner
- * prefers 0.15.0 to be held back, index.html:APP_VERSION and this line revert
- * together and nothing else in the suite moves. */
-const EXPECTED_VERSION = '0.15.0';
+/* The blocks allowed to hold a raw colour literal, in stylesheet order. Every
+ * palette must come before the Code Mode override, which wins on equal
+ * specificity purely by sitting last.
+ *
+ * CONSCIOUSLY UPDATED IN 0.16.0: was [':root {', '.theme-light {',
+ * '.high-contrast {']. The theme suite added four more palette blocks, and a
+ * palette block is by definition where colour literals live — so the whitelist
+ * grows with the suite rather than the suite leaking hexes past a stale list.
+ * The ORDER of this array is itself part of the contract: the same order is
+ * asserted, block by block, in tests/theming.test.js. */
+const TOKEN_BLOCK_SELECTORS = [
+  ':root {',
+  '.theme-light {',
+  '.theme-studio-colorsafe {',
+  '.theme-tape-deck {',
+  '.theme-null-signal {',
+  '.theme-abyssal-bloom {',
+  '.high-contrast {',
+];
+/* CONSCIOUSLY UPDATED IN 0.16.0: was '0.15.0' (the Prompt Editor workspace
+ * release). This constant and the title of the test that reads it are the only
+ * two things in this file that a version bump is allowed to touch, and both
+ * moved together — the assertion itself is unchanged. The bump follows the
+ * one-release-per-task cadence PROGRESS.md records for 0.10.0 through 0.15.0;
+ * 0.16.0 is the theme-suite release (four new palettes, a registry-driven
+ * picker and the raised Code Mode pins). If the owner prefers it held back,
+ * index.html:APP_VERSION and this line revert together and nothing else in the
+ * suite moves. */
+const EXPECTED_VERSION = '0.16.0';
 /* The Prompt Editor's four workflow zones, in the order they must be read. */
 const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
 /* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
@@ -888,7 +904,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the Prompt Editor workspace release (four workflow zones, sticky compile rail, jump strip)`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the theme-suite release (four new palettes, a registry-driven picker, raised Code Mode pins)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });
@@ -1123,9 +1139,10 @@ s.test('the token blocks are the only place a hex colour appears', () => {
       strays.map((h) => `  line ${h.line}: ${h.hex}  in  ${h.text}`).join('\n')
   );
 
-  // …and those declarations must actually live in one of the THREE token
-  // blocks: the two palettes (:root = Studio Obsidian, .theme-light = Studio
-  // Daylight) and the .high-contrast override that beats both.
+  // …and those declarations must actually live in one of the SEVEN token
+  // blocks: the six palettes (:root = Studio Obsidian, .theme-light = Studio
+  // Daylight, plus the four the 0.16.0 suite added) and the .high-contrast
+  // override that beats all of them.
   const blocks = TOKEN_BLOCK_SELECTORS.map((selector) => {
     const found = cssBlock(css, selector);
     assert.ok(found, `token block \`${selector} { … }\` is missing`);

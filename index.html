@@ -53,13 +53,16 @@
 
      THREE LAYERS, ONE SOURCE OF TRUTH.
 
-       1. PALETTE  — `:root` (Studio Obsidian, dark) and `.theme-light`
-          (Studio Daylight) declare exactly the same token names with
-          different literal values. These two blocks plus `.high-contrast`
-          are the ONLY places in this file allowed to hold a colour literal;
-          tests/ui-layout.test.js and tests/theming.test.js enforce that, and
-          tests/theming.test.js additionally proves the two palettes are a
-          name-for-name mirror of each other.
+       1. PALETTE  — `:root` (Studio Obsidian, dark), `.theme-light` (Studio
+          Daylight) and the four theme classes after it declare exactly the
+          same token names with different literal values. Those six blocks
+          plus `.high-contrast` (Studio Code) are the ONLY places in this file
+          allowed to hold a colour literal; tests/ui-layout.test.js and
+          tests/theming.test.js enforce that, and tests/theming.test.js
+          additionally proves every one of them is a name-for-name mirror of
+          :root. Which class is on <html> is owned by the THEMES registry in
+          #app-main — the picker, applyThemeState() and meta[color-scheme] all
+          read that one array.
        2. DERIVED  — the `html` block below mixes every wash, tint, glow ring
           and placeholder shade FROM the palette with color-mix(), so a user
           override of --accent-cyan repaints the genre badges and the tab tint
@@ -183,6 +186,196 @@
   }
 
   /* ==========================================================================
+     THE THEME SUITE — four more palettes, one block each (0.16.0).
+
+     THE MIRROR IS THE CONTRACT. :root declares seventeen colour tokens (the
+     fourteen a user may override plus the three --glow-*), and EVERY theme
+     block below declares all seventeen, name for name, with nothing else in
+     it. A token only some themes declare is a colour that survives a theme
+     swap unchanged — which is how a palette rots one hue at a time — so
+     tests/theming.test.js takes the :root name set and demands an exact match
+     from .theme-light, from each of the four blocks here, and (plus the two
+     mode-only tokens it is allowed) from .high-contrast.
+
+     SOURCE ORDER IS THE OTHER HALF. Every theme class is a single class
+     selector — specificity (0,1,0), identical to .high-contrast — so the only
+     thing that lets Code Mode beat all of them is sitting LAST. These four
+     blocks therefore go after .theme-light and before .high-contrast, and the
+     same test asserts that ordering rather than trusting it.
+
+     Ratios in each header are computed against that theme's own --bg with the
+     alpha composited, and tests/theming.test.js RECOMPUTES every one of them
+     from the declarations underneath it, so a value that drifts fails the run
+     instead of quietly making the comment a lie.
+
+     Which class goes on <html> is decided by the THEMES registry in #app-main,
+     never by a string literal: the registry is what applyThemeState(), the
+     picker rows and the meta[color-scheme] all read.
+     ========================================================================== */
+
+  /* --------------------------------------------------------------------------
+     STUDIO COLORSAFE — base light, for red/green colour vision deficiency.
+
+     Studio Daylight's ten NEUTRALS are hue-free, so they carry no CVD risk and
+     are reused verbatim (re-declared in full, because the mirror is a mirror).
+     The four ACCENTS are the whole theme: they are re-chosen so that no pair of
+     them relies on a red/green hue difference to be told apart. Primary drops
+     to a dark teal, secondary to a near-indigo violet, warning to a burnt
+     orange and danger to a very dark oxblood — the semantic pairs separate by
+     LIGHTNESS and CHROMA instead of hue, which is what survives a Viénot
+     protan/deutan/tritan simulation (tests/theming.test.js runs that simulation
+     and holds every pair to ΔE76 >= 25, where Daylight's own accents fall to
+     12.6 under tritan).
+
+       --text            over --bg   14.90:1
+       --text-dim        over --bg    4.98:1
+       --accent-cyan     over --bg    4.58:1
+       --accent-violet   over --bg   12.79:1
+       --warning-amber   over --bg    4.52:1
+       --danger-crimson  over --bg   11.26:1
+
+     Primary and warning clear AA with under 0.1 to spare (Daylight's same two
+     slots sit at 5.24 and 5.34). That is a conscious trade: pushing either one
+     darker closes the lightness gap the CVD separation is built on.
+     -------------------------------------------------------------------------- */
+  .theme-studio-colorsafe {
+    --bg: #F2F3F6;
+    --surface: rgba(16, 16, 22, 0.045);
+    --surface-2: rgba(16, 16, 22, 0.025);
+    --surface-border: rgba(16, 16, 22, 0.14);
+    --field-bg: rgba(255, 255, 255, 0.75);
+    --viz-bg: rgba(12, 12, 18, 0.90);
+    --toast-bg: rgba(252, 252, 254, 0.96);
+    --shadow-color: rgba(16, 16, 22, 0.16);
+    --accent-cyan: #0B7A84;
+    --accent-violet: #3D007A;
+    --warning-amber: #B85000;
+    --danger-crimson: #5F1C26;
+    --text: rgba(12, 12, 16, 0.92);
+    --text-dim: rgba(12, 12, 16, 0.60);
+    --glow-cyan: 0 2px 10px color-mix(in srgb, var(--accent-cyan) 30%, transparent);
+    --glow-violet: 0 2px 10px color-mix(in srgb, var(--accent-violet) 30%, transparent);
+    --glow-crimson: 0 2px 10px color-mix(in srgb, var(--danger-crimson) 30%, transparent);
+  }
+
+  /* --------------------------------------------------------------------------
+     TAPE DECK — base dark. Warm reel-to-reel: a brown-black chassis, VU-meter
+     amber, brushed-gold hairlines and a cream label stock for the type. The
+     "glass" washes tint warm (255, 214, 170) instead of neutral white, so a
+     card reads as backlit tape rather than frosted acrylic.
+
+       --text            over --bg   16.69:1
+       --text-dim        over --bg    6.99:1
+       --accent-cyan     over --bg   10.87:1
+       --accent-violet   over --bg    4.16:1
+       --warning-amber   over --bg    8.54:1
+       --danger-crimson  over --bg    4.51:1
+
+     Two things this palette gives up, stated rather than hidden. Primary
+     (#FFBF00) and warning (#D4AF37) are both golds, so the "starred" and
+     "active" languages stop differing by HUE here and differ by lightness
+     (10.87 vs 8.54) and by the border/glow they already carry. And the
+     secondary accent lands at 4.16:1 — under AA for body text, which is why
+     the RAW accent paints only borders, glows and chip accents (3:1 component
+     contrast, cleared): every violet-tinted TEXT run rides --ink-violet
+     instead, which mixes in 30% --text and clears AA in this theme at 6.39:1
+     (see the derived-token block). Code Mode remains the escape hatch.
+     -------------------------------------------------------------------------- */
+  .theme-tape-deck {
+    --bg: #1A1614;
+    --surface: rgba(255, 214, 170, 0.06);
+    --surface-2: rgba(255, 214, 170, 0.03);
+    --surface-border: rgba(212, 175, 55, 0.22);
+    --field-bg: rgba(10, 7, 5, 0.40);
+    --viz-bg: rgba(8, 5, 3, 0.60);
+    --toast-bg: rgba(28, 22, 18, 0.94);
+    --shadow-color: rgba(10, 6, 3, 0.55);
+    --accent-cyan: #FFBF00;
+    --accent-violet: #CC5500;
+    --warning-amber: #D4AF37;
+    --danger-crimson: #E8432E;
+    --text: #FFF6E0;
+    --text-dim: rgba(255, 246, 224, 0.62);
+    --glow-cyan: 0 0 18px color-mix(in srgb, var(--accent-cyan) 30%, transparent);
+    --glow-violet: 0 0 18px color-mix(in srgb, var(--accent-violet) 32%, transparent);
+    --glow-crimson: 0 0 18px color-mix(in srgb, var(--danger-crimson) 28%, transparent);
+  }
+
+  /* --------------------------------------------------------------------------
+     NULL SIGNAL — base dark. A clinical console: neutral graphite panels on
+     true black, one desaturated steel-blue for primary and a grey-slate
+     secondary. Nothing glows for attention; the only saturated things in the
+     theme are the two states that MEAN something (warning ochre, danger rose).
+
+       --text            over --bg   15.66:1
+       --text-dim        over --bg    6.53:1
+       --accent-cyan     over --bg    4.56:1
+       --accent-violet   over --bg    4.10:1
+       --warning-amber   over --bg    8.18:1
+       --danger-crimson  over --bg    4.73:1
+
+     The danger hue is the one value here that is NOT the reference design's.
+     Its #B23A48 measures 3.39:1 on this ground — below AA and below what
+     Obsidian already ships (5.57:1) — for the one accent that has to be read
+     when something has gone wrong. #CC5464 keeps the muted brick-rose and
+     lands at 4.73:1.
+     -------------------------------------------------------------------------- */
+  .theme-null-signal {
+    --bg: #0A0A0A;
+    --surface: rgba(26, 26, 26, 0.80);
+    --surface-2: rgba(26, 26, 26, 0.55);
+    --surface-border: rgba(255, 255, 255, 0.12);
+    --field-bg: rgba(0, 0, 0, 0.55);
+    --viz-bg: rgba(0, 0, 0, 0.65);
+    --toast-bg: rgba(18, 18, 18, 0.95);
+    --shadow-color: rgba(0, 0, 0, 0.60);
+    --accent-cyan: #5A7D9A;
+    --accent-violet: #6B7280;
+    --warning-amber: #C9A227;
+    --danger-crimson: #CC5464;
+    --text: rgba(240, 240, 242, 0.95);
+    --text-dim: rgba(240, 240, 242, 0.60);
+    --glow-cyan: 0 0 14px color-mix(in srgb, var(--accent-cyan) 35%, transparent);
+    --glow-violet: 0 0 10px color-mix(in srgb, var(--accent-violet) 20%, transparent);
+    --glow-crimson: 0 0 14px color-mix(in srgb, var(--danger-crimson) 30%, transparent);
+  }
+
+  /* --------------------------------------------------------------------------
+     ABYSSAL BLOOM — base dark. Deep-sea bioluminescence: an almost-black
+     teal trench, cyan and chartreuse light organs, magenta for danger. The
+     brightest palette in the suite and the only one whose glows are TWO-stop
+     shadows (a tight core plus a wide halo), which is what makes a lit element
+     read as emitting rather than as outlined. Both stops are ordinary
+     box-shadow entries, so nothing downstream needs to know.
+
+       --text            over --bg   18.90:1
+       --text-dim        over --bg    7.35:1
+       --accent-cyan     over --bg   16.08:1
+       --accent-violet   over --bg   17.16:1
+       --warning-amber   over --bg   11.32:1
+       --danger-crimson  over --bg    6.43:1
+     -------------------------------------------------------------------------- */
+  .theme-abyssal-bloom {
+    --bg: #02080A;
+    --surface: rgba(120, 220, 220, 0.05);
+    --surface-2: rgba(120, 220, 220, 0.03);
+    --surface-border: rgba(0, 255, 255, 0.14);
+    --field-bg: rgba(2, 10, 12, 0.45);
+    --viz-bg: rgba(2, 6, 7, 0.60);
+    --toast-bg: rgba(10, 20, 22, 0.95);
+    --shadow-color: rgba(0, 0, 0, 0.60);
+    --accent-cyan: #00FFFF;
+    --accent-violet: #CCFF00;
+    --warning-amber: #FFB347;
+    --danger-crimson: #FF00FF;
+    --text: #EAFBFB;
+    --text-dim: rgba(234, 251, 251, 0.62);
+    --glow-cyan: 0 0 12px color-mix(in srgb, var(--accent-cyan) 55%, transparent), 0 0 28px color-mix(in srgb, var(--accent-cyan) 25%, transparent);
+    --glow-violet: 0 0 10px color-mix(in srgb, var(--accent-violet) 50%, transparent), 0 0 24px color-mix(in srgb, var(--accent-violet) 22%, transparent);
+    --glow-crimson: 0 0 10px color-mix(in srgb, var(--danger-crimson) 50%, transparent), 0 0 24px color-mix(in srgb, var(--danger-crimson) 22%, transparent);
+  }
+
+  /* ==========================================================================
      DERIVED TOKENS — layer 2. Mixed from the palette, never written out, so
      they follow both the active theme AND any user override for free.
      color-mix() is baseline in every engine this app already requires for
@@ -197,6 +390,14 @@
     --tint-cyan: color-mix(in srgb, var(--accent-cyan) 12%, transparent);
     --tint-cyan-border: color-mix(in srgb, var(--accent-cyan) 44%, transparent);
     --tint-violet: color-mix(in srgb, var(--accent-violet) 16%, transparent);
+    /* Violet INK for normal-size text. Raw --accent-violet is a border/glow/
+       chip accent and misses WCAG AA as 12-13px body text in several themes
+       (Obsidian 3.32:1, Tape Deck 4.16, Null Signal 4.10). Mixing 30% of the
+       theme's own --text lifts every theme over AA with headroom — measured
+       vs --bg: Obsidian 5.30, Daylight 9.52, ColorSafe 13.99, Tape Deck 6.39,
+       Null Signal 6.54, Abyssal 17.36, Studio Code 10.13. Any rule that paints
+       violet TEXT must use this token, never the raw accent. */
+    --ink-violet: color-mix(in srgb, var(--accent-violet) 70%, var(--text) 30%);
     --tint-amber: color-mix(in srgb, var(--warning-amber) 8%, transparent);
     --tint-amber-border: color-mix(in srgb, var(--warning-amber) 36%, transparent);
     /* The Negative Tag Shield's own wash (FDD #30). An exclusion is a NEGATIVE
@@ -339,7 +540,9 @@
   .btn-toggle:hover { color: var(--text); border-color: var(--accent-violet); }
 
   .btn-toggle[aria-pressed="true"] {
-    color: var(--accent-violet);
+    /* Label text rides the AA-clearing ink; the border/glow keep the raw
+       accent (UI-component contrast, 3:1, which every theme clears). */
+    color: var(--ink-violet);
     border-color: var(--accent-violet);
     box-shadow: var(--glow-violet);
   }
@@ -349,29 +552,132 @@
     outline-offset: 2px;
   }
 
-  /* --- Dark/light switcher + user colour picker --------------------------- */
+  /* --- Theme picker + user colour picker ---------------------------------- */
 
   /* The glyph pair is inline SVG (a single-file app has no icon font and no
      sprite sheet to fetch); exactly one of the two is rendered at a time and
      the other carries [hidden], which the UA stylesheet already resolves to
-     display:none because nothing here overrides `display`. */
+     display:none because nothing here overrides `display`. It shows the BASE
+     of whatever theme is active — six palettes still resolve to one of two
+     grounds — while the fixed "Theme" label names what the button opens. */
   .btn-toggle .glyph {
     width: 15px;
     height: 15px;
     flex: none;
   }
 
-  .btn-toggle[aria-pressed="true"].btn-theme {
+  .btn-toggle[aria-expanded="true"].btn-theme {
     color: var(--warning-amber);
     border-color: var(--warning-amber);
     box-shadow: none;
   }
 
-  /* The disclosure and its popover share a positioning context, so the panel
-     hangs off the button no matter where the header wraps it. */
+  /* The two popovers in the header share one positioning contract, so each
+     panel hangs off its own button no matter where the header wraps it. */
+  .theme-menu,
   .colors-menu {
     position: relative;
     display: inline-flex;
+  }
+
+  /* --- The theme picker popover ------------------------------------------- */
+
+  .theme-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 70;
+    width: min(300px, calc(100vw - 40px));
+    max-height: min(70vh, 620px);
+    overflow-y: auto;
+    padding: 14px 14px 12px;
+    text-align: left;
+    background: var(--toast-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    box-shadow: 0 18px 44px var(--shadow-color);
+    backdrop-filter: var(--glass-blur);
+  }
+
+  .theme-panel[hidden] { display: none; }
+
+  .theme-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  /* One row per registry entry. It is a real <button> carrying
+     role="menuitemradio", so the pressed/checked state is announced rather
+     than only painted, and a roving tabindex keeps exactly one of the seven in
+     the tab order (the checked one) — arrows move between the rest. */
+  .theme-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 9px;
+    font: inherit;
+    font-size: 0.78rem;
+    text-align: left;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+  }
+
+  .theme-row:hover { color: var(--text); }
+
+  .theme-row[aria-checked="true"] {
+    color: var(--accent-cyan);
+    background: var(--tint-cyan);
+    border-color: var(--tint-cyan-border);
+  }
+
+  .theme-row:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 1px;
+  }
+
+  .theme-row-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .theme-row-kind {
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* THE SWATCH STRIP IS THE THEME ITSELF, not a picture of it. The strip
+     carries that theme's own class, so `background: var(--bg)` on the strip
+     and `var(--text)` / `var(--accent-*)` on the dots resolve through the very
+     block the row would apply — there is no second copy of the palette to
+     drift. Studio Obsidian is the one row with no class (its palette is :root,
+     which the active theme has already overridden higher up the tree), so its
+     strip is seeded at boot from the computed :root values instead; see
+     snapshotRootSwatch() in #app-main. */
+  .theme-swatches {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    padding: 4px 5px;
+    background: var(--bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 7px;
+  }
+
+  .theme-swatch {
+    width: 8px;
+    height: 14px;
+    border-radius: 2px;
   }
 
   .colors-panel {
@@ -1754,13 +2060,15 @@
   }
 
   /* The compiled tag line. Violet is the metatag colour everywhere in this app
-     (FDD #15), so a block reads as the same object as its compiled line. */
+     (FDD #15), so a block reads as the same object as its compiled line — but
+     as 12.8px body text it uses the AA-clearing --ink-violet, not the raw
+     accent (see the derived-token block). */
   .structure-tag {
     flex: 1 1 160px;
     min-width: 0;
     font-family: var(--font-mono);
     font-size: 0.8rem;
-    color: var(--accent-violet);
+    color: var(--ink-violet);
     overflow-wrap: anywhere;
   }
 
@@ -2245,28 +2553,54 @@
   #view-hum.is-entering { animation: view-fade-in var(--vt-in) ease-out both; }
 
   /* ==========================================================================
-     HIGH-CONTRAST "CODE" MODE — docs/FDD.md #17.
+     STUDIO CODE — the high-contrast "Code" mode, docs/FDD.md #17.
+
+     A MODE, NOT A THEME, and the distinction is load-bearing. The six theme
+     classes are alternatives to one another; this one sits on top of whichever
+     of them is active, driven by its own boolean, so turning it off returns
+     the user to the theme they had rather than to a default. That is why the
+     picker lists it as a seventh row that only sets the boolean, why
+     #btn-contrast and that row call the same setter, and why the stored
+     themeId is left untouched while it is on — it is the restore point.
+
      A pure token swap on the root element: solid black surfaces, no blur,
      borders and text pushed to full legibility, thicker focus rings. The
-     accent hues are deliberately not RE-designed — they are how the app
-     encodes meaning — but they are PINNED to their Obsidian values, because
-     Code Mode's ground is black whichever base theme is underneath it and
-     Studio Daylight's accents were derived for the opposite ground:
+     accent HUES are deliberately not re-designed — they are how the app
+     encodes meaning — but their lightness is pinned for a black ground,
+     because Code Mode's ground is black whichever base theme is underneath it
+     and no other palette in the suite was derived for one:
 
-       on #000000     Obsidian          Daylight
-       cyan           14.91:1           3.61:1
-       violet          3.52:1           2.62:1
-       amber          12.11:1           3.54:1
-       crimson         5.92:1           3.58:1
+       on #000000      pin        Obsidian    Daylight
+       cyan            #00F0FF    14.91:1     14.91:1     3.61:1
+       violet          #B77CED     7.12:1      3.52:1     2.62:1
+       amber           #FFB800    12.11:1     12.11:1     3.54:1
+       crimson         #FF5983     7.01:1      5.92:1     3.58:1
 
-     Letting the light accents through would have handed the accessibility
-     mode the least legible palette in the app.
+     Column 2 is what this block declares, column 3 what Studio Obsidian's own
+     value would have measured, column 4 what Studio Daylight's would.
 
-     THE LAST WORD IN THE CASCADE. This block sits after .theme-light, so it
-     beats either palette on equal specificity; and because inline custom
-     properties would still outrank a class, applyThemeState() SUSPENDS the
-     user's colour overrides for as long as the mode is on. A legibility mode
-     that a recolour could quietly defeat is not a legibility mode.
+     CONSCIOUSLY RAISED IN 0.16.0 (violet and crimson). Through 0.15.0 both
+     were pinned to Obsidian's literal values, which left the legibility mode
+     carrying a 3.52:1 secondary — the open item PLANNING.md tracked as
+     "Consider: Code Mode violet accent at 3.52:1 on black". #B77CED is the
+     same violet with the lightness lifted until it clears 7:1, and #FF5983 is
+     #FF3366 given the same treatment so danger and secondary stay a matched
+     pair. Cyan and amber already cleared it and are unchanged, so the mode
+     still reads as Obsidian rather than as a fifth palette. --surface-border
+     moved 0.45 -> 0.55 (4.41:1 -> 6.27:1) for the same reason: in a mode where
+     every surface is the same black, the border IS the layout.
+
+     THE LAST WORD IN THE CASCADE. Every theme class is a single class
+     selector, exactly like this one, so this block can only beat all six by
+     sitting after all six — tests/theming.test.js asserts that source order
+     rather than trusting it. And because inline custom properties would still
+     outrank a class, applyThemeState() SUSPENDS the user's colour overrides
+     for as long as the mode is on. A legibility mode that a recolour could
+     quietly defeat is not a legibility mode.
+
+     --glass-blur and --focus-ring below are the only two tokens here that are
+     outside the seventeen-name palette mirror: they are mode mechanics rather
+     than hues, and no THEME is allowed to touch them.
      ========================================================================== */
 
   .high-contrast {
@@ -2277,14 +2611,14 @@
     --viz-bg: #000000;
     --toast-bg: #000000;
     --shadow-color: rgba(0, 0, 0, 0);
-    --surface-border: rgba(255, 255, 255, 0.45);
+    --surface-border: rgba(255, 255, 255, 0.55);
     --text: #FFFFFF;
     --text-dim: rgba(255, 255, 255, 0.86);
-    /* Pinned, not re-designed — see the ratio table above. */
+    /* Pinned for a black ground, not re-designed — see the ratio table above. */
     --accent-cyan: #00F0FF;
-    --accent-violet: #8A2BE2;
+    --accent-violet: #B77CED;
     --warning-amber: #FFB800;
-    --danger-crimson: #FF3366;
+    --danger-crimson: #FF5983;
     --glass-blur: none;
     --focus-ring: 3px;
     --glow-cyan: none;
@@ -2297,6 +2631,7 @@
      outright on every glass surface. */
   .high-contrast .app-header,
   .high-contrast .colors-panel,
+  .high-contrast .theme-panel,
   .high-contrast .toast {
     backdrop-filter: none;
   }
@@ -2309,6 +2644,7 @@
   .high-contrast .colors-note,
   .high-contrast .confidence-meter,
   .high-contrast .view-tabs,
+  .high-contrast .theme-row[aria-checked="true"],
   .high-contrast .slider-chip,
   .high-contrast .style-meter,
   .high-contrast .exclude-chip[aria-pressed="true"],
@@ -2336,6 +2672,13 @@
   /* The selected tab loses its gradient here, so the accent border becomes the
      only thing marking it — it has to be the accent, not a neutral. */
   .high-contrast .view-tab[aria-selected="true"] {
+    border: 1px solid var(--accent-cyan);
+  }
+
+  /* Same story for the checked theme row: Code Mode has just flattened its
+     cyan wash, so the cyan border becomes the whole "this is the one you are
+     on" signal beside the announced aria-checked. */
+  .high-contrast .theme-row[aria-checked="true"] {
     border: 1px solid var(--accent-cyan);
   }
 
@@ -2396,10 +2739,11 @@
     box-shadow: none;
   }
 
-  /* A block's tag line is primary text, not a badge. Violet is 3.52:1 on black
-     (see the table above) — enough for a label, not for a line you read — so
-     in the legibility mode it takes the full-contrast foreground instead. The
-     compiled sheet below it already reads at --text in every mode. */
+  /* A block's tag line is primary text, not a badge. The 0.16.0 pin lifted the
+     Code Mode violet to 7.12:1 on black (see the table above), which is fine
+     for a label; a line you actually READ still takes the full-contrast
+     foreground, so this rule outlives the raise. The compiled sheet below it
+     already reads at --text in every mode. */
   .high-contrast .structure-tag { color: var(--text); }
 
   .high-contrast .badge-weight { color: var(--text-dim); }
@@ -2446,26 +2790,41 @@
         <button type="button" role="tab" id="tab-editor" class="view-tab" data-view="editor"
                 aria-controls="view-editor" aria-selected="false" tabindex="-1">Prompt Editor</button>
       </div>
-      <!-- Three token-level controls, three different jobs: pick a base theme,
+      <!-- Three token-level controls, three different jobs: pick a theme,
            recolour its tokens, or override both for legibility. The visible
            label of each stays fixed so the accessible name always contains it
-           (WCAG 2.5.3); the STATE lives in aria-pressed and, on the theme
-           switch, in which of the two inline glyphs is rendered. -->
-      <button type="button" id="btn-theme" class="btn-toggle btn-theme" aria-pressed="false"
-              aria-label="Light theme: off">
-        <svg id="theme-glyph-moon" class="glyph" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2" stroke-linecap="round"
-             stroke-linejoin="round" aria-hidden="true" focusable="false">
-          <path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z"/>
-        </svg>
-        <svg id="theme-glyph-sun" class="glyph" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2" stroke-linecap="round"
-             stroke-linejoin="round" aria-hidden="true" focusable="false" hidden>
-          <circle cx="12" cy="12" r="4.2"/>
-          <path d="M12 2v2.4M12 19.6V22M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2 12h2.4M19.6 12H22M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/>
-        </svg>
-        <span>Light</span>
-      </button>
+           (WCAG 2.5.3); the STATE lives in aria-pressed / aria-checked and, on
+           the theme button, in which of the two inline glyphs is rendered.
+
+           The theme control is a menu button rather than the dark/light toggle
+           it was through 0.15.0: there are seven choices now, and a two-state
+           control cannot express seven. Its rows are built from the THEMES
+           registry in #app-main so the markup never lists a theme twice. -->
+      <div class="theme-menu">
+        <button type="button" id="btn-theme" class="btn-toggle btn-theme"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="theme-panel"
+                aria-label="Theme: Studio Obsidian">
+          <svg id="theme-glyph-moon" class="glyph" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round"
+               stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z"/>
+          </svg>
+          <svg id="theme-glyph-sun" class="glyph" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round"
+               stroke-linejoin="round" aria-hidden="true" focusable="false" hidden>
+            <circle cx="12" cy="12" r="4.2"/>
+            <path d="M12 2v2.4M12 19.6V22M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2 12h2.4M19.6 12H22M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/>
+          </svg>
+          <span>Theme</span>
+        </button>
+        <div id="theme-panel" class="theme-panel" hidden>
+          <h2 id="theme-panel-title" class="colors-title">Theme</h2>
+          <!-- role="menu" sits on the ROWS rather than on the panel, so the
+               heading that labels it is not a child of the menu itself. -->
+          <div id="theme-rows" class="theme-rows" role="menu"
+               aria-labelledby="theme-panel-title"></div>
+        </div>
+      </div>
       <div class="colors-menu">
         <button type="button" id="btn-colors" class="btn-toggle" aria-expanded="false"
                 aria-controls="colors-panel" aria-haspopup="dialog"
@@ -4239,7 +4598,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.15.0';
+const APP_VERSION = '0.16.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -13356,6 +13715,121 @@ var THEME_LIGHT_CLASS = 'theme-light';
  * way an untouched install starts, and an explicit choice always wins. */
 var DEFAULT_THEME = 'dark';
 
+/*
+ * THE THEME REGISTRY — one array, four consumers.
+ *
+ * applyThemeState() drops every className here and adds the active one; the
+ * picker builds one row per entry; meta[name=color-scheme] is set from `base`;
+ * and the system-preference default is the first entry whose base matches the
+ * OS. Adding a theme is therefore an entry plus a CSS block, never an edit to
+ * four unrelated places — and tests/theming.test.js cross-checks every entry
+ * against a real `.theme-<slug> { … }` block in the stylesheet, so a registry
+ * row that names a class nobody wrote fails the run.
+ *
+ *   id        the stored, registry-validated slug (prefs.themeId)
+ *   label     what the picker row says
+ *   className the class applied to <html>; '' for Obsidian, which IS :root
+ *   base      'dark' | 'light' — the ground, used for meta[color-scheme] and
+ *             for the legacy `theme` field every write keeps in step
+ *   kind      why the theme exists, shown under its label in the picker
+ *
+ * STUDIO CODE IS NOT IN HERE, deliberately. It is a MODE that sits on top of
+ * whichever theme is active (the highContrast boolean), not an alternative to
+ * them: it has to be able to turn OFF and give the user their theme back. It
+ * gets its picker row from CODE_MODE_THEME below, and keeping it out of THEMES
+ * is what makes `themeId: 'studio-code'` an invalid stored value rather than a
+ * second way to say the same thing.
+ */
+var THEMES = [
+  { id: 'obsidian', label: 'Studio Obsidian', className: '', base: 'dark', kind: 'dark' },
+  { id: 'daylight', label: 'Studio Daylight', className: THEME_LIGHT_CLASS, base: 'light', kind: 'light' },
+  {
+    id: 'studio-colorsafe',
+    label: 'Studio ColorSafe',
+    className: 'theme-studio-colorsafe',
+    base: 'light',
+    kind: 'colour-vision safe',
+  },
+  { id: 'tape-deck', label: 'Tape Deck', className: 'theme-tape-deck', base: 'dark', kind: 'warm analogue' },
+  { id: 'null-signal', label: 'Null Signal', className: 'theme-null-signal', base: 'dark', kind: 'clinical' },
+  {
+    id: 'abyssal-bloom',
+    label: 'Abyssal Bloom',
+    className: 'theme-abyssal-bloom',
+    base: 'dark',
+    kind: 'bioluminescent',
+  },
+];
+
+/* The seventh picker row. Same shape as a THEMES entry so the row builder needs
+ * no special case, but it is reached through setHighContrast() rather than
+ * setThemeId(), and its class is applied by the boolean rather than by the
+ * registry walk. */
+var CODE_MODE_THEME = {
+  id: 'studio-code',
+  label: 'Studio Code',
+  className: HIGH_CONTRAST_CLASS,
+  base: 'dark',
+  kind: 'high contrast',
+};
+
+/* The two entries an untouched install falls back to, by system preference. */
+var DEFAULT_DARK_THEME_ID = 'obsidian';
+var DEFAULT_LIGHT_THEME_ID = 'daylight';
+
+/**
+ * @param {*} id
+ * @returns {object|null} the registry entry, or null for anything that is not
+ *   one of the base themes (including 'studio-code', which is a mode)
+ */
+function themeById(id) {
+  if (typeof id !== 'string' || !id) return null;
+  for (var i = 0; i < THEMES.length; i += 1) {
+    if (THEMES[i].id === id) return THEMES[i];
+  }
+  return null;
+}
+
+/**
+ * @param {*} id
+ * @returns {string|null} the canonical theme id, or null when unrecognised
+ */
+function normalizeThemeId(id) {
+  var entry = themeById(id);
+  return entry ? entry.id : null;
+}
+
+/**
+ * @param {'dark'|'light'} base
+ * @returns {string} the id of the theme that base maps to
+ */
+function defaultThemeIdForBase(base) {
+  return base === 'light' ? DEFAULT_LIGHT_THEME_ID : DEFAULT_DARK_THEME_ID;
+}
+
+/**
+ * Roving-tabindex arithmetic for a VERTICAL menu (WAI-ARIA menu pattern).
+ * Pure, like tabKeyTarget() below it, so the keyboard model of the theme
+ * picker is testable without a DOM: the caller does the focusing, this decides
+ * where focus should land.
+ *
+ * @param {string} key a KeyboardEvent.key value
+ * @param {number} index index of the row that currently has focus
+ * @param {number} count how many rows there are
+ * @returns {number} index to move to, or -1 when the key is not ours to handle
+ */
+function menuKeyTarget(key, index, count) {
+  var n = typeof count === 'number' && isFinite(count) ? Math.floor(count) : 0;
+  if (n <= 0) return -1;
+  var i = typeof index === 'number' && isFinite(index) ? Math.floor(index) : 0;
+  if (i < 0 || i >= n) i = 0;
+  if (key === 'ArrowDown') return (i + 1) % n;
+  if (key === 'ArrowUp') return (i - 1 + n) % n;
+  if (key === 'Home') return 0;
+  if (key === 'End') return n - 1;
+  return -1;
+}
+
 /* One of the TWO localStorage keys this app writes (docs/FEATURE-MECHANICS.md
  * §6.4: localStorage is strictly reserved for lightweight UI state; presets
  * and prompt history belong in IndexedDB). The other is PROFILES_KEY —
@@ -13778,18 +14252,32 @@ function composeColorValue(r, g, b, a) {
  * colour overrides.
  *
  * ONE key, `suno_ui_prefs`, holding ONE JSON record:
- *   { highContrast: boolean, theme: 'dark'|'light'|null, customColors: {} }
+ *   { highContrast: boolean,
+ *     theme: 'dark'|'light'|null,
+ *     themeId: <THEMES id>|null,
+ *     customColors: {} }
  * `theme: null` is not a missing value, it is a meaningful state: "never
  * chosen", which is what makes the system preference the initial answer while
- * an explicit choice keeps winning forever after.
+ * an explicit choice keeps winning forever after. `themeId: null` says the
+ * same thing about the suite.
+ *
+ * TWO FIELDS, ON PURPOSE (0.16.0). `theme` alone cannot name six palettes and
+ * `themeId` alone cannot be read by a build that predates it, so every write
+ * sets BOTH — themeId to the chosen entry and theme to that entry's BASE. A
+ * reader prefers a registry-validated themeId, falls back to theme, and falls
+ * back again to the system preference; a 0.15.0 build handed a record that
+ * says {theme:'dark', themeId:'tape-deck'} still paints Studio Obsidian rather
+ * than dropping to a null and losing the user's ground. The cost is one
+ * redundant field; the alternative was a stored value older code reads as
+ * "nothing chosen".
  *
  * Nothing read back is trusted. The record is JSON, every field is re-checked
- * against its own contract, and every stored colour is re-run through
- * normalizeColorValue() on load — a payload edited by hand, left by another
- * app, or truncated mid-write degrades to the default instead of reaching the
- * DOM or throwing during boot. That also means an older `{highContrast:true}`
- * record from before this release still loads, unchanged, as exactly what it
- * says.
+ * against its own contract, themeId is validated against the THEMES registry,
+ * and every stored colour is re-run through normalizeColorValue() on load — a
+ * payload edited by hand, left by another app, or truncated mid-write degrades
+ * to the default instead of reaching the DOM or throwing during boot. That also
+ * means an older `{highContrast:true}` record from before any of this still
+ * loads, unchanged, as exactly what it says.
  *
  * @param {{
  *   storage?: {getItem:Function, setItem:Function},
@@ -13808,6 +14296,8 @@ function createThemePrefs(deps) {
   var highContrast = false;
   /** @type {'dark'|'light'|null} null === the user has never chosen */
   var theme = null;
+  /** @type {string|null} a THEMES id; null === the user has never chosen */
+  var themeId = null;
   /** @type {Record<string,string>} */
   var customColors = {};
 
@@ -13825,7 +14315,12 @@ function createThemePrefs(deps) {
     try {
       storage.setItem(
         UI_PREFS_KEY,
-        JSON.stringify({ highContrast: highContrast, theme: theme, customColors: customColors })
+        JSON.stringify({
+          highContrast: highContrast,
+          theme: theme,
+          themeId: themeId,
+          customColors: customColors,
+        })
       );
       return true;
     } catch (err) {
@@ -13880,6 +14375,10 @@ function createThemePrefs(deps) {
       var record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
       highContrast = !!(record && record.highContrast === true);
       theme = record && (record.theme === 'dark' || record.theme === 'light') ? record.theme : null;
+      // Validated against the registry, so a slug from a build that shipped a
+      // theme this one does not (or a hand-edited one) falls through to the
+      // `theme` field rather than naming a class nobody wrote.
+      themeId = normalizeThemeId(record ? record.themeId : null);
       customColors = sanitizeColors(record ? record.customColors : null);
       return highContrast;
     },
@@ -13909,26 +14408,81 @@ function createThemePrefs(deps) {
     },
 
     /**
-     * @param {'dark'|'light'|null} next 'system' or null clears the explicit
-     *   choice and hands the decision back to the OS
-     * @returns {'dark'|'light'} the theme now in effect
+     * The coarse dark/light switch, kept because it is the field an older
+     * build reads. Setting it also moves themeId to that base's DEFAULT theme,
+     * because the two fields are never allowed to disagree about the ground.
+     *
+     * @param {'dark'|'light'|null} next 'system' or null clears BOTH fields and
+     *   hands the decision back to the OS
+     * @returns {'dark'|'light'} the base now in effect
      */
     setTheme: function (next) {
-      if (next === 'dark' || next === 'light') theme = next;
-      else if (next === null || next === undefined || next === 'system') theme = null;
-      else return this.resolvedTheme(); // unrecognised: change nothing, write nothing
+      if (next === 'dark' || next === 'light') {
+        theme = next;
+        themeId = defaultThemeIdForBase(next);
+      } else if (next === null || next === undefined || next === 'system') {
+        theme = null;
+        themeId = null;
+      } else {
+        return this.resolvedTheme(); // unrecognised: change nothing, write nothing
+      }
       write();
       return this.resolvedTheme();
     },
 
     /**
-     * The theme actually painted: the explicit choice if there is one, else
-     * the system preference, else Studio Obsidian.
+     * The EXPLICIT theme choice from the suite.
+     * @returns {string|null} a THEMES id, or null when the user has never chosen
+     */
+    getThemeId: function () {
+      return themeId;
+    },
+
+    /**
+     * @param {string|null} next a THEMES id; 'system' or null clears the choice
+     *   and hands the decision back to the OS. 'studio-code' is NOT a theme id
+     *   — Code Mode is setHighContrast() — so it is rejected like any other
+     *   unknown slug.
+     * @returns {string} the theme id now in effect
+     */
+    setThemeId: function (next) {
+      var entry = themeById(next);
+      if (entry) {
+        themeId = entry.id;
+        // The legacy field follows the entry's ground, never the other way
+        // round: that is what keeps an older build painting the right dark.
+        theme = entry.base;
+      } else if (next === null || next === undefined || next === 'system') {
+        themeId = null;
+        theme = null;
+      } else {
+        return this.resolvedThemeId(); // unrecognised: change nothing, write nothing
+      }
+      write();
+      return this.resolvedThemeId();
+    },
+
+    /**
+     * The theme actually painted, resolved in the documented order: a
+     * registry-valid themeId, else the legacy base field, else the system
+     * preference, else Studio Obsidian.
+     * @returns {string} a THEMES id
+     */
+    resolvedThemeId: function () {
+      if (themeId) return themeId;
+      if (theme === 'dark' || theme === 'light') return defaultThemeIdForBase(theme);
+      return defaultThemeIdForBase(systemTheme());
+    },
+
+    /**
+     * The GROUND actually painted — the resolved theme's base. Unchanged in
+     * meaning and in return type from before the suite existed, so every
+     * caller that only cares whether the app is dark or light still works.
      * @returns {'dark'|'light'}
      */
     resolvedTheme: function () {
-      if (theme === 'dark' || theme === 'light') return theme;
-      return systemTheme();
+      var entry = themeById(this.resolvedThemeId());
+      return entry ? entry.base : DEFAULT_THEME;
     },
 
     /** @returns {Record<string,string>} a copy — callers cannot mutate the record */
@@ -13976,7 +14530,8 @@ function createThemePrefs(deps) {
  * cascade contract is actually enforced (docs/FDD.md §6, #17).
  *
  * Three layers land here in a fixed order of authority:
- *   base theme  — .theme-light on <html>, or its absence for Studio Obsidian;
+ *   base theme  — the active THEMES entry's className on <html> (or no class
+ *                 at all for Studio Obsidian, whose palette IS :root);
  *   user colours — inline custom properties on <html>, which outrank any class;
  *   Code Mode    — .high-contrast, which must beat BOTH.
  *
@@ -13986,29 +14541,45 @@ function createThemePrefs(deps) {
  * straight back when the mode goes off). A legibility mode a recolour could
  * quietly defeat would not be one.
  *
+ * The class swap is a REGISTRY WALK, not a pair of if-statements: every
+ * className in THEMES comes off and exactly one goes back on, so a theme added
+ * to the registry is switched away from correctly without touching this
+ * function, and no stale class can survive a swap.
+ *
  * Idempotent by construction — it writes the full target state every time
  * rather than diffing, so calling it twice changes nothing the first call did
  * not already do, and it can safely be the handler for every control.
  *
- * @param {object} prefs a createThemePrefs instance
+ * @param {object} prefs a createThemePrefs instance. Only resolvedTheme(),
+ *   isHighContrast() and getCustomColors() are REQUIRED; resolvedThemeId() is
+ *   used when present, so a caller with an older prefs shape still resolves to
+ *   that base's default theme rather than throwing.
  * @param {object} doc a Document (or any object exposing documentElement +
  *   querySelector; the whole function is DOM-shaped, not DOM-dependent)
- * @returns {{theme:string, highContrast:boolean, applied:string[]}|null}
+ * @returns {{theme:string, themeId:string, highContrast:boolean, applied:string[]}|null}
  */
 function applyThemeState(prefs, doc) {
   if (!prefs || !doc) return null;
   var root = doc.documentElement;
   if (!root) return null;
 
-  var theme = typeof prefs.resolvedTheme === 'function' ? prefs.resolvedTheme() : DEFAULT_THEME;
-  if (theme !== 'light') theme = DEFAULT_THEME;
+  var themeId =
+    typeof prefs.resolvedThemeId === 'function' ? normalizeThemeId(prefs.resolvedThemeId()) : null;
+  if (themeId === null) {
+    var base = typeof prefs.resolvedTheme === 'function' ? prefs.resolvedTheme() : DEFAULT_THEME;
+    themeId = defaultThemeIdForBase(base === 'light' ? 'light' : DEFAULT_THEME);
+  }
+  var entry = themeById(themeId) || THEMES[0];
+  var theme = entry.base;
   var highContrast = typeof prefs.isHighContrast === 'function' ? !!prefs.isHighContrast() : false;
   var customColors =
     typeof prefs.getCustomColors === 'function' ? prefs.getCustomColors() || {} : {};
 
   if (root.classList && typeof root.classList.add === 'function') {
-    if (theme === 'light') root.classList.add(THEME_LIGHT_CLASS);
-    else root.classList.remove(THEME_LIGHT_CLASS);
+    for (var t = 0; t < THEMES.length; t += 1) {
+      if (THEMES[t].className) root.classList.remove(THEMES[t].className);
+    }
+    if (entry.className) root.classList.add(entry.className);
     if (highContrast) root.classList.add(HIGH_CONTRAST_CLASS);
     else root.classList.remove(HIGH_CONTRAST_CLASS);
   }
@@ -14039,7 +14610,7 @@ function applyThemeState(prefs, doc) {
     typeof doc.querySelector === 'function' ? doc.querySelector('meta[name="color-scheme"]') : null;
   if (meta && typeof meta.setAttribute === 'function') meta.setAttribute('content', theme);
 
-  return { theme: theme, highContrast: highContrast, applied: applied };
+  return { theme: theme, themeId: entry.id, highContrast: highContrast, applied: applied };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -15440,6 +16011,8 @@ function createRibbonRenderer(deps) {
     const themePrefs = createThemePrefs({ storage: prefsStorage, matchMedia: mediaQuery });
     const contrastBtn = $('btn-contrast');
     const themeBtn = $('btn-theme');
+    const themePanel = $('theme-panel');
+    const themeRowsHost = $('theme-rows');
     const themeGlyphSun = $('theme-glyph-sun');
     const themeGlyphMoon = $('theme-glyph-moon');
     const colorsBtn = $('btn-colors');
@@ -15448,22 +16021,154 @@ function createRibbonRenderer(deps) {
     const colorsNote = $('colors-note');
     const colorsError = $('colors-error');
 
+    /* The six tokens a picker swatch strip paints with: the strip's ground and
+       its hairline, then four dots. Every one of them is read through var() so
+       the strip IS the theme rather than a second copy of it. */
+    const SWATCH_STRIP_TOKENS = ['--bg', '--surface-border'];
+    const SWATCH_DOT_TOKENS = ['--text', '--accent-cyan', '--accent-violet', '--danger-crimson'];
+
+    /* Studio Obsidian's palette lives in :root, which every other theme class
+       overrides ON THE SAME ELEMENT — so its swatch strip cannot get its
+       colours from a class the way the other six can. It is snapshotted HERE,
+       at boot, while <html> still carries no theme class and no user override,
+       and written onto that one strip as inline custom properties. Reading the
+       stylesheet is the point: there is still exactly one place the Obsidian
+       values are written down. */
+    function snapshotRootSwatch() {
+      const out = {};
+      try {
+        const computed = window.getComputedStyle(document.documentElement);
+        for (const token of SWATCH_STRIP_TOKENS.concat(SWATCH_DOT_TOKENS)) {
+          const value = String(computed.getPropertyValue(token) || '').trim();
+          if (value) out[token] = value;
+        }
+      } catch (err) {
+        // No getComputedStyle (a detached document): the strip simply inherits.
+      }
+      return out;
+    }
+
+    // Taken NOW, before applyThemeState() has had a chance to put a class or an
+    // override on <html> — after that, :root is no longer what computes.
+    const rootSwatch = snapshotRootSwatch();
+
+    /** @type {Array<{entry:object, el:object}>} */
+    const themeRows = [];
+
+    /**
+     * One row per registry entry plus the Code Mode row. A row is a real
+     * <button role="menuitemradio">, so its state is announced and not merely
+     * painted; the swatch strip carries the theme's own class so it previews
+     * the palette it would apply.
+     */
+    function buildThemeRows() {
+      for (const entry of THEMES.concat([CODE_MODE_THEME])) {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'theme-row';
+        row.id = 'theme-row-' + entry.id;
+        row.setAttribute('role', 'menuitemradio');
+        row.setAttribute('aria-checked', 'false');
+        row.setAttribute('tabindex', '-1');
+
+        const strip = document.createElement('span');
+        strip.className = entry.className ? 'theme-swatches ' + entry.className : 'theme-swatches';
+        // Decorative: the row's own text already names the theme.
+        strip.setAttribute('aria-hidden', 'true');
+        if (!entry.className) {
+          for (const token of SWATCH_STRIP_TOKENS.concat(SWATCH_DOT_TOKENS)) {
+            if (rootSwatch[token]) strip.style.setProperty(token, rootSwatch[token]);
+          }
+        }
+        for (const token of SWATCH_DOT_TOKENS) {
+          const dot = document.createElement('span');
+          dot.className = 'theme-swatch';
+          dot.style.background = 'var(' + token + ')';
+          strip.appendChild(dot);
+        }
+
+        const text = document.createElement('span');
+        text.className = 'theme-row-text';
+        const label = document.createElement('span');
+        label.textContent = entry.label;
+        const kind = document.createElement('span');
+        kind.className = 'theme-row-kind';
+        kind.textContent = entry.kind;
+        text.appendChild(label);
+        text.appendChild(kind);
+
+        row.appendChild(strip);
+        row.appendChild(text);
+        themeRowsHost.appendChild(row);
+        themeRows.push({ entry: entry, el: row });
+
+        row.addEventListener('click', function () {
+          chooseTheme(entry);
+          closeThemeMenu();
+        });
+      }
+    }
+
+    /**
+     * THE one place a picker row turns into state. A base row leaves Code Mode
+     * (a theme you cannot see is not a theme you chose) and stores the id; the
+     * Code Mode row only flips the boolean, so the stored themeId stays exactly
+     * where it was and becomes the restore point when the mode goes off.
+     */
+    function chooseTheme(entry) {
+      if (entry === CODE_MODE_THEME) {
+        setCodeMode(true);
+        return;
+      }
+      themePrefs.setHighContrast(false);
+      themePrefs.setThemeId(entry.id);
+      repaintTheme();
+    }
+
+    /**
+     * The single Code Mode setter, shared by the picker's Studio Code row and
+     * by #btn-contrast so the two can never disagree about the mode.
+     * @param {boolean} on
+     */
+    function setCodeMode(on) {
+      themePrefs.setHighContrast(!!on);
+      repaintTheme();
+    }
+
     /** Mirror the preference state onto the controls that announce it. */
     function syncThemeControls() {
       const on = themePrefs.isHighContrast();
-      const light = themePrefs.resolvedTheme() === 'light';
+      const activeId = themePrefs.resolvedThemeId();
+      const base = on ? CODE_MODE_THEME : themeById(activeId) || THEMES[0];
+      const light = base.base === 'light';
+
       contrastBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
       contrastBtn.setAttribute(
         'aria-label',
         on ? 'High-contrast code mode: on' : 'High-contrast code mode: off'
       );
-      themeBtn.setAttribute('aria-pressed', light ? 'true' : 'false');
-      themeBtn.setAttribute('aria-label', light ? 'Light theme: on' : 'Light theme: off');
-      // The glyph shows the theme in effect; the fixed "Light" label names what
-      // the control toggles, so the accessible name still contains it.
+      // The visible label stays the fixed word "Theme" (WCAG 2.5.3 wants the
+      // accessible name to contain it); WHICH theme is the announced state.
+      themeBtn.setAttribute('aria-label', 'Theme: ' + base.label);
+      // The glyph shows the GROUND in effect — six palettes still resolve to
+      // one of two — so the button reads at a glance without being a toggle.
       themeGlyphSun.hidden = !light;
       themeGlyphMoon.hidden = light;
       colorsNote.hidden = !on;
+
+      // Exactly one row is checked, and it is the only one in the tab order:
+      // arrows move between the rest (WAI-ARIA menu pattern).
+      let checkedIndex = -1;
+      for (let i = 0; i < themeRows.length; i += 1) {
+        const row = themeRows[i];
+        const isCode = row.entry === CODE_MODE_THEME;
+        const checked = isCode ? on : !on && row.entry.id === activeId;
+        if (checked) checkedIndex = i;
+        row.el.setAttribute('aria-checked', checked ? 'true' : 'false');
+        row.el.setAttribute('tabindex', '-1');
+      }
+      if (checkedIndex === -1 && themeRows.length) checkedIndex = 0;
+      if (checkedIndex !== -1) themeRows[checkedIndex].el.setAttribute('tabindex', '0');
     }
 
     /**
@@ -15618,6 +16323,7 @@ function createRibbonRenderer(deps) {
     }
 
     buildColorRows();
+    buildThemeRows();
     repaintTheme();
 
     /* -------- disclosure behaviour -------- */
@@ -15675,25 +16381,99 @@ function createRibbonRenderer(deps) {
       showColorError('');
     });
 
+    /* -------- the theme picker (one row per registry entry) -------- */
+
+    /** Index of the row that currently holds focus, or the checked one. */
+    function focusedThemeIndex() {
+      for (let i = 0; i < themeRows.length; i += 1) {
+        if (themeRows[i].el === document.activeElement) return i;
+      }
+      for (let i = 0; i < themeRows.length; i += 1) {
+        if (themeRows[i].el.getAttribute('aria-checked') === 'true') return i;
+      }
+      return 0;
+    }
+
+    /** Move focus to a row and apply it — a menu that follows focus. */
+    function focusThemeRow(index) {
+      const row = themeRows[index];
+      if (!row) return;
+      // Arrowing PICKS: the panel is a live preview. repaintTheme() re-derives
+      // every aria-checked AND the roving tabindex from the state it just
+      // wrote, so nothing here has to remember which row was checked before.
+      chooseTheme(row.entry);
+      row.el.focus();
+    }
+
+    function onThemeKeydown(event) {
+      if (themePanel.hidden) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeThemeMenu();
+        return;
+      }
+      if (!themeRowsHost.contains(event.target)) return;
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+        // The row is already applied (focus follows selection), so committing
+        // is simply "I am done here" — take the menu down and hand focus back.
+        event.preventDefault();
+        closeThemeMenu();
+        return;
+      }
+      const target = menuKeyTarget(event.key, focusedThemeIndex(), themeRows.length);
+      if (target === -1) return;
+      event.preventDefault();
+      focusThemeRow(target);
+    }
+
+    function onThemePointerDown(event) {
+      if (themePanel.hidden) return;
+      const target = event.target;
+      if (themePanel.contains(target) || themeBtn.contains(target)) return;
+      // Same contract as the colours popover: dismiss without stealing focus.
+      closeThemeMenu(false);
+    }
+
+    function openThemeMenu() {
+      themePanel.hidden = false;
+      themeBtn.setAttribute('aria-expanded', 'true');
+      document.addEventListener('keydown', onThemeKeydown, true);
+      document.addEventListener('pointerdown', onThemePointerDown, true);
+      const active = themeRows[focusedThemeIndex()];
+      if (active && typeof active.el.focus === 'function') active.el.focus();
+    }
+
+    function closeThemeMenu(restoreFocus) {
+      if (themePanel.hidden) return;
+      themePanel.hidden = true;
+      themeBtn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('keydown', onThemeKeydown, true);
+      document.removeEventListener('pointerdown', onThemePointerDown, true);
+      if (restoreFocus !== false) themeBtn.focus();
+    }
+
     themeBtn.addEventListener('click', function () {
-      themePrefs.setTheme(themePrefs.resolvedTheme() === 'light' ? 'dark' : 'light');
-      repaintTheme();
+      if (themePanel.hidden) openThemeMenu();
+      else closeThemeMenu();
     });
 
+    // The same setter the picker's Studio Code row calls, so pressing either
+    // control moves the other: #btn-contrast's aria-pressed and the row's
+    // aria-checked are both re-derived by syncThemeControls() from one boolean.
     contrastBtn.addEventListener('click', function () {
-      themePrefs.setHighContrast(!themePrefs.isHighContrast());
-      repaintTheme();
+      setCodeMode(!themePrefs.isHighContrast());
     });
 
     // While the user has expressed no preference of their own, the OS keeps
     // the vote — including when it changes mid-session (macOS/Windows auto
-    // dark at sunset). An explicit choice ends the subscription's effect.
+    // dark at sunset). An explicit choice of EITHER field ends the
+    // subscription's effect, because either one is a choice.
     if (mediaQuery) {
       try {
         const lightQuery = mediaQuery('(prefers-color-scheme: light)');
         if (lightQuery && typeof lightQuery.addEventListener === 'function') {
           lightQuery.addEventListener('change', function () {
-            if (themePrefs.getTheme() === null) repaintTheme();
+            if (themePrefs.getTheme() === null && themePrefs.getThemeId() === null) repaintTheme();
           });
         }
       } catch (err) {
