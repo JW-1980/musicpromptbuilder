@@ -16,9 +16,11 @@
 - [ ] #94 Markdown/Text Exporter (data: download path proven twice already).
 - [ ] Fix: `#mic-help` never opens on NotFoundError/NotReadableError (no-microphone case; pre-existing since v1.0.0).
 - [ ] Fix: `.theme-switching` release uses rAF, which parks in hidden tabs (cosmetic; use a visibility-safe fallback).
+- [ ] Fix: four source-scanner tests are CRLF-brittle — green on an LF checkout, fail on CRLF (measured: a `git worktree` materialized with CRLF made exactly these four fail: persistence "style-prompt copy appends to the history bank", ai-dissector "(RACE d) boot arms NOTHING" + "STATIC: only the gate writes the four cloud fields", keybinds-palette "one overlay contract"). Make the `\n` anchors `\r?\n`-tolerant, or pin `eol=lf` in `.gitattributes`.
 *Runners-up:* #46 solo cues, #19 onboarding tour, #72 A/B splitter.
 
 ## DONE
+- [x] Re-verify: theme-swap freeze re-reported against a pre-Task-23 revision — confirmed already fixed at HEAD in real Chrome (headless CDP, dark→light `.btn-record`/`.btn-midi` acceptance pass, no reload); regression coverage hardened in tests/theming.test.js (kill class must be armed before `applyThemeState`, which must keep its single call site).
 - [x] #90 Studio Shortcut Keybinds + #16 Command Palette (central dispatcher, 537-entry palette over the real toggle paths, cheat sheet; auto-repeat + a11y review fixes).
 - [x] Fix: theme-swap transition freeze — pattern-level `.theme-switching` kill class in repaintTheme (Tasks 11/14 diagnosis closed).
 - [x] Resolved: Code Mode violet legibility — already fixed by Task 17's raised pin (#B77CED, 7.12:1) + `--ink-violet` for text (10.13:1 in Code Mode).
