@@ -62,7 +62,7 @@ const TOKEN_BLOCK_SELECTORS = [
  * things in this file a version bump may touch, and they move together.
  * Convention since the v1.1.0 release audit: per-task bumps between releases,
  * and the release commit aligns APP_VERSION, package.json and the git tag. */
-const EXPECTED_VERSION = '1.2.0'; // CONSCIOUSLY UPDATED IN 1.2.0: FDD #49/#81/#83 (Pure Instrumental Mode Lock, Tag Clutter Warning, Prompt Synergy Score) — a per-task bump between releases.
+const EXPECTED_VERSION = '1.3.0'; // CONSCIOUSLY UPDATED IN 1.3.0: FDD #76/#82/#57 (Batch Variation Matrix, Suno Credit Cost Estimator, Prompt Diff Viewer) — a per-task bump between releases.
 /* The Prompt Editor's four workflow zones, in the order they must be read. */
 const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
 /* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
@@ -918,7 +918,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the compiler-intelligence release (FDD #49's Pure Instrumental Mode Lock over compileStylePrompt's instrumentalLock branch, FDD #81's Tag Clutter Warning over isInstrumentClutter, and FDD #83's Prompt Synergy Score over computeSynergyScore)`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the batch-and-diff release (FDD #76's Batch Variation Matrix over spinBatchVariations, FDD #82's Suno Credit Cost Estimator over estimateBatchCreditCost, and FDD #57's Prompt Diff Viewer over wordDiff/renderDiffOps)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });

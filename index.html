@@ -1813,6 +1813,49 @@
 
   .dissect-safe-note[hidden] { display: none; }
 
+  /* --- Prompt Diff Viewer (FDD #57) over FEATURE-MECHANICS.md §7.4 -------
+     R1 (in #app-main, right above the PERSISTENCE header) explains why these
+     are --accent-cyan / --danger-crimson rather than a new green token: two
+     colours this app already assigns the same meanings to, already held
+     apart at CVD-safe ΔE76 >= 25 by theming.test.js. No transition on either
+     — the measured Chrome freeze .instrument-badge's own rule documents
+     applies just as much to a word appearing or disappearing mid-diff. */
+  .diff-removed {
+    color: var(--danger-crimson);
+    text-decoration: line-through;
+  }
+
+  .diff-added {
+    color: var(--accent-cyan);
+  }
+
+  /* R3: an "added" word the dissector's raw result carries but Safe Mode
+     refused must never read as plain cyan "safe to add" text. Specificity
+     (two classes) over source order, so this wins over .diff-added above
+     regardless of which rule the cascade meets first. Values copied from
+     .genre-badge.is-unsafe (:1819) rather than widening that rule's own
+     selector — it belongs to a different feature and is not this one's to
+     edit. */
+  .diff-added.is-unsafe {
+    color: var(--text-dim);
+    background: var(--field-bg);
+    border: 1px dashed var(--surface-border);
+    text-decoration: line-through;
+    cursor: not-allowed;
+  }
+
+  /* The same treatment, standalone, for a plain 'equal' word the diff would
+     otherwise render as bare unstyled text — the realistic case in practice,
+     since a Safe-Mode-refused name is by definition one that echoes the
+     user's OWN input, which is exactly what an 'equal' run already is. */
+  .is-unsafe {
+    color: var(--text-dim);
+    background: var(--field-bg);
+    border: 1px dashed var(--surface-border);
+    text-decoration: line-through;
+    cursor: not-allowed;
+  }
+
   /* A badge Safe Mode refuses to hand to the prompt still SHOWS — hiding it
      would misreport what the engine returned. It is struck through, dimmed and
      disabled instead, so the refusal is visible rather than silent. */
@@ -2450,6 +2493,66 @@
   .style-synergy-score.is-warn { color: var(--warning-amber); }
 
   .style-conflicts li + li { margin-top: 4px; }
+
+  /* --- Batch Variation Matrix (FDD #76) / Suno Credit Cost Estimator
+     (FDD #82), over FEATURE-MECHANICS.md §5.2 -----------------------------
+     Reuses .style-block, .style-gauge-head, .style-gauge-label,
+     .style-zone-note, .draft-counts and .btn-mini verbatim — a batch row is
+     built from the same parts as everything else in this card. .batch-row-text
+     also serves the Prompt Diff Viewer's two read-only surfaces (the
+     dissector's #dissect-diff-text and the history bank's
+     #history-compare-text): all three are "a compiled/diffed string in a
+     box", so one rule holds it rather than three near-identical ones. */
+  .style-batch-rows {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .style-batch-rows[hidden] { display: none; }
+
+  .batch-row {
+    padding: 10px 12px;
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    background: var(--field-bg);
+  }
+
+  /* A duplicate roll still counts (it still cost a generation) — amber flags
+     it as worth a second look, the same signal .style-trimmed already
+     carries for "notable, not broken". */
+  .batch-row.is-duplicate .batch-row-caption { color: var(--warning-amber); }
+
+  .batch-row-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .batch-row-text {
+    margin: 6px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--text);
+    word-break: break-word;
+  }
+
+  .batch-row-text[hidden] { display: none; }
+
+  .batch-row-caption,
+  .batch-row-note {
+    margin: 6px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
 
   /* --- Song structure builder (FDD #39/#40/#42/#50) ----------------------- */
 
@@ -4071,6 +4174,20 @@
           <span id="dissect-source">source: —</span>
           <span id="dissect-fellback" class="source-flag" hidden>fell back to local</span>
         </p>
+
+        <!-- FDD #57 Prompt Diff Viewer, over FEATURE-MECHANICS.md §7.4: what
+             you typed vs. what the dissector heard — the RAW result (§7.4 is
+             spec-faithful here), so a Safe-Mode-refused name still SHOWS
+             (R3, .is-unsafe) rather than vanishing as if never heard. Hidden
+             for a #58 batch dissection: several tracks blended into one
+             result leaves no single input line to diff against. Read-only —
+             no copy button, this panel explains a result, it is not itself a
+             source of tags. -->
+        <div id="dissect-diff-block" class="style-block" hidden>
+          <p class="style-gauge-label" id="dissect-diff-label">Input vs. dissection (raw)</p>
+          <p id="dissect-diff-empty" class="style-zone-note" hidden>nothing to compare</p>
+          <p id="dissect-diff-text" class="batch-row-text" hidden></p>
+        </div>
         <details class="dissect-raw">
           <summary>Raw JSON</summary>
           <pre id="dissect-json"></pre>
@@ -4547,6 +4664,22 @@
           <button type="button" id="btn-style-copy" class="btn-mini">Copy style prompt</button>
         </span>
       </div>
+
+      <!-- FDD #76 Batch Variation Matrix + #82 Suno Credit Cost Estimator,
+           over FEATURE-MECHANICS.md §5.2. Behind an explicit Roll — never
+           auto-recomputed on promptState change, unlike the gauge above:
+           five compiles is five times the cost of one, for a feature whose
+           whole point is a deliberate batch rather than a live preview. -->
+      <div class="style-block style-batch">
+        <div class="style-gauge-head">
+          <span class="style-gauge-label" id="style-batch-label">Batch variations</span>
+          <button type="button" id="btn-batch-roll" class="btn-mini">Roll 5 variations</button>
+        </div>
+        <p id="style-batch-anchor" class="style-zone-note" role="status" aria-live="polite"></p>
+        <p id="style-batch-cost" class="draft-counts" hidden></p>
+        <ul id="style-batch-rows" class="style-batch-rows" role="list" hidden></ul>
+        <button type="button" id="btn-batch-copy-all" class="btn-mini" hidden>Copy all</button>
+      </div>
     </section>
 
     </div><!-- /.editor-rail -->
@@ -4605,6 +4738,16 @@
           0 entries
         </span>
         <span id="history-status" class="dissect-status" role="status" aria-live="polite"></span>
+      </div>
+
+      <!-- FDD #57 Prompt Diff Viewer, Surface B: one shared, non-virtualized
+           panel — "Compare" on a row above diffs that BANKED text against
+           what buildFinalPrompt(...) compiles for the CURRENT draft right
+           now, the same compile copyStylePrompt() runs. -->
+      <div id="history-compare" class="style-block" hidden>
+        <p class="style-gauge-label" id="history-compare-label">Compare with current draft</p>
+        <p id="history-compare-empty" class="style-zone-note" hidden>no differences</p>
+        <p id="history-compare-text" class="batch-row-text" hidden></p>
       </div>
     </section>
 
@@ -6556,7 +6699,7 @@ if (typeof self !== 'undefined') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -11643,6 +11786,41 @@ function sanitizeSafeMode(inputText, result, kb) {
   return out;
 }
 
+/**
+ * A dissection result flattened to plain prose for the Prompt Diff Viewer
+ * (FDD #57): genre_tokens[].tag, instruments, mood and era, joined with
+ * ', '. Deliberately NO bpm_range — it is a numeric [low, high) pair, not
+ * prose, and folding "130-145" into a word diff would compare a NUMBER
+ * FORMAT choice rather than what the dissector actually heard.
+ *
+ * Same function for a raw result and a sanitizeSafeMode() one — the two
+ * differ only in which entries survived the strip, never in shape — which is
+ * what lets the diff surface (:26xxx, renderDissectDiff) call this once on
+ * each and diff the two calls' own outputs against each other for R3.
+ *
+ * @param {object} result a dissection result
+ * @returns {string}
+ */
+function dissectionOutputText(result) {
+  if (!result || typeof result !== 'object') return '';
+  var parts = [];
+  if (isArrayLike(result.genre_tokens)) {
+    for (var i = 0; i < result.genre_tokens.length; i += 1) {
+      var token = result.genre_tokens[i];
+      if (token && typeof token.tag === 'string' && token.tag) parts.push(token.tag);
+    }
+  }
+  var lists = ['instruments', 'mood', 'era'];
+  for (var l = 0; l < lists.length; l += 1) {
+    var values = result[lists[l]];
+    if (!isArrayLike(values)) continue;
+    for (var v = 0; v < values.length; v += 1) {
+      if (typeof values[v] === 'string' && values[v]) parts.push(values[v]);
+    }
+  }
+  return parts.join(', ');
+}
+
 /* -------------------------------------------------------------------------- */
 /* E. VOCAL PERSONA REGISTRY (FDD #65) AND ITS SELECTOR (FDD #28)             */
 /* -------------------------------------------------------------------------- */
@@ -16293,6 +16471,216 @@ function applyInspiration(store, result) {
   return outcome;
 }
 
+/* -------------------------------------------------------------------------- */
+/* FDD #76 BATCH VARIATION MATRIX + #82 SUNO CREDIT COST ESTIMATOR            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * FDD #76's anchor: which ONE MUSIC_KB genre the current draft is already
+ * closest to, scored by how many of that genre's own tokens[].tag already
+ * sit in the draft's genre section (compared via normalizePromptTag :10793,
+ * the same case/whitespace identity the draft dedupes tags on). Ties keep
+ * kb.genres' own array order — the FIRST genre to reach the top score wins.
+ *
+ * R4: NEVER GUESS SILENTLY. The precedent is instruments-inspire.test.js's
+ * "the strip names the genre that seeded the combination" (:2008) — a
+ * suggestion whose provenance is hidden is one you cannot argue with. Every
+ * result carries `reason`, a sentence true on a clean match, on a tie AND on
+ * a total miss, because quietly falling back to Math.random or to
+ * kb.genres[0] would hand a five-row batch a family the draft never asked
+ * for.
+ *
+ * @param {object|Array} promptState the store, or its entries
+ * @param {object} [kb] defaults to MUSIC_KB
+ * @returns {{genreId:string|null, genreLabel:string|null, score:number,
+ *            tied:string[], reason:string}}
+ */
+function findAnchorGenre(promptState, kb) {
+  var k = kb && isArrayLike(kb.genres) ? kb : MUSIC_KB;
+  var entries = promptEntriesOf(promptState);
+  var draftGenreTags = Object.create(null);
+  var draftCount = 0;
+  var i;
+  for (i = 0; i < entries.length; i += 1) {
+    var entry = entries[i];
+    if (!entry || typeof entry.tag !== 'string') continue;
+    var section = typeof entry.section === 'string' ? entry.section.toLowerCase() : '';
+    if (section !== 'genre') continue;
+    var norm = normalizePromptTag(entry.tag);
+    if (!norm || draftGenreTags[norm]) continue;
+    draftGenreTags[norm] = true;
+    draftCount += 1;
+  }
+
+  if (!draftCount) {
+    return {
+      genreId: null,
+      genreLabel: null,
+      score: 0,
+      tied: [],
+      reason:
+        'The draft holds no genre tag yet, so there is no family to anchor a batch to — ' +
+        'add one (or spin a single Inspire Me combination) before rolling variations.',
+    };
+  }
+
+  var bestScore = -1;
+  var bestGenre = null;
+  var tiedWith = [];
+  for (i = 0; i < k.genres.length; i += 1) {
+    var genre = k.genres[i];
+    if (!genre || !isArrayLike(genre.tokens)) continue;
+    var score = 0;
+    for (var t = 0; t < genre.tokens.length; t += 1) {
+      var tag = genre.tokens[t] && genre.tokens[t].tag;
+      if (typeof tag === 'string' && draftGenreTags[normalizePromptTag(tag)]) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestGenre = genre;
+      tiedWith = [genre];
+    } else if (score === bestScore && score > 0) {
+      tiedWith.push(genre);
+    }
+  }
+
+  if (!bestGenre || bestScore <= 0) {
+    return {
+      genreId: null,
+      genreLabel: null,
+      score: 0,
+      tied: [],
+      reason:
+        'None of the draft’s ' +
+        draftCount +
+        ' genre tag' +
+        (draftCount === 1 ? '' : 's') +
+        ' matched a genre row in the embedded taxonomy, so there is no family to anchor a batch to.',
+    };
+  }
+
+  var tiedLabels = [];
+  for (i = 0; i < tiedWith.length; i += 1) tiedLabels.push(tiedWith[i].label);
+  var isTie = tiedWith.length > 1;
+  var reason = isTie
+    ? 'tied: ' + tiedLabels.join(' and ') + ' — using ' + tiedLabels[0] + ' (overlap ' + bestScore + ').'
+    : bestGenre.label + ' — overlap ' + bestScore + ' of its own tokens already in the draft.';
+
+  return {
+    genreId: bestGenre.id,
+    genreLabel: bestGenre.label,
+    score: bestScore,
+    tied: tiedLabels,
+    reason: reason,
+  };
+}
+
+/**
+ * FDD #76's Batch Variation Matrix: five compiled variations that all stay in
+ * ONE genre family — findAnchorGenre()'s pick — rather than five unrelated
+ * rolls that happen to share a click. Each row is the current draft PLUS a
+ * small same-family swap: spinInspiration() locked to the anchor genre is
+ * what makes that a genre-lock rather than a promise this function keeps by
+ * hand, and rngSample() of at most two of that spin's picks is what keeps
+ * five rows five distinct swaps rather than one whole spin added five times.
+ *
+ * R4 applies here too: with no anchor (findAnchorGenre returns a null
+ * genreId) this returns `{ok:false}` and the anchor's own `reason` — never a
+ * batch spun against a silently guessed genre.
+ *
+ * @param {object|Array} promptState the store, or its entries (the base every row starts from)
+ * @param {object} kb defaults to MUSIC_KB
+ * @param {number} masterSeed row `i` runs createSeededRng(masterSeed + i)
+ * @param {{exclusions?:string[], max?:number, modelId?:string,
+ *          excludeSupported?:boolean, instrumentalLock?:boolean}} [options]
+ *   `exclusions` is read here and never forwarded past this function;
+ *   everything else passes straight through to buildFinalPrompt() untouched.
+ * @returns {{ok:boolean, anchor:object, reason?:string, rows?:Array<{
+ *   seed:number, text:string, length:number, limit:number, zone:string,
+ *   trimmed:boolean, droppedTags:string[], droppedExclusions:string[],
+ *   conflicts:Array<object>, caption:string, duplicateOfIndex:number}>}}
+ */
+function spinBatchVariations(promptState, kb, masterSeed, options) {
+  var k = kb && isArrayLike(kb.genres) ? kb : MUSIC_KB;
+  var anchor = findAnchorGenre(promptState, k);
+  if (!anchor.genreId) {
+    return { ok: false, anchor: anchor, reason: anchor.reason };
+  }
+
+  var opts = options || {};
+  var exclusions = isArrayLike(opts.exclusions) ? opts.exclusions : [];
+  var base = promptEntriesOf(promptState);
+  var seed = typeof masterSeed === 'number' && isFinite(masterSeed) ? masterSeed : 0;
+
+  var rows = [];
+  var seenTexts = Object.create(null);
+  for (var i = 0; i < 5; i += 1) {
+    var rowSeed = seed + i;
+    var rng = createSeededRng(rowSeed);
+    var spin = spinInspiration({ rng: rng, kb: k, genreId: anchor.genreId });
+    var picks = spin && isArrayLike(spin.picks) ? spin.picks : [];
+    // Same rng stream spinInspiration already drew from — a fresh generator
+    // here would decorrelate the swap from the spin it is supposed to be a
+    // slice of, and determinism only needs ONE stream per row, not two.
+    var chosen = rngSample(rng, picks, Math.min(2, picks.length));
+    var seeds = inspirationSeeds({ picks: chosen });
+    var merged = base.concat(seeds);
+    var final = buildFinalPrompt(merged, exclusions, opts);
+
+    var duplicateOfIndex = Object.prototype.hasOwnProperty.call(seenTexts, final.text)
+      ? seenTexts[final.text]
+      : -1;
+    if (duplicateOfIndex === -1) seenTexts[final.text] = i;
+
+    var captionParts = [];
+    for (var c = 0; c < chosen.length; c += 1) {
+      captionParts.push(chosen[c].label + ' (' + chosen[c].kind + ')');
+    }
+    var caption = captionParts.length
+      ? 'swapped in: ' + captionParts.join(', ')
+      : 'no swap this roll — the anchor genre had nothing left to add';
+    if (duplicateOfIndex !== -1) {
+      caption += ' — duplicate of variation ' + (duplicateOfIndex + 1) + '; still counted.';
+    }
+
+    rows.push({
+      seed: rowSeed,
+      text: final.text,
+      length: final.length,
+      limit: final.limit,
+      zone: final.zone,
+      trimmed: final.trimmed,
+      droppedTags: final.droppedTags,
+      droppedExclusions: final.droppedExclusions,
+      conflicts: final.conflicts,
+      caption: caption,
+      duplicateOfIndex: duplicateOfIndex,
+    });
+  }
+
+  return { ok: true, anchor: anchor, rows: rows };
+}
+
+/** FEATURE-MECHANICS.md §5.2: "Suno v5.5 charges 5 credits per single
+ *  generation (which yields 2 audio tracks)." */
+var SUNO_CREDITS_PER_GENERATION = 5;
+
+/**
+ * FDD #82's Suno Credit Cost Estimator. §5.2's own worked example: "If the
+ * user selects the 'Batch Variation Matrix' (generating 5 variations), the
+ * estimator must dynamically calculate and display: `Estimated Cost: 25 Credits`."
+ * This returns exactly the number that example is built from —
+ * n × SUNO_CREDITS_PER_GENERATION — and leaves the sentence itself to the
+ * UI, which lower-cases it to match every other status line in this app.
+ *
+ * @param {number} n how many generations (batch rows) will be produced
+ * @returns {number} total credits; 0 for anything not a positive finite number
+ */
+function estimateBatchCreditCost(n) {
+  var count = typeof n === 'number' && isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  return count * SUNO_CREDITS_PER_GENERATION;
+}
+
 /* ==========================================================================
  * SONG STRUCTURE BUILDER — docs/FDD.md Domain D, over
  * docs/FEATURE-MECHANICS.md §2.3, §3.1 and §3.2.
@@ -19453,6 +19841,184 @@ function computeSynergyScore(input) {
       },
     ],
   };
+}
+
+/* ==========================================================================
+ * PROMPT DIFF VIEWER — docs/FDD.md #57, over docs/FEATURE-MECHANICS.md §7.4.
+ *
+ * R1 (colour), decided here in writing, the way the FDD #74-vs-§6.4 storage
+ * conflict was resolved above (see the PERSISTENCE header just below):
+ * §7.4's own example calls .diff-added "colored green". REJECTED. A new
+ * --diff-added token would mean editing :root, all five theme blocks and
+ * .high-contrast just for theming.test.js:1593's "every theme block is a
+ * name-for-name mirror of :root, all seventeen tokens, nothing else" to keep
+ * holding — for a colour meaning this app ALREADY owns: cyan already reads
+ * "this ADDS tags" (.btn-persona[aria-pressed="true"]), crimson already reads
+ * "this takes them away" (.exclude-chip[aria-pressed="true"]), and
+ * theming.test.js's own ColorSafe pairwise test already holds --accent-cyan
+ * and --danger-crimson apart at ΔE76 >= 25 under protan/deutan/tritan — the
+ * exact CVD contract a new green token would have had to earn from nothing.
+ * The mandatory part of §7.4 — a leading "+"/"−" that survives colour
+ * blindness and a greyscale print — is kept exactly; only the literal hue
+ * is substituted for one this app can defend with zero new test surface.
+ * ========================================================================== */
+
+/**
+ * Split diff input on whitespace, keeping every other character — including
+ * punctuation — attached to its word.
+ *
+ * Deliberately NOT normalizePromptTag() (:10793). That function's identity
+ * rule folds whitespace for TAG DE-DUPLICATION, where "lo-fi" and "lo fi" are
+ * meant to collide. A word diff exists to show exactly what changed, so the
+ * one hyphen that tells "lo-fi" (one token) apart from "lo fi" (two) has to
+ * stay significant here — this borrows the RULE from that comment, never the
+ * function itself.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function tokenizeForDiff(text) {
+  if (typeof text !== 'string' || !text.trim()) return [];
+  return text.trim().split(/\s+/);
+}
+
+/**
+ * The identity of one diff TOKEN for LCS matching: lowercased, leading and
+ * trailing punctuation stripped, everything internal (hyphens, apostrophes)
+ * left significant.
+ * @param {string} word
+ * @returns {string}
+ */
+function diffTokenKey(word) {
+  if (typeof word !== 'string') return '';
+  return word.toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '');
+}
+
+/** LOCAL_MAX_TOKENS-style discipline (:8462) applied to the diff DP table: a
+ *  hard ceiling on the WORK a diff may cost, never on how long either input
+ *  is allowed to be. */
+var WORD_DIFF_MAX_CELLS = 250000;
+
+/**
+ * A word-level diff between `a` and `b` — classic LCS dynamic programming
+ * over the two KEY arrays, so "lo-fi" only ever matches "lo-fi".
+ *
+ * Capped at WORD_DIFF_MAX_CELLS DP cells (lenA * lenB). Past that this skips
+ * the DP entirely — a diff nobody will read past 250,000 cells is not worth
+ * the O(n*m) memory — and returns a two-block fallback (the whole of `a`
+ * removed, the whole of `b` added) with `truncated: true`, so a caller can
+ * say so rather than silently serving a partial diff.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {{ops: Array<{type:'equal'|'removed'|'added', text:string}>, truncated: boolean}}
+ */
+function wordDiff(a, b) {
+  var tokensA = tokenizeForDiff(a);
+  var tokensB = tokenizeForDiff(b);
+  var lenA = tokensA.length;
+  var lenB = tokensB.length;
+
+  if (lenA * lenB > WORD_DIFF_MAX_CELLS) {
+    var fallback = [];
+    if (lenA) fallback.push({ type: 'removed', text: tokensA.join(' ') });
+    if (lenB) fallback.push({ type: 'added', text: tokensB.join(' ') });
+    return { ops: fallback, truncated: true };
+  }
+
+  var keysA = new Array(lenA);
+  for (var ka = 0; ka < lenA; ka += 1) keysA[ka] = diffTokenKey(tokensA[ka]);
+  var keysB = new Array(lenB);
+  for (var kb = 0; kb < lenB; kb += 1) keysB[kb] = diffTokenKey(tokensB[kb]);
+
+  // table[i][j] = length of the LCS of keysA[0..i) and keysB[0..j).
+  var table = new Array(lenA + 1);
+  var row;
+  for (var i = 0; i <= lenA; i += 1) {
+    row = new Array(lenB + 1);
+    for (var j = 0; j <= lenB; j += 1) row[j] = 0;
+    table[i] = row;
+  }
+  for (i = 1; i <= lenA; i += 1) {
+    for (j = 1; j <= lenB; j += 1) {
+      table[i][j] =
+        keysA[i - 1] === keysB[j - 1]
+          ? table[i - 1][j - 1] + 1
+          : Math.max(table[i - 1][j], table[i][j - 1]);
+    }
+  }
+
+  var ops = [];
+  i = lenA;
+  j = lenB;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && keysA[i - 1] === keysB[j - 1]) {
+      ops.push({ type: 'equal', text: tokensB[j - 1] });
+      i -= 1;
+      j -= 1;
+    } else if (j > 0 && (i === 0 || table[i][j - 1] >= table[i - 1][j])) {
+      ops.push({ type: 'added', text: tokensB[j - 1] });
+      j -= 1;
+    } else {
+      ops.push({ type: 'removed', text: tokensA[i - 1] });
+      i -= 1;
+    }
+  }
+  ops.reverse();
+  return { ops: ops, truncated: false };
+}
+
+/**
+ * Paint `ops` (from wordDiff) into `container` as DOM nodes ONLY — never a raw
+ * markup assignment, so nothing a diff ever carries can execute.
+ * `container.ownerDocument` is read rather than a bare global `document`, so
+ * this stays callable on any real element (which always carries one) or on a
+ * test double built to carry
+ * the same shape, with no dependency on this running inside the boot IIFE.
+ *
+ * Every 'removed'/'added' run (and any 'equal' run an `unsafe: true` flag is
+ * set on — R3, read by the dissector's diff surface) becomes a <span> holding
+ * exactly ONE text-node child; a plain 'equal' run is a bare text node. The
+ * leading "+"/"−" is baked into that single text node's own string, never a
+ * CSS ::before — a screen reader, a copy-paste and a greyscale print all need
+ * the glyph to be real text, not generated content.
+ *
+ * @param {object} container a DOM element (real, or ownerDocument-shaped)
+ * @param {Array<{type:string, text:string, unsafe?:boolean}>} ops
+ */
+function renderDiffOps(container, ops) {
+  if (!container || typeof container.appendChild !== 'function') return;
+  var doc = container.ownerDocument;
+  if (!doc || typeof doc.createTextNode !== 'function' || typeof doc.createElement !== 'function') return;
+  container.textContent = '';
+  var list = isArrayLike(ops) ? ops : [];
+  var appended = false;
+  for (var idx = 0; idx < list.length; idx += 1) {
+    var op = list[idx];
+    if (!op || typeof op.text !== 'string' || !op.text) continue;
+    if (appended) container.appendChild(doc.createTextNode(' '));
+    appended = true;
+
+    var classes = [];
+    var prefix = '';
+    if (op.type === 'removed') {
+      classes.push('diff-removed');
+      prefix = '− ';
+    } else if (op.type === 'added') {
+      classes.push('diff-added');
+      prefix = '+ ';
+    }
+    if (op.unsafe === true) classes.push('is-unsafe');
+
+    if (classes.length) {
+      var span = doc.createElement('span');
+      span.className = classes.join(' ');
+      span.appendChild(doc.createTextNode(prefix + op.text));
+      container.appendChild(span);
+    } else {
+      container.appendChild(doc.createTextNode(op.text));
+    }
+  }
 }
 
 /* ==========================================================================
@@ -26459,6 +27025,11 @@ function createInstallCapability(deps) {
     const rawJson = $('dissect-json');
     const addRow = $('dissect-add-row');
     const safeNote = $('dissect-safe-note');
+    /* FDD #57 Prompt Diff Viewer, Surface A (dissector). See
+       renderDissectDiff() below, called from the tail of renderDissection(). */
+    const dissectDiffBlock = $('dissect-diff-block');
+    const dissectDiffEmpty = $('dissect-diff-empty');
+    const dissectDiffText = $('dissect-diff-text');
 
     /* --- Mode 1b: the on-device model card --- */
     const localConfig = $('dissect-local-config');
@@ -27384,6 +27955,72 @@ function createInstallCapability(deps) {
        * the prefers-reduced-motion guard already governs.
        */
       dissectResults.focus();
+      renderDissectDiff();
+    }
+
+    /**
+     * FDD #57 Prompt Diff Viewer, Surface A. Diffs `lastDissectInput` against
+     * the RAW result's prose (dissectionOutputText(lastResult) — §7.4 is
+     * spec-faithful about using the raw one), then flags every OUTPUT-side
+     * token Safe Mode actually stripped so it can carry the .is-unsafe
+     * treatment (R3) instead of reading as plain "added" text.
+     *
+     * Hidden for a #58 batch dissection (trackLines().length > 1: no single
+     * input line to diff against) and whenever there is no result to show.
+     */
+    function renderDissectDiff() {
+      if (trackLines().length > 1 || !lastResult) {
+        dissectDiffBlock.hidden = true;
+        return;
+      }
+      dissectDiffBlock.hidden = false;
+
+      const inputText = lastDissectInput;
+      const rawText = dissectionOutputText(lastResult);
+      const safeText = dissectionOutputText(lastSafeResult);
+
+      if (!inputText.trim() && !rawText.trim()) {
+        dissectDiffEmpty.hidden = false;
+        dissectDiffEmpty.textContent = 'nothing to compare';
+        dissectDiffText.hidden = true;
+        dissectDiffText.textContent = '';
+        return;
+      }
+      dissectDiffEmpty.hidden = true;
+      dissectDiffText.hidden = false;
+
+      // WHICH raw-side tokens Safe Mode actually stripped — a frequency-map
+      // subtraction over the two PROSE outputs (the "spend the budget in
+      // order" idiom applyInspiration's caller already uses, :16243-ish),
+      // never a second call into safeModeHitsName here: that would be a
+      // SECOND implementation of the safe-mode rule this diff has to agree
+      // with, not the real one lastSafeResult already ran.
+      const safeBudget = Object.create(null);
+      const safeKeys = tokenizeForDiff(safeText).map(diffTokenKey);
+      for (let s = 0; s < safeKeys.length; s += 1) {
+        safeBudget[safeKeys[s]] = (safeBudget[safeKeys[s]] || 0) + 1;
+      }
+      const rawTokens = tokenizeForDiff(rawText);
+      const unsafeFlags = rawTokens.map(function (word) {
+        const key = diffTokenKey(word);
+        if (safeBudget[key] > 0) {
+          safeBudget[key] -= 1;
+          return false;
+        }
+        return true;
+      });
+
+      const diff = wordDiff(inputText, rawText);
+      let rawIdx = 0;
+      const ops = diff.ops.map(function (op) {
+        // 'removed' runs come purely from the INPUT side — they consume no
+        // raw-output token, so there is nothing to look up.
+        if (op.type === 'removed') return op;
+        const unsafe = unsafeFlags[rawIdx] === true;
+        rawIdx += 1;
+        return unsafe ? { type: op.type, text: op.text, unsafe: true } : op;
+      });
+      renderDiffOps(dissectDiffText, ops);
     }
 
     let dissectBusy = false;
@@ -27430,6 +28067,7 @@ function createInstallCapability(deps) {
             lastSafeResult = null;
             renderSafeNote();
             dissectResults.hidden = true;
+            dissectDiffBlock.hidden = true;
             dissectStatus.className = 'dissect-status err';
             dissectStatus.textContent = outcome.error;
             toastHost.show(outcome.error, 'error');
@@ -28475,6 +29113,153 @@ function createInstallCapability(deps) {
     }
 
     styleCopyBtn.addEventListener('click', copyStylePrompt);
+
+    /* -- G1b. Batch Variation Matrix (FDD #76) + Suno Credit Cost Estimator
+     * (FDD #82), over FEATURE-MECHANICS.md §5.2 --
+     *
+     * Behind an explicit Roll (see the button's own comment in the markup).
+     * `lastBatchRows` is what "Copy all" reads — THIS roll's five strings,
+     * not a live recompile, because a roll already stamped a seed and an
+     * anchor name on the panel and a copy has to reproduce exactly what the
+     * reader is looking at, not whatever the draft has drifted to since.
+     */
+    const batchRollBtn = $('btn-batch-roll');
+    const batchAnchorNote = $('style-batch-anchor');
+    const batchCostNote = $('style-batch-cost');
+    const batchRowsList = $('style-batch-rows');
+    const batchCopyAllBtn = $('btn-batch-copy-all');
+
+    /** @type {Array<object>} the rows the panel is currently showing */
+    let lastBatchRows = [];
+
+    /** copyViaClipboard -> copyViaExecCommand -> honest failure, shared by
+     *  every per-row Copy button and Copy all. */
+    function copyBatchText(text, doneMessage) {
+      copyViaClipboard(text).then(
+        function () {
+          toastHost.show(doneMessage);
+        },
+        function () {
+          if (copyViaExecCommand(text)) toastHost.show(doneMessage);
+          else toastHost.show('Could not reach the clipboard — select the text and copy it manually.', 'error');
+        }
+      );
+    }
+
+    function buildBatchRow(row, index) {
+      const li = document.createElement('li');
+      li.className = 'batch-row' + (row.duplicateOfIndex !== -1 ? ' is-duplicate' : '');
+
+      const head = document.createElement('div');
+      head.className = 'batch-row-head';
+      const label = document.createElement('span');
+      label.className = 'vrow-name';
+      label.textContent = 'Variation ' + (index + 1);
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'btn-mini';
+      copyBtn.textContent = 'Copy';
+      copyBtn.addEventListener('click', function () {
+        copyBatchText(
+          row.text,
+          'Variation ' + (index + 1) + ' copied — ' + plural(row.text.length, 'character') + '.'
+        );
+      });
+      head.appendChild(label);
+      head.appendChild(copyBtn);
+
+      const text = document.createElement('p');
+      text.className = 'batch-row-text';
+      text.textContent = row.text;
+
+      const caption = document.createElement('p');
+      caption.className = 'batch-row-caption';
+      caption.textContent = row.caption;
+
+      li.appendChild(head);
+      li.appendChild(text);
+      li.appendChild(caption);
+
+      // buildFinalPrompt's own trimmed/dropped notes — the same facts
+      // renderStylePrompt() shows for the live draft, mirrored per row.
+      if (row.droppedTags.length || row.droppedExclusions.length || row.conflicts.length) {
+        const note = document.createElement('p');
+        note.className = 'batch-row-note';
+        const parts = [];
+        if (row.droppedTags.length) {
+          parts.push(
+            'Trimmed to fit — ' + plural(row.droppedTags.length, 'tag') + ' dropped: ' + row.droppedTags.join(', ') + '.'
+          );
+        }
+        if (row.droppedExclusions.length) {
+          parts.push(plural(row.droppedExclusions.length, 'exclusion') + ' dropped for the same reason.');
+        }
+        if (row.conflicts.length) {
+          parts.push(plural(row.conflicts.length, 'conflict') + ' resolved.');
+        }
+        note.textContent = parts.join(' ');
+        li.appendChild(note);
+      }
+
+      return li;
+    }
+
+    function renderBatchRows(outcome) {
+      if (!outcome.ok) {
+        batchAnchorNote.textContent = outcome.reason;
+        batchCostNote.hidden = true;
+        batchRowsList.hidden = true;
+        batchRowsList.textContent = '';
+        batchCopyAllBtn.hidden = true;
+        lastBatchRows = [];
+        return;
+      }
+      batchAnchorNote.textContent = 'Anchor: ' + outcome.anchor.reason;
+
+      const credits = estimateBatchCreditCost(outcome.rows.length);
+      batchCostNote.hidden = false;
+      batchCostNote.textContent =
+        'Estimated cost: ' +
+        credits +
+        ' credits (' +
+        outcome.rows.length +
+        ' × ' +
+        SUNO_CREDITS_PER_GENERATION +
+        '/generation)';
+
+      batchRowsList.textContent = '';
+      for (let i = 0; i < outcome.rows.length; i += 1) {
+        batchRowsList.appendChild(buildBatchRow(outcome.rows[i], i));
+      }
+      batchRowsList.hidden = false;
+      batchCopyAllBtn.hidden = false;
+      lastBatchRows = outcome.rows;
+    }
+
+    batchRollBtn.addEventListener('click', function () {
+      const masterSeed = Date.now();
+      // Same activeModelOptions() + instrumentalLock merge copyStylePrompt()
+      // and renderStylePrompt() both use, plus `exclusions` — the one extra
+      // field spinBatchVariations() reads and strips before forwarding the
+      // rest to buildFinalPrompt() untouched.
+      const options = Object.assign({}, activeModelOptions(), {
+        instrumentalLock: instrumentalLock.get(),
+        exclusions: exclusions.list(),
+      });
+      const outcome = spinBatchVariations(promptState, MUSIC_KB, masterSeed, options);
+      renderBatchRows(outcome);
+      if (!outcome.ok) toastHost.show(outcome.reason, 'warn');
+    });
+
+    batchCopyAllBtn.addEventListener('click', function () {
+      if (!lastBatchRows.length) return;
+      const joined = lastBatchRows
+        .map(function (row, i) {
+          return 'Variation ' + (i + 1) + ':\n' + row.text;
+        })
+        .join('\n\n');
+      copyBatchText(joined, 'All ' + plural(lastBatchRows.length, 'variation') + ' copied.');
+    });
 
     /* -- G2. the share link (FDD #75) --
      *
@@ -30297,6 +31082,11 @@ function createInstallCapability(deps) {
     const historyCounts = $('history-counts');
     const historyStatus = $('history-status');
     const historyClearBtn = $('btn-history-clear');
+    /* FDD #57 Prompt Diff Viewer, Surface B — one shared, non-virtualized
+       panel near historyCounts. See showHistoryCompare() below. */
+    const historyCompareBlock = $('history-compare');
+    const historyCompareEmpty = $('history-compare-empty');
+    const historyCompareText = $('history-compare-text');
 
     /** Everything the bank holds, newest first. The view filters and sorts. */
     let historyRecords = [];
@@ -30356,6 +31146,20 @@ function createInstallCapability(deps) {
         restoreHistoryEntry(record.id);
       });
 
+      // FDD #57 Prompt Diff Viewer, Surface B. data-focus-key is what the
+      // virtual list's focus rescue (:20690-ish) keys off — every action in
+      // this row must carry one, and this is the one the earlier track (#49
+      // #81 #83) omitted.
+      const compare = document.createElement('button');
+      compare.type = 'button';
+      compare.className = 'btn-mini';
+      compare.setAttribute('data-focus-key', 'compare');
+      compare.textContent = 'Compare';
+      compare.title = 'Diff this entry against the style prompt compiled from the current draft';
+      compare.addEventListener('click', function () {
+        showHistoryCompare(record.id);
+      });
+
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'btn-mini';
@@ -30368,10 +31172,49 @@ function createInstallCapability(deps) {
 
       actions.appendChild(star);
       actions.appendChild(restore);
+      actions.appendChild(compare);
       actions.appendChild(remove);
       row.appendChild(main);
       row.appendChild(actions);
       return row;
+    }
+
+    /**
+     * FDD #57 Prompt Diff Viewer, Surface B. Diffs a BANKED entry's text
+     * against `buildFinalPrompt(...).text` compiled from the CURRENT draft —
+     * the exact same compile copyStylePrompt() runs (:28xxx-ish, same
+     * activeModelOptions() + instrumentalLock merge), so this panel can never
+     * show a string copyStylePrompt would disagree with a moment later.
+     *
+     * One shared panel, not one per row: unlike the 84px virtualized list
+     * above it, a diff can run to any length, and only one comparison is ever
+     * "the" comparison in view at a time.
+     *
+     * @param {string} id a prompt_history record id
+     */
+    function showHistoryCompare(id) {
+      const record = historyRecords.find(function (r) {
+        return r.id === id;
+      });
+      if (!record) return;
+
+      const final = buildFinalPrompt(
+        promptState,
+        exclusions.list(),
+        Object.assign({}, activeModelOptions(), { instrumentalLock: instrumentalLock.get() })
+      );
+
+      historyCompareBlock.hidden = false;
+      if (record.text === final.text) {
+        historyCompareEmpty.hidden = false;
+        historyCompareEmpty.textContent = 'no differences';
+        historyCompareText.hidden = true;
+        historyCompareText.textContent = '';
+        return;
+      }
+      historyCompareEmpty.hidden = true;
+      historyCompareText.hidden = false;
+      renderDiffOps(historyCompareText, wordDiff(record.text, final.text).ops);
     }
 
     const historyView = createVirtualList({
