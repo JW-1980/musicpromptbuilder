@@ -748,18 +748,28 @@ s.test('buildFinalPrompt reports the whole truth: length, zone, trims, drops and
   });
 
   const final = buildFinalPrompt(state, ['harsh noise']);
+  /* CONSCIOUSLY UPDATED IN 0.21.0: 'modelId' and 'excludeOmitted' joined the
+   * result for FDD #69. The pin exists to catch the shape growing by accident;
+   * this growth is deliberate and is what keeps the model-scoped omission of
+   * the [Exclude: …] block REPORTED rather than silent, which is the same
+   * "nothing is ever dropped quietly" rule droppedTags already serves.
+   * tests/model-deeplink.test.js asserts what both fields mean. */
   deepEqual(Object.keys(final).sort(), [
     'conflicts',
     'droppedExclusions',
     'droppedTags',
+    'excludeOmitted',
     'exclusions',
     'length',
     'limit',
+    'modelId',
     'tags',
     'text',
     'trimmed',
     'zone',
   ]);
+  assert.strictEqual(final.modelId, 'v5-5', 'no options means the default model, as it always did');
+  assert.strictEqual(final.excludeOmitted, false, 'v5.5 writes the shield, so nothing was omitted');
   assert.strictEqual(final.limit, PROMPT_CHAR_LIMIT);
   assert.strictEqual(final.length, final.text.length, 'the reported length IS the string length');
   assert.strictEqual(final.trimmed, false);
@@ -917,9 +927,20 @@ s.test('the gauge is a SUBSCRIBER of both stores — it can never show a stale c
 
   // The compiled string comes from the real pipeline over the real stores,
   // recomputed — never from a cached number (ENGINEERING-STANDARD.md §1.2).
+  /* CONSCIOUSLY UPDATED IN 0.21.0: the call now carries the FDD #69 model
+   * options. The contract is stronger than before, not weaker — the ceiling
+   * and the exclusion block are model-scoped, so a call site that compiled
+   * without them would show a gauge for a model the user has not selected. */
   assert.ok(
-    html.indexOf('buildFinalPrompt(promptState, exclusions.list())') !== -1,
-    'the panel must compile from live state'
+    /buildFinalPrompt\(promptState, exclusions\.list\(\), activeModelOptions\(\)\)/.test(html),
+    'the panel must compile from live state, for the selected model'
+  );
+  // Both call sites — the render and the copy — must agree about the model.
+  assert.strictEqual(
+    (html.match(/buildFinalPrompt\(promptState, exclusions\.list\(\)/g) || []).length,
+    (html.match(/buildFinalPrompt\(promptState, exclusions\.list\(\), activeModelOptions\(\)\)/g) || [])
+      .length,
+    'a buildFinalPrompt call over the live stores must never omit the model options'
   );
   assert.ok(
     /styleCount\.textContent = final\.length \+ ' \/ ' \+ final\.limit;/.test(html),

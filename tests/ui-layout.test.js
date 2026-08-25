@@ -58,17 +58,17 @@ const TOKEN_BLOCK_SELECTORS = [
   '.theme-abyssal-bloom {',
   '.high-contrast {',
 ];
-/* CONSCIOUSLY UPDATED IN 0.20.0: was '0.19.0' (the PWA release). This constant
- * and the title of the test that reads it are the only two things in this file
- * that a version bump is allowed to touch, and both moved together — the
- * assertion itself is unchanged. The bump follows the one-release-per-task
- * cadence PROGRESS.md records for 0.10.0 through 0.19.0; 0.20.0 is the paired
- * selector/generator release: FDD #27's var INSTRUMENT_REGISTRY and its
- * Instrument blocks card, and FDD #71's "Inspire me" slot machine over the
- * pure, seedable spinInspiration(). If the owner prefers it held back,
- * index.html:APP_VERSION and this line revert together and nothing else in the
- * suite moves. */
-const EXPECTED_VERSION = '0.20.0';
+/* CONSCIOUSLY UPDATED IN 0.21.0: was '0.20.0' (the instrument-blocks + inspire
+ * release). This constant and the title of the test that reads it are the only
+ * two things in this file that a version bump is allowed to touch, and both
+ * moved together — the assertion itself is unchanged. The bump follows the
+ * one-release-per-task cadence PROGRESS.md records for 0.10.0 through 0.20.0;
+ * 0.21.0 is the paired model/deep-link release: FDD #69's var SUNO_MODELS
+ * threaded through the compile pipeline as an options argument, and FDD #75's
+ * base64url workspace hash behind a Share link button. If the owner prefers it
+ * held back, index.html:APP_VERSION and this line revert together and nothing
+ * else in the suite moves. */
+const EXPECTED_VERSION = '0.21.0';
 /* The Prompt Editor's four workflow zones, in the order they must be read. */
 const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
 /* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
@@ -924,7 +924,7 @@ s.test('setHighContrast coerces to a real boolean rather than storing whatever i
 /* Version                                                                    */
 /* -------------------------------------------------------------------------- */
 
-s.test(`APP_VERSION is ${EXPECTED_VERSION} — the instrument-blocks + inspire release (var INSTRUMENT_REGISTRY with its MUSIC_KB derivation record and the Instrument blocks card, plus FDD #71's seedable spinInspiration behind an "Inspire me" card that never auto-adds)`, () => {
+s.test(`APP_VERSION is ${EXPECTED_VERSION} — the model-selector + deep-link release (FDD #69's var SUNO_MODELS threaded through compileStylePrompt/buildFinalPrompt/formatStructureTag as an options argument, plus FDD #75's spb1.<crc32>.<base64url> workspace hash behind a Share link button)`, () => {
   const app = loadAppSandbox();
   assert.strictEqual(app.evaluate('APP_VERSION'), EXPECTED_VERSION);
 });

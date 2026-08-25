@@ -1087,9 +1087,24 @@ s.test('the share is applied AFTER the session restore settles — on both of it
    * handler on both the fulfil and the reject path so a database that will not
    * open cannot swallow the user's share. */
   assert.ok(/const sessionRestore = idb\.ready\(\)/.test(source), 'the restore must be a named promise');
+  /* CONSCIOUSLY UPDATED IN 0.21.0. The share used to be chained on directly;
+   * FDD #75's workspace hash joined the SAME settled chain rather than growing
+   * a second one that could race it, so the handler is now applyBootIntents.
+   * The contract this test defends is unchanged and is asserted harder below:
+   * one chain, both settle paths, and the share still applied LAST. */
   assert.ok(
-    /ignoreRejection\(sessionRestore\.then\(applySharedIntent, applySharedIntent\)\);/.test(source),
-    'the share must be applied on BOTH settle paths of the session restore'
+    /ignoreRejection\(sessionRestore\.then\(applyBootIntents, applyBootIntents\)\);/.test(source),
+    'the boot intents must be applied on BOTH settle paths of the session restore'
+  );
+  const intents = /function applyBootIntents\(\)\s*\{([\s\S]*?)\n    \}/.exec(source);
+  assert.ok(intents, 'applyBootIntents not found');
+  assert.ok(
+    /applySharedIntent\(\);/.test(intents[1]),
+    'the share must still be applied in that chain'
+  );
+  assert.ok(
+    intents[1].indexOf('applyWorkspaceLink();') < intents[1].indexOf('applySharedIntent();'),
+    'the share writes one block’s lyrics and must land ON TOP of a workspace link, not under it'
   );
   assert.ok(
     /const sharedIntent = readSharedIntent\(\);/.test(source),

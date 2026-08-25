@@ -64,19 +64,27 @@
        formatStructureTag), createStructureState with the §2.3 auto-chorus
        refrain, and createHistoryStack plus the pure keybinding predicates
        (isTextEntryTarget, structureShortcut, structureMoveShortcut)
-    6. the studio shell (createViewManager, tabKeyTarget, the theming layer —
+    6. the Suno model registry (FDD #69) — var SUNO_MODELS and its pure
+       resolvers (sunoModelById, resolveSunoModel, sunoModelOptions,
+       sunoModelKnob). Every knob carries the BASIS it was chosen on, because
+       docs/FEATURE-MECHANICS.md §3 documents v5.5 and nothing else. It is
+       the options argument the compiler pipeline below takes
+    7. the studio shell (createViewManager, tabKeyTarget, the theming layer —
        THEMABLE_TOKENS, normalizeColorValue, parseColorParts,
        composeColorValue, createThemePrefs, applyThemeState)
-    7. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
+    8. the 3D WebGL frequency ribbon — its two GLSL 300 es shader sources and
        the pure mesh/level/colour helpers (buildRibbonGeometry, downsampleBuffer,
        valenceToColor, pushRibbonRow, perspectiveMatrix4) plus createRibbonRenderer
-    8. the PWA layer (FDD #89/#92) — var PWA_MANIFEST and the pure builders
+    9. the PWA layer (FDD #89/#92) — var PWA_MANIFEST and the pure builders
        that encode it into the data: URI on <link rel="manifest"> above
        (percentEncodeUri, svgDataUri, pwaManifestFor, manifestDataUri),
        updateManifestLink which applyThemeState() calls, the pure
        FEATURE-MECHANICS §6.6 share reader parseSharedLyrics, and
-       createInstallCapability — the beforeinstallprompt state machine
-    9. the boot IIFE
+       createInstallCapability — the beforeinstallprompt state machine, and
+       beside them the FDD #75 deep-link codec (crc32, base64url,
+       encodeWorkspaceHash / decodeWorkspaceHash / buildWorkspaceLink), which
+       is URL-facing for the same reason the share reader is
+   10. the boot IIFE
 -->
 <style>
   /* ==========================================================================
@@ -1864,6 +1872,16 @@
     gap: 12px;
   }
 
+  /* Two buttons where the foot used to hold one (FDD #75 added "Share link").
+     They stay a pair on one side of the space-between so the count keeps the
+     other, and they wrap together rather than one of them stranding. */
+  .draft-foot-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
   /* A plain character count of the INGREDIENTS. The budget verdict belongs to
      the Style prompt card's gauge below (FDD #67), which counts the compiled
      string rather than this one. */
@@ -2264,6 +2282,37 @@
     background: color-mix(in srgb, var(--tint-cyan) 60%, var(--surface-2));
     border-color: var(--tint-cyan-border);
     box-shadow: var(--glow-cyan);
+  }
+
+  /* The card header carries the Suno model picker (FDD #69) beside the heading.
+     `align-items: flex-end` puts the select's baseline on the heading's rather
+     than hanging it off the top, and the wrap means a narrow container drops the
+     picker under the heading instead of squeezing either. */
+  .style-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .style-model-field { flex: 0 0 auto; }
+
+  /* Compact by intent: this is a setting, not an action, and it must not read
+     louder than the compiled prompt underneath it. */
+  .style-model-select {
+    padding: 6px 10px;
+    font-size: 0.78rem;
+  }
+
+  /* What the selected model changes, and what that rests on. Dim like the zone
+     note: it is standing information, not an alert. */
+  .style-model-note {
+    margin: 10px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.55;
+    color: var(--text-dim);
   }
 
   .style-gauge-head {
@@ -2930,6 +2979,12 @@
     .inspire-spin { justify-content: center; }
     .instrument-badge { flex: 1 1 auto; }
     .draft-foot { align-items: stretch; flex-direction: column; }
+    .draft-foot-actions { flex-direction: column; align-items: stretch; }
+    /* The model picker drops under the heading and takes the full width, like
+       every other field in this breakpoint, rather than sharing a line with a
+       heading that has nowhere left to wrap. */
+    .style-head { align-items: stretch; }
+    .style-model-field { width: 100%; }
     /* A narrow structure card stacks the block toolbar rather than letting the
        tag line, the handle and four buttons fight over one line. */
     .structure-toolbar { align-items: stretch; flex-direction: column; }
@@ -4016,6 +4071,11 @@
       </h5>
       <p id="structure-refrain-note" class="structure-refrain-note" role="status"
          aria-live="polite" hidden></p>
+      <!-- FDD #69. Appears only when the selected model compiles fewer bracket
+           modifiers than a block is holding, so a tag line that suddenly reads
+           shorter has a reason on screen instead of looking like data loss. -->
+      <p id="structure-model-note" class="structure-refrain-note" role="status"
+         aria-live="polite" hidden></p>
       <pre id="structure-preview" class="structure-preview" role="region" tabindex="0"
            aria-labelledby="structure-preview-heading" hidden></pre>
       <div class="draft-foot">
@@ -4082,6 +4142,12 @@
         Nothing excluded yet — the style prompt carries no exclusion block.
       </p>
       <div id="exclude-chips" class="exclude-chips"></div>
+      <!-- FDD #69. Shown ONLY when the selected model has no documented
+           [Exclude: …] syntax and there are terms that therefore go unwritten.
+           The terms are kept, not deleted: switching back to v5.5 compiles them
+           again. Amber, because it is a warning about the prompt rather than a
+           fault in the app — the same signal .style-trimmed carries. -->
+      <p id="exclude-model-note" class="style-trimmed" role="status" aria-live="polite" hidden></p>
       <p id="exclude-status" class="dissect-status" role="status" aria-live="polite"></p>
     </section>
 
@@ -4091,13 +4157,29 @@
          a SEPARATE Suno field and is deliberately not counted against this
          budget. -->
     <section class="view-col vibe-card style-panel" aria-labelledby="style-heading">
-      <h4 id="style-heading" class="panel-heading">Style prompt</h4>
+      <!-- The model picker (docs/FDD.md #69) sits in this card's header because
+           this is the card its choice changes: the ceiling on the gauge, the
+           exclusion block, and how much fits inside a bracket. The options are
+           built from the SUNO_MODELS registry in #app-main rather than written
+           here, so the labels and the compiler can never disagree. -->
+      <div class="style-head">
+        <h4 id="style-heading" class="panel-heading">Style prompt</h4>
+        <span class="field style-model-field">
+          <label class="field-label" for="style-model">Suno model</label>
+          <select id="style-model" class="field-select style-model-select"></select>
+        </span>
+      </div>
       <p class="panel-note">
         The finished style field: genre tokens weighted to the front, contradictory
         tags resolved in favour of the heavier one, exclusions appended last, and the
         whole string held under the strict 1,000-character Suno v5.5 ceiling. Anything
         that had to be dropped is listed below rather than disappearing quietly.
       </p>
+      <!-- What the chosen model actually changes, and what that claim rests on.
+           Written from the registry's own `summary` + `basis`, so a knob that is
+           a judgement call says so instead of passing itself off as documented
+           Suno behaviour. -->
+      <p id="style-model-note" class="style-model-note" role="status" aria-live="polite"></p>
 
       <div class="style-gauge">
         <div class="style-gauge-head">
@@ -4128,7 +4210,13 @@
 
       <div class="draft-foot">
         <span id="style-tally" class="draft-counts">0 tags · 0 exclusions</span>
-        <button type="button" id="btn-style-copy" class="btn-mini">Copy style prompt</button>
+        <span class="draft-foot-actions">
+          <!-- FDD #75. The link carries the WORKSPACE, not the compiled string:
+               opening it rebuilds the sliders, tags, exclusions and song flow so
+               the recipient can keep working, rather than pasting a dead prompt. -->
+          <button type="button" id="btn-style-share" class="btn-mini">Share link</button>
+          <button type="button" id="btn-style-copy" class="btn-mini">Copy style prompt</button>
+        </span>
       </div>
     </section>
 
@@ -6075,7 +6163,7 @@ if (typeof self !== 'undefined') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.20.0';
+const APP_VERSION = '0.21.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -16069,14 +16157,22 @@ function parseModifierList(text) {
  * Commas and brackets are stripped from inside a term as well, so a term
  * cannot smuggle a fifth trait past the ceiling or break the bracket syntax.
  *
+ * `cap` (0.21.0, FDD #69) lets an older Suno model compile a SHORTER bracket
+ * than §3.2 allows. It is a compile-time ceiling only: the store still holds
+ * what §3.2 permits, so switching the model back brings the discarded
+ * modifiers straight back rather than having destroyed them.
+ *
  * @param {*} list
- * @returns {string[]} at most STRUCTURE_MAX_MODIFIERS entries
+ * @param {number} [cap] defaults to STRUCTURE_MAX_MODIFIERS (§3.2)
+ * @returns {string[]} at most `cap` entries
  */
-function clampModifiers(list) {
+function clampModifiers(list, cap) {
   var out = [];
+  var limit =
+    typeof cap === 'number' && isFinite(cap) && cap >= 0 ? Math.floor(cap) : STRUCTURE_MAX_MODIFIERS;
   if (!isArrayLike(list)) return out;
   for (var i = 0; i < list.length; i += 1) {
-    if (out.length >= STRUCTURE_MAX_MODIFIERS) break;
+    if (out.length >= limit) break;
     if (typeof list[i] !== 'string') continue;
     var value = list[i].replace(/[[\],]/g, ' ').replace(/\s+/g, ' ').trim();
     if (value) out.push(value);
@@ -16095,16 +16191,24 @@ function clampModifiers(list) {
  * compiled sheet by any path. A number written into the section itself is
  * honoured when no explicit one is given.
  *
+ * `options` (0.21.0, FDD #69) is a sunoModelOptions() object — or any object
+ * carrying `modelId` and/or an explicit knob. Omitted, every knob is the
+ * DEFAULT model's, so every pre-0.21.0 call formats byte-identically. The
+ * §3.1 taxonomy is NOT model-scoped: the same tags are valid for every model,
+ * and only how much is packed into the bracket changes.
+ *
  * @param {string} section
  * @param {number|null} [number]
  * @param {string[]} [modifiers]
+ * @param {{modelId?:string, modifierCap?:number, sectionNumbering?:boolean}} [options]
  * @returns {string}
  */
-function formatStructureTag(section, number, modifiers) {
+function formatStructureTag(section, number, modifiers, options) {
   var parsed = splitStructureTag(section);
   var explicit = structureNumber(number);
   var n = explicit === null ? parsed.number : explicit;
-  var mods = clampModifiers(modifiers);
+  if (sunoModelKnob(options, 'sectionNumbering') === false) n = null;
+  var mods = clampModifiers(modifiers, sunoModelKnob(options, 'modifierCap'));
   var head = parsed.section + (n === null ? '' : ' ' + n);
   return '[' + head + (mods.length ? ' - ' + mods.join(', ') : '') + ']';
 }
@@ -16234,8 +16338,8 @@ function createStructureState(deps) {
   }
 
   /** One block as it appears in the sheet: its tag line, then its lyrics. */
-  function blockSheet(block) {
-    var tag = formatStructureTag(block.section, block.number, block.modifiers);
+  function blockSheet(block, options) {
+    var tag = formatStructureTag(block.section, block.number, block.modifiers, options);
     var body = lyricBody(block.lyrics);
     return body ? tag + '\n' + body : tag;
   }
@@ -16311,11 +16415,18 @@ function createStructureState(deps) {
   /**
    * The structure sheet: one formatted tag line per block, its lyrics under
    * it, a blank line between blocks, plus the §2.3 refrain when it applies.
+   *
+   * `options` is a sunoModelOptions() object (FDD #69). It reaches the tag
+   * lines and nothing else — the flow, the numbering rule and the refrain are
+   * the same song whichever model compiles it. Omitted, the sheet is exactly
+   * the pre-0.21.0 one.
+   *
+   * @param {{modelId?:string, modifierCap?:number, sectionNumbering?:boolean}} [options]
    */
-  function compile() {
+  function compile(options) {
     var parts = [];
     var i;
-    for (i = 0; i < blocks.length; i += 1) parts.push(blockSheet(blocks[i]));
+    for (i = 0; i < blocks.length; i += 1) parts.push(blockSheet(blocks[i], options));
     var refrain = autoChorus();
     if (refrain.applied) parts.splice(refrain.index, 0, '[Chorus]\n' + refrain.lyrics);
     return parts.join('\n\n');
@@ -16629,6 +16740,240 @@ function structureMoveShortcut(event) {
   if (event.key === 'ArrowUp') return -1;
   if (event.key === 'ArrowDown') return 1;
   return 0;
+}
+
+/* ==========================================================================
+ * SUNO MODEL SELECTOR — docs/FDD.md #69, "Adjusts syntax for Suno v5.5, v4,
+ * or v3.5", over docs/FEATURE-MECHANICS.md §3.
+ *
+ * THE HONESTY PROBLEM THIS REGISTRY EXISTS TO NOT PAPER OVER
+ *
+ *   §3 of FEATURE-MECHANICS.md is the ONLY documented model contract in this
+ *   repository, and every line of it describes v5.5: the 1,000-character
+ *   ceiling (FDD.md header + CLAUDE.md "Non-Negotiable Rules"), the four-term
+ *   modifier cap (§3.2) and the `[Exclude: …]` block (§3.3). Not one line
+ *   anywhere states what v4 or v3.5 do differently.
+ *
+ *   A "model selector" could therefore be built two ways. It could invent a
+ *   plausible-sounding older syntax — a smaller ceiling here, a renamed tag
+ *   there — and every one of those numbers would be a fabrication presented
+ *   to the user as a fact about Suno. Or it can ship a SMALL set of
+ *   deliberately conservative differences and say, per knob, exactly what it
+ *   is standing on. This is the second one.
+ *
+ * EVERY KNOB CARRIES ITS BASIS
+ *   'documented'     a line in docs/ says this, for this model. The citation
+ *                    is in `rationale`.
+ *   'conservative'   the docs are silent for this model. The value is the
+ *                    cautious direction and `rationale` says why that
+ *                    direction was chosen. It is a judgement call, labelled
+ *                    as one, and the UI says so out loud.
+ *   'app-convention' this app's own rule, identical for every model, and not
+ *                    a claim about Suno at all.
+ *
+ * WHY v4 AND v3.5 ARE IDENTICAL TO EACH OTHER
+ *   Because nothing distinguishes them in any document available here.
+ *   Inventing a difference so the two entries "look different" would be
+ *   exactly the fabrication above, one layer down. They are separate entries
+ *   because the FDD names both and a user picking "v3.5" should see "v3.5"
+ *   selected — not because this app knows something about v3.5 it does not.
+ *
+ * WHAT DOES *NOT* CHANGE WITH THE MODEL
+ *   The §3.1 metatag taxonomy. `[Intro]`, `[Verse]`, `[Chorus]`, `[Drop]` and
+ *   the rest are the shared structural vocabulary, validated identically for
+ *   every model: SUNO_METATAGS is not model-scoped and validateMetatag takes
+ *   no model. The three knobs below are about how much is packed INTO a tag
+ *   and whether the exclusion block is written — not about which tags exist.
+ * ========================================================================== */
+
+/** The knobs a model may move. A registry entry declares exactly these. */
+var SUNO_MODEL_KNOBS = ['charLimit', 'modifierCap', 'excludeSupported', 'sectionNumbering'];
+
+/** How each knob is NAMED to the user, so the note reads as a sentence. */
+var SUNO_MODEL_KNOB_LABELS = {
+  charLimit: 'the character ceiling',
+  modifierCap: 'the modifier cap',
+  excludeSupported: 'the exclusion block',
+  sectionNumbering: 'section numbering',
+};
+
+/** The vocabulary `basis` is allowed to use. See the header block. */
+var SUNO_MODEL_BASES = ['documented', 'conservative', 'app-convention'];
+
+/** The model every un-parameterised call compiles for — v5.5, as it always was. */
+var DEFAULT_SUNO_MODEL_ID = 'v5-5';
+
+/**
+ * THE REGISTRY. Ordered newest first, which is the order the picker shows.
+ *
+ * @type {Array<{id:string, label:string, charLimit:number, modifierCap:number,
+ *   excludeSupported:boolean, sectionNumbering:boolean, summary:string,
+ *   basis:Record<string,string>, rationale:Record<string,string>}>}
+ */
+var SUNO_MODELS = [
+  {
+    id: 'v5-5',
+    label: 'Suno v5.5',
+    charLimit: 1000,
+    modifierCap: 4,
+    excludeSupported: true,
+    sectionNumbering: true,
+    summary:
+      'The documented target: 1,000-character style field, up to 4 modifiers inside a ' +
+      'bracket, and the [Exclude: …] block written last.',
+    basis: {
+      charLimit: 'documented',
+      modifierCap: 'documented',
+      excludeSupported: 'documented',
+      sectionNumbering: 'app-convention',
+    },
+    rationale: {
+      charLimit:
+        'docs/FDD.md header and CLAUDE.md both state the strict 1,000-character v5.5 ' +
+        'style-prompt ceiling.',
+      modifierCap:
+        'FEATURE-MECHANICS.md §3.2: "Modifiers inside brackets must not exceed 4 ' +
+        'comma-separated terms."',
+      excludeSupported:
+        'FEATURE-MECHANICS.md §3.3: negative prompting in v5.5 is handled explicitly via ' +
+        'the [Exclude: …] tag, concatenated into one block at the very end.',
+      sectionNumbering:
+        'Numbering a section only when the flow holds two or more of it is this app’s own ' +
+        'rule (see createStructureState), not a documented Suno behaviour.',
+    },
+  },
+  {
+    id: 'v4',
+    label: 'Suno v4',
+    /* KEPT AT 1,000 ON PURPOSE. No document in this repository states a v4
+       ceiling. Raising it would let this app hand the user a prompt it cannot
+       prove fits; lowering it would silently trim text the user may well be
+       able to use. Holding the one ceiling that IS documented is the only
+       direction that cannot invent a fact in either direction. */
+    charLimit: 1000,
+    modifierCap: 2,
+    excludeSupported: false,
+    sectionNumbering: true,
+    summary:
+      'Conservative older-model mode: same 1,000-character ceiling, bracket modifiers ' +
+      'capped at 2, and no [Exclude: …] block.',
+    basis: {
+      charLimit: 'conservative',
+      modifierCap: 'conservative',
+      excludeSupported: 'conservative',
+      sectionNumbering: 'app-convention',
+    },
+    rationale: {
+      charLimit:
+        'No document states a v4 ceiling. The documented 1,000 is kept rather than guessed ' +
+        'up (which could overflow) or guessed down (which would trim usable text).',
+      modifierCap:
+        '§3.2’s four-term cap is stated for v5.5 only. Bracket complexity is halved rather ' +
+        'than invented: fewer terms per tag is the direction that stays parseable if an ' +
+        'older arrangement parser is simpler, and costs only detail if it is not.',
+      excludeSupported:
+        '§3.3 introduces [Exclude: …] as how negative prompting is handled "in v5.5". No ' +
+        'document extends it backwards, so it is not emitted here — and the terms are ' +
+        'reported as un-written rather than dropped in silence.',
+      sectionNumbering:
+        'This app’s numbering rule is not a claim about any model, so it does not change ' +
+        'with one.',
+    },
+  },
+  {
+    id: 'v3-5',
+    label: 'Suno v3.5',
+    charLimit: 1000,
+    modifierCap: 2,
+    excludeSupported: false,
+    sectionNumbering: true,
+    summary:
+      'Conservative older-model mode, identical to v4: nothing available here documents a ' +
+      'difference between the two, so none is invented.',
+    basis: {
+      charLimit: 'conservative',
+      modifierCap: 'conservative',
+      excludeSupported: 'conservative',
+      sectionNumbering: 'app-convention',
+    },
+    rationale: {
+      charLimit: 'Same reasoning as v4: the only documented ceiling is the one that is kept.',
+      modifierCap:
+        'Same reasoning as v4. No document separates v3.5 from v4, so the same conservative ' +
+        'cap applies rather than a second invented number.',
+      excludeSupported:
+        'Same reasoning as v4: [Exclude: …] is documented for v5.5 and nowhere else.',
+      sectionNumbering: 'Unchanged — an app convention, not a model behaviour.',
+    },
+  },
+];
+
+/**
+ * @param {*} id
+ * @returns {object|null} the registry entry, or null for anything unknown
+ */
+function sunoModelById(id) {
+  if (typeof id !== 'string' || !id) return null;
+  for (var i = 0; i < SUNO_MODELS.length; i += 1) {
+    if (SUNO_MODELS[i].id === id) return SUNO_MODELS[i];
+  }
+  return null;
+}
+
+/**
+ * The entry a compile should use. An unknown, absent or malformed id resolves
+ * to the DEFAULT model rather than throwing: a compile is on the path of every
+ * keystroke, and the honest answer to "which model?" when the answer is
+ * unreadable is the one this app is built around.
+ *
+ * @param {*} id
+ * @returns {object} always a registry entry
+ */
+function resolveSunoModel(id) {
+  return sunoModelById(id) || sunoModelById(DEFAULT_SUNO_MODEL_ID) || SUNO_MODELS[0];
+}
+
+/**
+ * The full resolved knob set for one model, as the options object every
+ * compile call site takes.
+ *
+ * `max` rather than `charLimit` because buildFinalPrompt's ceiling option has
+ * been called `max` since 0.10.0 and existing callers pass it directly.
+ *
+ * @param {*} id
+ * @returns {{modelId:string, max:number, modifierCap:number,
+ *            excludeSupported:boolean, sectionNumbering:boolean}}
+ */
+function sunoModelOptions(id) {
+  var entry = resolveSunoModel(id);
+  return {
+    modelId: entry.id,
+    max: entry.charLimit,
+    modifierCap: entry.modifierCap,
+    excludeSupported: entry.excludeSupported,
+    sectionNumbering: entry.sectionNumbering,
+  };
+}
+
+/**
+ * Read one knob for a compile call, with a documented precedence:
+ *
+ *   1. an explicit value on the options object — which is what keeps
+ *      `buildFinalPrompt(state, ex, {max: 30})` working for the callers and
+ *      tests that predate this registry;
+ *   2. otherwise the registry entry named by `options.modelId`;
+ *   3. otherwise the DEFAULT model — so a call with no options at all
+ *      compiles exactly as it did before 0.21.0, byte for byte.
+ *
+ * @param {*} options
+ * @param {string} name one of SUNO_MODEL_KNOBS
+ */
+function sunoModelKnob(options, name) {
+  var o = options && typeof options === 'object' && !isArrayLike(options) ? options : {};
+  if (Object.prototype.hasOwnProperty.call(o, name) && o[name] !== undefined && o[name] !== null) {
+    return o[name];
+  }
+  return resolveSunoModel(o.modelId)[name];
 }
 
 /* ==========================================================================
@@ -17356,18 +17701,32 @@ function promptEntriesOf(source) {
  * an empty '[Exclude: ]' would be a syntax artefact telling Suno to exclude
  * nothing, which is worse than saying nothing.
  *
+ * THE MODEL (0.21.0, FDD #69). `options` is a sunoModelOptions() object. A
+ * model whose `excludeSupported` is false gets NO block: §3.3 documents
+ * `[Exclude: …]` for v5.5 and nothing extends it backwards, so writing one
+ * for an older model would be inventing syntax. The terms are not lost and
+ * not silently dropped — they come back in `meta.exclusions` with
+ * `meta.excludeOmitted: true`, and the UI says so on the card. With no
+ * options the default model applies and the output is byte-identical to
+ * every build before this one.
+ *
  * @param {object|Array} promptState the store, or its entries
  * @param {Array<string>} [exclusions]
+ * @param {{modelId?:string, excludeSupported?:boolean}} [options]
  * @returns {{text:string, meta:{tags:string[], ordered:string[],
- *            conflicts:Array<object>, exclusions:string[], excludeBlock:string}}}
+ *            conflicts:Array<object>, exclusions:string[], excludeBlock:string,
+ *            modelId:string, excludeOmitted:boolean}}}
  */
-function compileStylePrompt(promptState, exclusions) {
+function compileStylePrompt(promptState, exclusions, options) {
   var ordered = weightTokens(promptEntriesOf(promptState));
   var resolved = resolveConflicts(ordered);
   var terms = normalizeExclusionList(exclusions);
+  var model = resolveSunoModel(options && options.modelId);
+  var excludeSupported = sunoModelKnob(options, 'excludeSupported') !== false;
 
   var body = resolved.tags.join(', ');
-  var block = terms.length ? EXCLUDE_OPEN + terms.join(', ') + EXCLUDE_CLOSE : '';
+  var block =
+    terms.length && excludeSupported ? EXCLUDE_OPEN + terms.join(', ') + EXCLUDE_CLOSE : '';
   var text = body && block ? body + EXCLUDE_JOIN + block : body || block;
 
   return {
@@ -17378,6 +17737,8 @@ function compileStylePrompt(promptState, exclusions) {
       conflicts: resolved.conflicts,
       exclusions: terms,
       excludeBlock: block,
+      modelId: model.id,
+      excludeOmitted: terms.length > 0 && !excludeSupported,
     },
   };
 }
@@ -17594,19 +17955,27 @@ function limitPrompt(text, max) {
  * every single state change (ENGINEERING-STANDARD.md §1.2: the character count
  * is the real length of the real string, recomputed, never estimated).
  *
+ * THE CEILING, and where it comes from (0.21.0, FDD #69). An explicit
+ * `options.max` still wins — that is the option this function has taken since
+ * 0.10.0 and what makes a tight budget testable. With no `max` the ceiling is
+ * the ACTIVE MODEL's `charLimit`, which for every model shipped today is the
+ * documented 1,000: see the SUNO_MODELS header for why an older model's
+ * ceiling is held there rather than guessed at.
+ *
  * @param {object|Array} promptState the store, or its entries
  * @param {Array<string>} [exclusions]
- * @param {{max?: number}} [options]
+ * @param {{max?: number, modelId?: string, excludeSupported?: boolean}} [options]
  * @returns {{text:string, length:number, limit:number, zone:string,
  *            trimmed:boolean, droppedTags:string[], droppedExclusions:string[],
- *            conflicts:Array<object>, tags:string[], exclusions:string[]}}
+ *            conflicts:Array<object>, tags:string[], exclusions:string[],
+ *            modelId:string, excludeOmitted:boolean}}
  */
 function buildFinalPrompt(promptState, exclusions, options) {
+  var compiled = compileStylePrompt(promptState, exclusions, options);
   var limit =
     options && typeof options.max === 'number' && isFinite(options.max)
       ? Math.floor(options.max)
-      : PROMPT_CHAR_LIMIT;
-  var compiled = compileStylePrompt(promptState, exclusions);
+      : resolveSunoModel(options && options.modelId).charLimit;
   var limited = limitPrompt(compiled.text, limit);
 
   return {
@@ -17620,6 +17989,8 @@ function buildFinalPrompt(promptState, exclusions, options) {
     conflicts: compiled.meta.conflicts,
     tags: compiled.meta.tags,
     exclusions: compiled.meta.exclusions,
+    modelId: compiled.meta.modelId,
+    excludeOmitted: compiled.meta.excludeOmitted,
   };
 }
 
@@ -20901,7 +21272,17 @@ function composeColorValue(r, g, b, a) {
  *   { highContrast: boolean,
  *     theme: 'dark'|'light'|null,
  *     themeId: <THEMES id>|null,
+ *     modelId: <SUNO_MODELS id>|null,
  *     customColors: {} }
+ *
+ * WHY THE SUNO MODEL LIVES IN A FUNCTION CALLED "themePrefs" (0.21.0). It is
+ * not a theme, but it IS lightweight UI state under the key §6.4 reserves for
+ * exactly that, and this factory is the single WRITER of that key: every write
+ * re-serialises the whole record, so a second writer would silently erase
+ * whatever the first one had just stored. One owner per key, and the owner is
+ * this. The model is deliberately NOT part of a workspace snapshot either —
+ * see the note on the share link — because it describes the machine the user
+ * is generating on, not the song they are building.
  * `theme: null` is not a missing value, it is a meaningful state: "never
  * chosen", which is what makes the system preference the initial answer while
  * an explicit choice keeps winning forever after. `themeId: null` says the
@@ -20944,6 +21325,8 @@ function createThemePrefs(deps) {
   var theme = null;
   /** @type {string|null} a THEMES id; null === the user has never chosen */
   var themeId = null;
+  /** @type {string|null} a SUNO_MODELS id; null === never chosen (= v5.5) */
+  var modelId = null;
   /** @type {Record<string,string>} */
   var customColors = {};
 
@@ -20965,6 +21348,7 @@ function createThemePrefs(deps) {
           highContrast: highContrast,
           theme: theme,
           themeId: themeId,
+          modelId: modelId,
           customColors: customColors,
         })
       );
@@ -21025,6 +21409,11 @@ function createThemePrefs(deps) {
       // theme this one does not (or a hand-edited one) falls through to the
       // `theme` field rather than naming a class nobody wrote.
       themeId = normalizeThemeId(record ? record.themeId : null);
+      // Validated against the SUNO_MODELS registry for the same reason themeId
+      // is validated against THEMES: a stored id from a build that shipped a
+      // model this one does not must fall back to the default rather than
+      // compiling for a model nobody defined.
+      modelId = record && sunoModelById(record.modelId) ? record.modelId : null;
       customColors = sanitizeColors(record ? record.customColors : null);
       return highContrast;
     },
@@ -21129,6 +21518,44 @@ function createThemePrefs(deps) {
     resolvedTheme: function () {
       var entry = themeById(this.resolvedThemeId());
       return entry ? entry.base : DEFAULT_THEME;
+    },
+
+    /**
+     * The EXPLICIT Suno model choice (FDD #69).
+     * @returns {string|null} a SUNO_MODELS id, or null when never chosen
+     */
+    getModelId: function () {
+      return modelId;
+    },
+
+    /**
+     * The model actually compiled for: the explicit choice, else the default.
+     * Separate from getModelId() for the same reason resolvedThemeId() is
+     * separate from getThemeId() — "what did the user pick" and "what is in
+     * force" are different questions, and conflating them loses the never-
+     * chosen state.
+     * @returns {string} a SUNO_MODELS id
+     */
+    resolvedModelId: function () {
+      return resolveSunoModel(modelId).id;
+    },
+
+    /**
+     * @param {string|null} next a SUNO_MODELS id; null or 'default' clears the
+     *   choice. An unrecognised id changes nothing and writes nothing.
+     * @returns {string} the model id now in force
+     */
+    setModelId: function (next) {
+      var entry = sunoModelById(next);
+      if (entry) {
+        modelId = entry.id;
+      } else if (next === null || next === undefined || next === 'default') {
+        modelId = null;
+      } else {
+        return this.resolvedModelId();
+      }
+      write();
+      return this.resolvedModelId();
     },
 
     /** @returns {Record<string,string>} a copy — callers cannot mutate the record */
@@ -22876,6 +23303,445 @@ function shareToastMessage(share, tag) {
     parts.push('It was longer than ' + SHARE_LYRICS_MAX + ' characters, so the rest was cut.');
   }
   return parts.join(' ');
+}
+
+/* ==========================================================================
+ * BASE64 / URL-HASH DEEP LINKING — docs/FDD.md #75, "Serializes UI state into
+ * shareable URL hashes".
+ *
+ * THE WIRE FORMAT
+ *
+ *     spb1.<crc32, 8 lower-case hex>.<base64url of the UTF-8 JSON>
+ *
+ *   spb1  A version tag, not decoration. A future build that changes the
+ *         payload shape mints 'spb2' and every spb1 link keeps decoding with
+ *         the spb1 rules — or is refused honestly by a build too old to know
+ *         the newer tag. It is also what makes a hash CLAIMABLE: this page
+ *         shares its fragment with the jump-nav anchors (#style-heading and
+ *         friends), so anything not starting with this tag is emphatically
+ *         not ours and is left completely alone.
+ *
+ *   crc32 An INTEGRITY check, and nothing more. It catches the damage links
+ *         really suffer — a truncated paste, a chat client that ate the tail,
+ *         a line-wrapped email — before a single byte is parsed. It is NOT a
+ *         signature and is not treated as one: anyone can recompute a CRC for
+ *         any payload they like, which is exactly why the real gate behind it
+ *         is validateWorkspaceSnapshot(), the same validator every restore,
+ *         preset import and history entry already has to pass.
+ *
+ *   base64url, unpadded (RFC 4648 §5). '+' and '/' are hostile in a URL
+ *         fragment and '=' is worse; the 62nd/63rd characters therefore
+ *         become '-' and '_' and the padding is dropped. The encoder is the
+ *         one already in this file — bytesToBase64, written out because the
+ *         node:vm sandboxes have no btoa — with the three substitutions
+ *         applied on top rather than a second alphabet copied in.
+ *
+ * NO KEY MATERIAL CAN RIDE ALONG. serializeWorkspace() already excludes
+ * everything secret by construction (it is never handed a key), and the
+ * encoder asserts it a second time: the payload is rebuilt field-by-field
+ * against the shape serializeWorkspace() itself declares, so a fat object
+ * with an API key hung off it encodes to exactly the same bytes as the clean
+ * workspace. The template is READ from serializeWorkspace(null) rather than
+ * hard-coded, so a field added to the snapshot tomorrow travels automatically
+ * and a field that is not part of a workspace can never start travelling.
+ *
+ * A HOSTILE HASH IS A STRING SOMEONE ELSE WROTE. Every refusal below happens
+ * BEFORE the next step's cost is paid: length before decode, alphabet before
+ * decode, checksum before UTF-8, UTF-8 before JSON.parse, JSON.parse before
+ * validation, validation before a single store is touched.
+ * ========================================================================== */
+
+/** The format tag. Bump the digit if the payload shape ever changes. */
+var WORKSPACE_HASH_PREFIX = 'spb1';
+
+/**
+ * Refuse-before-parse ceiling, in characters of the fragment.
+ *
+ * 256k is far larger than any real workspace (a full one encodes to a few
+ * kilobytes) and far smaller than a payload worth spending JSON.parse on. The
+ * check runs on the raw string, so a megabyte of garbage in the address bar
+ * costs one length comparison.
+ */
+var WORKSPACE_HASH_MAX_CHARS = 262144;
+
+/**
+ * When to WARN about a long link — not to refuse one.
+ *
+ * There is no standard URL length limit; ~8,000 characters is the practical
+ * floor across browsers, mail clients and chat apps, several of which silently
+ * truncate past it. A truncated link fails loudly at the checksum, so the risk
+ * is a broken paste rather than a wrong restore — which is worth a warning and
+ * not worth blocking a link the user may be about to paste somewhere fine.
+ */
+var WORKSPACE_LINK_WARN_CHARS = 8000;
+
+/** RFC 4648 §5: the two characters that differ from the standard alphabet. */
+var BASE64URL_FROM = '+/';
+var BASE64URL_TO = '-_';
+/* The url-safe alphabet, DERIVED from the standard one already in this file so
+   the two can never disagree about the first 62 characters. Spelling it out is
+   what makes the decoder strict: '+' and '/' are not base64url and are refused
+   like any other stray character, rather than quietly accepted because the
+   standard table happens to contain them. */
+var BASE64URL_ALPHABET = BASE64_ALPHABET.slice(0, 62) + BASE64URL_TO;
+
+/* CRC-32 (IEEE 802.3, reflected, polynomial 0xEDB88320) — the same CRC a zip
+ * file and a PNG chunk carry. The table is built once, lazily, so the cost is
+ * paid by the first link and never at load time. */
+var CRC32_TABLE = null;
+
+/** @returns {number[]} the 256-entry lookup table, built once */
+function crc32Table() {
+  if (CRC32_TABLE) return CRC32_TABLE;
+  var table = [];
+  for (var n = 0; n < 256; n += 1) {
+    var c = n;
+    for (var k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table.push(c >>> 0);
+  }
+  CRC32_TABLE = table;
+  return CRC32_TABLE;
+}
+
+/**
+ * CRC-32 of a byte sequence.
+ *
+ * @param {ArrayLike<number>} bytes
+ * @returns {number} unsigned 32-bit
+ */
+function crc32(bytes) {
+  var table = crc32Table();
+  var src = isArrayLike(bytes) ? bytes : [];
+  var crc = 0xffffffff;
+  for (var i = 0; i < src.length; i += 1) {
+    crc = table[(crc ^ (src[i] & 0xff)) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** The checksum as it appears in a hash: fixed-width, lower-case hex. */
+function crc32Hex(bytes) {
+  var hex = crc32(bytes).toString(16);
+  while (hex.length < 8) hex = '0' + hex;
+  return hex;
+}
+
+/**
+ * UTF-8 encode, by hand.
+ *
+ * TextEncoder is not reachable here for the same reason percentEncodeUri
+ * hand-rolls its own: this file is evaluated whole inside DOM-free node:vm
+ * sandboxes that carry the language built-ins and nothing else. A lone
+ * surrogate becomes U+FFFD rather than throwing — the same deliberate
+ * divergence percentEncodeUri documents, for the same reason.
+ *
+ * @param {string} text
+ * @returns {number[]} UTF-8 bytes
+ */
+function utf8Encode(text) {
+  var input = String(text === undefined || text === null ? '' : text);
+  var out = [];
+  for (var i = 0; i < input.length; i += 1) {
+    var code = input.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < input.length) {
+      var low = input.charCodeAt(i + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        code = (code - 0xd800) * 0x400 + (low - 0xdc00) + 0x10000;
+        i += 1;
+      }
+    }
+    if (code >= 0xd800 && code <= 0xdfff) code = 0xfffd;
+    if (code < 0x80) {
+      out.push(code);
+    } else if (code < 0x800) {
+      out.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code < 0x10000) {
+      out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    } else {
+      out.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3f),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f)
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * UTF-8 decode, by hand — STRICT.
+ *
+ * Malformed input returns null rather than a string full of U+FFFD. On the
+ * encode side a broken character is the user's own text and must survive;
+ * on the decode side it is a byte sequence from someone else's URL, and
+ * "this is not UTF-8" is a reason to refuse the whole hash rather than a
+ * detail to paper over. Overlong forms, surrogates encoded as three bytes and
+ * values past U+10FFFF are all rejected: each one is a classic way to smuggle
+ * a different string past a validator than the one it checked.
+ *
+ * @param {ArrayLike<number>} bytes
+ * @returns {string|null}
+ */
+function utf8Decode(bytes) {
+  var src = isArrayLike(bytes) ? bytes : [];
+  var out = '';
+  var i = 0;
+  while (i < src.length) {
+    var b0 = src[i] & 0xff;
+    var code;
+    var need;
+    var min;
+    if (b0 < 0x80) {
+      code = b0;
+      need = 0;
+      min = 0;
+    } else if (b0 >= 0xc2 && b0 <= 0xdf) {
+      code = b0 & 0x1f;
+      need = 1;
+      min = 0x80;
+    } else if (b0 >= 0xe0 && b0 <= 0xef) {
+      code = b0 & 0x0f;
+      need = 2;
+      min = 0x800;
+    } else if (b0 >= 0xf0 && b0 <= 0xf4) {
+      code = b0 & 0x07;
+      need = 3;
+      min = 0x10000;
+    } else {
+      return null; // 0x80-0xc1 and 0xf5-0xff are never a leading byte
+    }
+    // A multi-byte sequence that runs off the end is a truncated string, not a
+    // character: the last byte of it would be src[i + need].
+    if (i + need >= src.length) return null;
+    for (var k = 1; k <= need; k += 1) {
+      var bx = src[i + k] & 0xff;
+      if (bx < 0x80 || bx > 0xbf) return null;
+      code = (code << 6) | (bx & 0x3f);
+    }
+    if (code < min) return null; // overlong
+    if (code >= 0xd800 && code <= 0xdfff) return null; // surrogate half
+    if (code > 0x10ffff) return null;
+    if (code < 0x10000) {
+      out += String.fromCharCode(code);
+    } else {
+      var v = code - 0x10000;
+      out += String.fromCharCode(0xd800 + (v >> 10), 0xdc00 + (v & 0x3ff));
+    }
+    i += need + 1;
+  }
+  return out;
+}
+
+/** Standard base64 -> base64url: substitute two characters, drop the padding. */
+function base64ToBase64Url(text) {
+  var out = '';
+  for (var i = 0; i < text.length; i += 1) {
+    var ch = text.charAt(i);
+    if (ch === '=') continue;
+    var at = BASE64URL_FROM.indexOf(ch);
+    out += at === -1 ? ch : BASE64URL_TO.charAt(at);
+  }
+  return out;
+}
+
+/**
+ * base64url -> bytes. Returns null for anything outside the alphabet or of an
+ * impossible length, so a caller never gets "best effort" bytes out of a
+ * string that was not base64url in the first place.
+ *
+ * @param {string} text
+ * @returns {number[]|null}
+ */
+function base64UrlToBytes(text) {
+  if (typeof text !== 'string' || !text) return null;
+  var bits = 0;
+  var acc = 0;
+  var out = [];
+  for (var i = 0; i < text.length; i += 1) {
+    var value = BASE64URL_ALPHABET.indexOf(text.charAt(i));
+    if (value === -1) return null;
+    acc = (acc << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((acc >> bits) & 0xff);
+      // Keep only what is still owed a byte, so the accumulator can never
+      // drift into the sign bit over a long payload.
+      acc &= (1 << bits) - 1;
+    }
+  }
+  // 6 leftover bits cannot be the tail of any encoding, and whatever bits do
+  // remain must be zero — a non-zero remainder means the string was edited.
+  if (bits === 6) return null;
+  if (bits > 0 && (acc & ((1 << bits) - 1)) !== 0) return null;
+  return out;
+}
+
+/**
+ * Deterministic JSON: object keys in sorted order, everywhere, at every depth.
+ *
+ * Two workspaces that are equal must encode to the SAME hash, or "did this
+ * link change?" becomes unanswerable and every re-share mints a new-looking
+ * URL. JSON.stringify preserves insertion order, which is a property of how an
+ * object was built rather than of what it holds, so the ordering is imposed
+ * here instead. Values are plain data by contract (a workspace snapshot is
+ * JSON already), so there is nothing exotic to handle.
+ *
+ * @param {*} value
+ * @returns {string}
+ */
+function stableJsonStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (isArrayLike(value)) {
+    var items = [];
+    for (var i = 0; i < value.length; i += 1) {
+      var item = stableJsonStringify(value[i]);
+      items.push(item === undefined ? 'null' : item);
+    }
+    return '[' + items.join(',') + ']';
+  }
+  var keys = [];
+  for (var key in value) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) keys.push(key);
+  }
+  keys.sort();
+  var parts = [];
+  for (var k = 0; k < keys.length; k += 1) {
+    var encoded = stableJsonStringify(value[keys[k]]);
+    // An undefined member is absent from JSON, exactly as JSON.stringify has it.
+    if (encoded === undefined) continue;
+    parts.push(JSON.stringify(keys[k]) + ':' + encoded);
+  }
+  return '{' + parts.join(',') + '}';
+}
+
+/**
+ * The workspace fields a hash is allowed to carry, READ from the serializer
+ * rather than listed here.
+ *
+ * serializeWorkspace(null) returns a complete empty snapshot — every field it
+ * writes, with default values — so its key set IS the contract. A field added
+ * to the snapshot travels the next time without touching this function, and
+ * anything hung off the object that is not part of a workspace (a cloud
+ * config, an input element, an API key) cannot travel at all.
+ *
+ * @param {*} snapshot
+ * @returns {object} a fresh object holding only workspace fields
+ */
+function workspaceHashPayload(snapshot) {
+  var template = serializeWorkspace(null, { savedAt: 0 });
+  var out = {};
+  var source = snapshot && typeof snapshot === 'object' && !isArrayLike(snapshot) ? snapshot : {};
+  for (var key in template) {
+    if (!Object.prototype.hasOwnProperty.call(template, key)) continue;
+    out[key] = Object.prototype.hasOwnProperty.call(source, key) ? source[key] : template[key];
+  }
+  return out;
+}
+
+/**
+ * PURE. A workspace snapshot as a URL fragment (without the leading '#').
+ *
+ * @param {object} snapshot serializeWorkspace() output
+ * @returns {string} 'spb1.<crc32>.<base64url>'
+ */
+function encodeWorkspaceHash(snapshot) {
+  var json = stableJsonStringify(workspaceHashPayload(snapshot));
+  var bytes = utf8Encode(json);
+  return (
+    WORKSPACE_HASH_PREFIX + '.' + crc32Hex(bytes) + '.' + base64ToBase64Url(bytesToBase64(bytes))
+  );
+}
+
+/**
+ * PURE. Is this fragment one of ours at all?
+ *
+ * Deliberately cheap and deliberately strict: the fragment is shared with the
+ * jump-nav anchors, and a hash this app does not own must be left exactly
+ * where it is — not consumed, not warned about, not touched.
+ *
+ * @param {*} hash with or without its leading '#'
+ * @returns {boolean}
+ */
+function isWorkspaceHash(hash) {
+  if (typeof hash !== 'string' || !hash) return false;
+  var raw = hash.charAt(0) === '#' ? hash.slice(1) : hash;
+  return raw.indexOf(WORKSPACE_HASH_PREFIX + '.') === 0;
+}
+
+/**
+ * PURE. Decode a fragment back into a validated workspace snapshot.
+ *
+ * Every failure is a refusal with a reason, in escalating order of cost, and
+ * NOTHING is applied on the way through — this function touches no store, no
+ * DOM and no clock. The caller applies the snapshot only on {ok:true}.
+ *
+ * @param {*} hash with or without its leading '#'
+ * @returns {{ok:true, snapshot:object, plan:object}|{ok:false, reason:string}}
+ */
+function decodeWorkspaceHash(hash) {
+  if (typeof hash !== 'string' || !hash) return { ok: false, reason: 'no link data' };
+  // LENGTH FIRST, on the raw string: a hostile fragment must cost one
+  // comparison, not a base64 decode.
+  if (hash.length > WORKSPACE_HASH_MAX_CHARS) {
+    return { ok: false, reason: 'the link is larger than this app will read' };
+  }
+  var raw = hash.charAt(0) === '#' ? hash.slice(1) : hash;
+  var parts = raw.split('.');
+  if (parts.length !== 3) return { ok: false, reason: 'not a workspace link' };
+  if (parts[0] !== WORKSPACE_HASH_PREFIX) {
+    return { ok: false, reason: 'link format ' + JSON.stringify(parts[0]) + ' is not one this build reads' };
+  }
+  if (!/^[0-9a-f]{8}$/.test(parts[1])) return { ok: false, reason: 'the checksum is malformed' };
+  if (!parts[2]) return { ok: false, reason: 'the link carries no data' };
+
+  var bytes = base64UrlToBytes(parts[2]);
+  if (bytes === null) return { ok: false, reason: 'the link data is not valid base64url' };
+  if (crc32Hex(bytes) !== parts[1]) {
+    return { ok: false, reason: 'the checksum does not match — the link was cut short or edited' };
+  }
+
+  var json = utf8Decode(bytes);
+  if (json === null) return { ok: false, reason: 'the link data is not valid UTF-8' };
+
+  var parsed;
+  try {
+    parsed = JSON.parse(json);
+  } catch (err) {
+    return { ok: false, reason: 'the link data is not readable JSON' };
+  }
+
+  // THE REAL GATE. A correct checksum proves the bytes arrived intact, not
+  // that they are friendly — anyone can compute one. Everything past here is
+  // the same validator every restore, import and history entry must pass.
+  var verdict = validateWorkspaceSnapshot(parsed);
+  if (!verdict.ok) return { ok: false, reason: verdict.reason };
+  return { ok: true, snapshot: parsed, plan: verdict.plan };
+}
+
+/**
+ * PURE. The shareable URL for a snapshot: this document's own address, with
+ * the query string REMOVED and the workspace in the fragment.
+ *
+ * The query goes because a share-target link carries `?lyrics=…`, and a
+ * workspace link that dragged one along would re-import that text into the
+ * recipient's song flow every single time they opened it. manifestDocumentUrl
+ * already strips exactly this (and the old fragment) for exactly this reason,
+ * so it is reused rather than re-implemented.
+ *
+ * @param {*} href typically location.href
+ * @param {string} hash an encodeWorkspaceHash() result
+ * @returns {string|null} null when the document has no usable address, which
+ *   is honest: half a link is worse than none
+ */
+function buildWorkspaceLink(href, hash) {
+  if (typeof hash !== 'string' || !hash) return null;
+  var doc = manifestDocumentUrl(href);
+  if (!doc) return null;
+  return doc.url + '#' + hash;
 }
 
 /* --- FDD #89 — install capability ----------------------------------------- */
@@ -25713,6 +26579,113 @@ function createInstallCapability(deps) {
     const styleConflictList = $('style-conflicts');
     const styleTally = $('style-tally');
     const styleCopyBtn = $('btn-style-copy');
+    const styleShareBtn = $('btn-style-share');
+    const modelSelect = $('style-model');
+    const modelNote = $('style-model-note');
+    const excludeModelNote = $('exclude-model-note');
+
+    /* -- G1. the Suno model selector (FDD #69) --
+     *
+     * The choice lives in suno_ui_prefs beside the theme: it is a preference
+     * about the machine the user generates on, not part of the song, which is
+     * also why it does not travel in a workspace snapshot or a share link.
+     *
+     * There is exactly ONE reader of it — activeModelOptions() — and every
+     * compile call site takes its result. Nothing anywhere else asks "which
+     * model?", so the gauge, the copied string, the exclusion block and the
+     * structure sheet cannot disagree about the answer. */
+
+    /** @returns {object} the SUNO_MODELS entry in force */
+    function activeModel() {
+      return resolveSunoModel(themePrefs.getModelId());
+    }
+
+    /** @returns {object} that entry as the options object the compilers take */
+    function activeModelOptions() {
+      return sunoModelOptions(themePrefs.getModelId());
+    }
+
+    /* The model everything falls back to, NAMED from the registry rather than
+       spelled out in three sentences that would drift apart. */
+    const DEFAULT_MODEL_LABEL = resolveSunoModel(DEFAULT_SUNO_MODEL_ID).label;
+
+    /** The picker's options ARE the registry — never a second copy of it. */
+    function buildModelPicker() {
+      modelSelect.textContent = '';
+      for (let i = 0; i < SUNO_MODELS.length; i += 1) {
+        const option = document.createElement('option');
+        option.value = SUNO_MODELS[i].id;
+        option.textContent = SUNO_MODELS[i].label;
+        modelSelect.appendChild(option);
+      }
+      modelSelect.value = activeModel().id;
+    }
+
+    /**
+     * What the selected model changes — and, when it is not documented, that
+     * it is not documented.
+     *
+     * The sentence is assembled from the entry's own `summary` and `basis`
+     * rather than written per model, so a knob that is a judgement call can
+     * never quietly start reading as a fact about Suno.
+     */
+    function modelNoteText(entry) {
+      const parts = [entry.summary];
+      const judged = [];
+      for (let i = 0; i < SUNO_MODEL_KNOBS.length; i += 1) {
+        const knob = SUNO_MODEL_KNOBS[i];
+        if (entry.basis[knob] === 'conservative') judged.push(SUNO_MODEL_KNOB_LABELS[knob]);
+      }
+      if (judged.length) {
+        parts.push(
+          'Nothing available here documents ' +
+            entry.label +
+            '’s prompt syntax, so ' +
+            listPhrase(judged) +
+            (judged.length === 1 ? ' is a' : ' are') +
+            ' deliberately conservative choice' +
+            (judged.length === 1 ? '' : 's') +
+            ' rather than a documented Suno behaviour.'
+        );
+      }
+      return parts.join(' ');
+    }
+
+    /** "a", "a and b", "a, b and c" — an Oxford-free list for prose. */
+    function listPhrase(items) {
+      if (items.length <= 1) return items[0] || '';
+      return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+    }
+
+    /**
+     * Everything the model choice paints, in one call: the picker, its note,
+     * the compiled prompt (whose ceiling and exclusion block it moves) and the
+     * structure sheet (whose bracket modifiers it caps).
+     */
+    function renderModelState() {
+      const entry = activeModel();
+      if (modelSelect.value !== entry.id) modelSelect.value = entry.id;
+      modelNote.textContent = modelNoteText(entry);
+      renderStylePrompt();
+      // Declared further down in this same scope (a hoisted declaration): the
+      // structure sheet's tag lines are model-scoped too, so a switch must
+      // repaint them in the same gesture rather than on the next keystroke.
+      refreshStructure();
+    }
+
+    modelSelect.addEventListener('change', function () {
+      const chosen = themePrefs.setModelId(modelSelect.value);
+      renderModelState();
+      const entry = resolveSunoModel(chosen);
+      toastHost.show(
+        'Compiling for ' +
+          entry.label +
+          ' — ' +
+          (entry.excludeSupported
+            ? 'the [Exclude: …] block is written as usual.'
+            : 'the [Exclude: …] block is left out; your exclusion terms are kept.')
+      );
+    });
 
     /* One sentence per safety band, naming the threshold that was crossed. */
     const ZONE_NOTES = {
@@ -25737,7 +26710,7 @@ function createInstallCapability(deps) {
      * change — never an estimate, never the ingredient count.
      */
     function renderStylePrompt() {
-      const final = buildFinalPrompt(promptState, exclusions.list());
+      const final = buildFinalPrompt(promptState, exclusions.list(), activeModelOptions());
       const zoneClass = final.zone === 'safe' ? '' : ' is-' + final.zone;
 
       styleMeterFill.style.width = Math.min(100, (final.length / final.limit) * 100).toFixed(2) + '%';
@@ -25803,6 +26776,23 @@ function createInstallCapability(deps) {
 
       styleTally.textContent =
         plural(final.tags.length, 'tag') + ' · ' + plural(final.exclusions.length, 'exclusion');
+
+      /* FDD #69, over the "nothing is dropped silently" rule. The shield card
+         is where the terms are, so that is where the note about them going
+         unwritten belongs — and it says the terms are KEPT, because they are:
+         the store still holds them and v5.5 compiles them again. */
+      const omitted = final.excludeOmitted;
+      excludeModelNote.hidden = !omitted;
+      excludeModelNote.textContent = omitted
+        ? plural(final.exclusions.length, 'exclusion') +
+          ' not written for ' +
+          activeModel().label +
+          ' — the [Exclude: …] block is documented for ' +
+          DEFAULT_MODEL_LABEL +
+          ' only, so it is left out rather than invented. Nothing is lost: switch back to ' +
+          DEFAULT_MODEL_LABEL +
+          ' and it compiles again.'
+        : '';
     }
 
     promptState.subscribe(renderStylePrompt);
@@ -25813,7 +26803,7 @@ function createInstallCapability(deps) {
       // Recompiled rather than read from a cached render: the pipeline is
       // deterministic, so this is the same string the panel is showing, and
       // there is no cached copy that could ever go stale behind it.
-      const final = buildFinalPrompt(promptState, exclusions.list());
+      const final = buildFinalPrompt(promptState, exclusions.list(), activeModelOptions());
       if (!final.text) {
         toastHost.show('Nothing to copy yet — the style prompt is empty.', 'warn');
         return;
@@ -25843,6 +26833,79 @@ function createInstallCapability(deps) {
       });
     });
 
+    /* -- G2. the share link (FDD #75) --
+     *
+     * WHAT TRAVELS, AND WHAT DOES NOT. The link carries a workspace SNAPSHOT —
+     * the same object the autosave, the presets and the history bank already
+     * hold — so opening it rebuilds the sliders, tags, exclusions and song flow
+     * and the recipient can keep working. It does not carry the compiled
+     * string (that is what "Copy style prompt" is for), it does not carry the
+     * Suno model (a preference about the recipient's own machine) and it
+     * cannot carry a key: serializeWorkspace is never handed one, and
+     * encodeWorkspaceHash rebuilds the payload against the snapshot's declared
+     * shape on top of that.
+     */
+    styleShareBtn.addEventListener('click', function () {
+      const snapshot = serializeWorkspace(workspaceRegistry);
+      const hash = encodeWorkspaceHash(snapshot);
+      const link = buildWorkspaceLink(
+        typeof window !== 'undefined' && window.location ? String(window.location.href) : null,
+        hash
+      );
+      if (!link) {
+        toastHost.show(
+          'This page has no address to build a link from, so there is nothing to share.',
+          'error'
+        );
+        return;
+      }
+
+      const done = function () {
+        const parts = ['Share link copied — ' + plural(link.length, 'character') + '.'];
+        // A WARNING, not a refusal: there is no standard URL limit, and a link
+        // this long may well paste fine where the user is putting it. If it is
+        // cut, the checksum catches it at the other end rather than a wrong
+        // workspace loading — which is exactly what the checksum is for.
+        if (link.length > WORKSPACE_LINK_WARN_CHARS) {
+          parts.push(
+            'That is over ' +
+              WORKSPACE_LINK_WARN_CHARS +
+              ' characters — some apps and mail clients cut links that long. If it arrives ' +
+              'truncated the other end will refuse it rather than load half a workspace.'
+          );
+        }
+        toastHost.show(parts.join(' '), link.length > WORKSPACE_LINK_WARN_CHARS ? 'warn' : 'info');
+      };
+
+      copyViaClipboard(link).then(done, function () {
+        if (copyViaExecCommand(link)) {
+          done();
+          return;
+        }
+        // Neither clipboard path worked, and unlike every other copy in this
+        // app the text is not on screen to select. So it is PUT somewhere the
+        // user can reach: this page's own address bar. Harmless — the hash is
+        // read at boot only, so nothing re-imports while they copy it.
+        let parked = false;
+        try {
+          if (window.history && typeof window.history.replaceState === 'function') {
+            window.history.replaceState(null, '', link);
+            parked = true;
+          }
+        } catch (err) {
+          parked = false;
+        }
+        toastHost.show(
+          parked
+            ? 'Could not reach the clipboard — the link is now in this page’s address bar, ready to copy from there.'
+            : 'Could not reach the clipboard, and this page’s address bar cannot be written either — sharing is not available here.',
+          parked ? 'warn' : 'error'
+        );
+      });
+    });
+
+    buildModelPicker();
+    modelNote.textContent = modelNoteText(activeModel());
     renderExclusions();
     renderStylePrompt();
 
@@ -26664,6 +27727,7 @@ function createInstallCapability(deps) {
     const structurePreview = $('structure-preview');
     const structurePreviewHeading = $('structure-preview-heading');
     const structureRefrainNote = $('structure-refrain-note');
+    const structureModelNote = $('structure-model-note');
     const structureCountsEl = $('structure-counts');
     const structureCopyBtn = $('btn-structure-copy');
     const undoBtn = $('btn-undo');
@@ -27126,10 +28190,13 @@ function createInstallCapability(deps) {
     /** Repaint everything that is derived, touching no field the user holds. */
     function refreshStructure() {
       const list = structure.blocks();
+      // ONE read of the active model per repaint (FDD #69): the tag lines, the
+      // sheet below and the note about them must all describe the same model.
+      const modelOptions = activeModelOptions();
       for (let i = 0; i < list.length; i += 1) {
         const view = blockViews[list[i].id];
         if (!view) continue;
-        const text = formatStructureTag(list[i].section, list[i].number, list[i].modifiers);
+        const text = formatStructureTag(list[i].section, list[i].number, list[i].modifiers, modelOptions);
         if (view.tag.textContent === text) continue;
         view.tag.textContent = text;
         view.handle.setAttribute(
@@ -27141,7 +28208,7 @@ function createInstallCapability(deps) {
         view.remove.setAttribute('aria-label', 'Remove ' + text);
       }
 
-      const sheet = structure.compile();
+      const sheet = structure.compile(modelOptions);
       const refrain = structure.autoChorus();
       const empty = list.length === 0;
 
@@ -27158,6 +28225,30 @@ function createInstallCapability(deps) {
       if (structureRefrainNote.textContent !== refrainText) {
         structureRefrainNote.textContent = refrainText;
         structureRefrainNote.hidden = !refrainText;
+      }
+
+      /* FDD #69. A tag line that suddenly renders shorter needs a reason on
+         screen; without one it reads as data loss. Counted against what the
+         blocks HOLD, because the store is not clamped by the model — the
+         modifiers come straight back on v5.5. */
+      let cappedBlocks = 0;
+      for (let c = 0; c < list.length; c += 1) {
+        if (list[c].modifiers.length > modelOptions.modifierCap) cappedBlocks += 1;
+      }
+      const modelText = cappedBlocks
+        ? activeModel().label +
+          ' compiles at most ' +
+          plural(modelOptions.modifierCap, 'modifier') +
+          ' inside a tag, so ' +
+          plural(cappedBlocks, 'block') +
+          (cappedBlocks === 1 ? ' shows fewer than it holds' : ' show fewer than they hold') +
+          '. Nothing is lost — ' +
+          DEFAULT_MODEL_LABEL +
+          ' compiles all of them again.'
+        : '';
+      if (structureModelNote.textContent !== modelText) {
+        structureModelNote.textContent = modelText;
+        structureModelNote.hidden = !modelText;
       }
 
       // Two plain numbers, exactly like the draft card: no budget verdict, no
@@ -27300,7 +28391,9 @@ function createInstallCapability(deps) {
     });
 
     structureCopyBtn.addEventListener('click', function () {
-      const text = structure.compile();
+      // The SAME options the preview was painted with, recompiled rather than
+      // read back from the DOM: what is copied is what is shown.
+      const text = structure.compile(activeModelOptions());
       if (!text) {
         toastHost.show('Nothing to copy yet — the song flow is empty.', 'warn');
         return;
@@ -28228,7 +29321,26 @@ function createInstallCapability(deps) {
     });
 
     /*
-     * -- E. SHARED-IN LYRICS (FDD #92, FEATURE-MECHANICS §6.6) --
+     * -- E. SHARED-IN LYRICS (FDD #92, FEATURE-MECHANICS §6.6) AND
+     *       WORKSPACE DEEP LINKS (FDD #75) --
+     *
+     * THE PRECEDENCE, DECIDED AND WRITTEN DOWN (0.21.0)
+     *
+     *   autosave  <  workspace hash  <  ?lyrics=
+     *
+     *   The autosave is a background side effect of the last session. A
+     *   workspace hash is somebody deliberately opening a link RIGHT NOW, so
+     *   it wins: it replaces the restored draft outright, which is what a
+     *   person clicking a shared workspace unambiguously asked for.
+     *
+     *   The share parameter wins over BOTH — but only over the lyrics of one
+     *   block, which is the whole of what it writes. That is what makes a link
+     *   carrying both parts compose instead of one silently cancelling the
+     *   other: the workspace arrives from the hash, and the shared text lands
+     *   on top of it exactly where a share always lands.
+     *
+     *   All three are applied in that order in ONE settled chain, so the
+     *   ordering is a property of the code rather than of who wins a race.
      *
      * THE ORDERING DECISION, and why it is not "as early as possible".
      *
@@ -28255,6 +29367,11 @@ function createInstallCapability(deps) {
      *   one block's lyrics, never the workspace.
      */
     const sharedIntent = readSharedIntent();
+    /* READ SYNCHRONOUSLY, for the same reason the share is: the fragment is
+       captured as it was at boot, before the tidy-ups below can edit it out
+       from under us. decodeWorkspaceHash is pure, so reading commits to
+       nothing — the applying happens in the settled chain at the bottom. */
+    const workspaceLink = readWorkspaceLink();
 
     function readSharedIntent() {
       if (typeof window === 'undefined' || !window.location) return null;
@@ -28264,6 +29381,105 @@ function createInstallCapability(deps) {
         // A URL this browser cannot parse is not worth taking the boot down.
         return null;
       }
+    }
+
+    /**
+     * The workspace fragment, if this page was opened with one.
+     *
+     * A hash that is not ours is not a failure and not a warning: the jump nav
+     * puts #style-heading and friends in that very slot. isWorkspaceHash() is
+     * the claim check, and anything it refuses is left completely alone —
+     * unread, unreported and above all not stripped.
+     *
+     * @returns {{ok:boolean, snapshot?:object, reason?:string}|null}
+     */
+    function readWorkspaceLink() {
+      if (typeof window === 'undefined' || !window.location) return null;
+      let hash = '';
+      try {
+        hash = String(window.location.hash || '');
+      } catch (err) {
+        return null;
+      }
+      if (!isWorkspaceHash(hash)) return null;
+      try {
+        return decodeWorkspaceHash(hash);
+      } catch (err) {
+        // decodeWorkspaceHash is written not to throw; if an engine surprises
+        // us the boot still finishes and the user still gets told.
+        return { ok: false, reason: 'the link could not be read' };
+      }
+    }
+
+    /*
+     * The workspace hash has been consumed, so it comes off the address bar —
+     * whether it was applied or refused.
+     *
+     * Applied: a reload would otherwise re-apply the LINK over whatever the
+     * user has since built, which is the same lost-edit failure clearShareParams
+     * exists to prevent. Refused: a hostile or broken fragment should not sit
+     * in the address bar waiting to be re-shared or re-toasted.
+     *
+     * The query is preserved here and stripped by clearShareParams a moment
+     * later; each function reads the LIVE location, so the two compose in
+     * either order rather than putting each other's part back.
+     */
+    function clearWorkspaceHash() {
+      try {
+        if (window.history && typeof window.history.replaceState === 'function') {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      } catch (err) {
+        /* the link is already applied; a stale fragment is cosmetic */
+      }
+    }
+
+    /**
+     * Apply the workspace hash — AFTER the session restore has settled, so it
+     * replaces the restored draft by construction rather than by racing it.
+     *
+     * Nothing is applied on a refusal: decodeWorkspaceHash validated the whole
+     * snapshot before returning, and restoreWorkspace validates it again, so a
+     * hostile fragment lands inert with the restored session untouched.
+     */
+    function applyWorkspaceLink() {
+      if (!workspaceLink) return;
+      if (!workspaceLink.ok) {
+        toastHost.show(
+          'That shared link could not be opened (' + workspaceLink.reason + ') — nothing was changed.',
+          'warn'
+        );
+        clearWorkspaceHash();
+        return;
+      }
+
+      /* DELIBERATELY NOT wrapped in `restoringSession`, unlike the autosave
+         restore above. That flag exists to stop a restore re-saving what it
+         just read back out of the same record. A shared workspace is new
+         state this browser has never stored, and the toast below says it
+         replaced the saved draft — so it has to actually become the saved
+         draft. Letting the store mutations reach the autosave subscription is
+         what makes that sentence true. */
+      const outcome = restoreWorkspace(workspaceLink.snapshot, workspaceRegistry);
+      if (!outcome.ok) {
+        toastHost.show(
+          'That shared link could not be opened (' + outcome.reason + ') — nothing was changed.',
+          'warn'
+        );
+        clearWorkspaceHash();
+        return;
+      }
+      renderStructure();
+      toastHost.show(
+        'Opened a shared workspace — ' +
+          plural(outcome.applied.tags, 'tag') +
+          ', ' +
+          plural(outcome.applied.exclusions, 'exclusion') +
+          ', ' +
+          plural(outcome.applied.blocks, 'block') +
+          '. It replaced the draft this browser had saved.'
+      );
+      clearWorkspaceHash();
     }
 
     /*
@@ -28318,7 +29534,19 @@ function createInstallCapability(deps) {
       clearShareParams();
     }
 
-    ignoreRejection(sessionRestore.then(applySharedIntent, applySharedIntent));
+    /**
+     * THE ONE SETTLED CHAIN, in the precedence documented at the top of this
+     * section: the restore lands first (or fails), then the workspace hash
+     * replaces it, then the shared lyrics land on top of whatever is there.
+     * Attached to BOTH outcomes of the restore, so a database that will not
+     * open cannot swallow either gesture.
+     */
+    function applyBootIntents() {
+      applyWorkspaceLink();
+      applySharedIntent();
+    }
+
+    ignoreRejection(sessionRestore.then(applyBootIntents, applyBootIntents));
 
     /* -- F. Install capability (FDD #89) -- */
 
