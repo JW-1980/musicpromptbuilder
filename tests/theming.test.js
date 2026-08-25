@@ -1709,6 +1709,31 @@ s.test('theme swaps kill transitions for the swap frame (Chrome freeze fix, queu
   );
 });
 
+s.test('the kill class is armed before the palette lands, and nothing swaps behind its back', () => {
+  const source = readIndex();
+  const repaint = /function repaintTheme\(\)\s*\{([\s\S]*?)\n    \}/.exec(source);
+  assert.ok(repaint, 'repaintTheme not found');
+  const body = repaint[1];
+  const armed = body.indexOf("classList.add('theme-switching')");
+  const released = body.indexOf('requestAnimationFrame');
+  const applied = body.indexOf('applyThemeState(themePrefs, document)');
+  assert.ok(armed !== -1 && applied !== -1, 'repaintTheme must arm the kill class and apply the palette');
+  assert.ok(armed < applied, 'the kill class must be on the root BEFORE the palette swap it guards');
+  assert.ok(
+    released !== -1 && released < applied,
+    'the release must be scheduled before the swap, so a throwing apply cannot wedge the page transitionless'
+  );
+  // The guard only guards swaps that pass through it. Every control funnels
+  // into repaintTheme today; this pins that a future one (a keybind, a palette
+  // command) cannot quietly call applyThemeState on the live document itself
+  // and reintroduce the frozen-transition swap the class exists to prevent.
+  assert.strictEqual(
+    source.split('applyThemeState(themePrefs, document)').length - 1,
+    1,
+    'applyThemeState(themePrefs, document) must have exactly one call site: inside repaintTheme'
+  );
+});
+
 s.test('--ink-violet clears WCAG AA in every theme, and violet TEXT rides it, never the raw accent (0.16.x fix)', () => {
   const style = readStyle();
 
