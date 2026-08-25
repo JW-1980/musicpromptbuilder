@@ -48,6 +48,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert');
 const vm = require('node:vm');
+const { webcrypto } = require('node:crypto');
 const { suite } = require('./lib/runner.js');
 const { extractScriptById } = require('./lib/extract.js');
 const nightly = require('./e2e/nightly.js');
@@ -139,6 +140,11 @@ const {
   IDB_PRESETS,
   IDB_HISTORY,
   IDB_SESSION,
+  IDB_KEYS,
+  IDB_DEVICE_KEY,
+  IDB_MODEL_CACHE,
+  IDB_STORES,
+  IDB_RAW_STORES,
   IDB_TS_INDEX,
   AUTOSAVE_ID,
   HISTORY_CAP,
@@ -198,6 +204,17 @@ function deepEqual(actual, expected, message) {
  *     order (ascending), so the wrapper's own newest-first sort is what is
  *     really under test;
  *   - a request that throws aborts the transaction.
+ *
+ * PRE-SEEDING. `options.seed` stands a database up at an EARLIER version with
+ * records already in it — the only way to test an upgrade the way a real user
+ * meets it, which is with a year of their presets already inside:
+ *
+ *   makeFakeIndexedDB({ seed: { name: 'sunoprompt', version: 1,
+ *                               stores: { presets: [record, …] } } })
+ *
+ * Every seeded store gets keyPath 'id' and a 'ts' index, because that is what
+ * the 0.16.0 (v1) upgrade handler created. Records are cloned on the way in,
+ * so the test's own objects cannot be mutated by the store under test.
  */
 function makeFakeIndexedDB(options) {
   const opts = options || {};
@@ -215,6 +232,24 @@ function makeFakeIndexedDB(options) {
 
   function orderedKeys(store) {
     return Object.keys(store.data).sort();
+  }
+
+  /*
+   * The fake's stand-in for IndexedDB's own STRUCTURED CLONE. It used to be a
+   * JSON round-trip, which was close enough while every record was plain data
+   * — but structured clone carries a CryptoKey and an ArrayBuffer through
+   * intact and JSON destroys both, so a JSON-cloning fake would have hidden
+   * the exact bug IDB_RAW_STORES exists to prevent.
+   */
+  function platformClone(value) {
+    if (value === undefined || value === null) return value;
+    try {
+      return structuredClone(value);
+    } catch (err) {
+      // structuredClone refuses functions and a few exotic values; nothing a
+      // record should hold, but a fake must not be the thing that throws.
+      return JSON.parse(JSON.stringify(value));
+    }
   }
 
   function makeStoreHandle(storeState, tx) {
@@ -252,7 +287,7 @@ function makeFakeIndexedDB(options) {
                   if (av === bv) return String(a[storeState.keyPath]) < String(b[storeState.keyPath]) ? -1 : 1;
                   return av < bv ? -1 : 1;
                 })
-                .map((r) => JSON.parse(JSON.stringify(r)))
+                .map((r) => platformClone(r))
             );
           },
         };
@@ -261,14 +296,14 @@ function makeFakeIndexedDB(options) {
         return enqueue(() => {
           const key = value[storeState.keyPath];
           if (key === undefined || key === null) throw new Error('record has no key');
-          storeState.data[key] = JSON.parse(JSON.stringify(value));
+          storeState.data[key] = platformClone(value);
           return key;
         });
       },
       get(key) {
         return enqueue(() => {
           const hit = storeState.data[key];
-          return hit === undefined ? undefined : JSON.parse(JSON.stringify(hit));
+          return hit === undefined ? undefined : platformClone(hit);
         });
       },
       delete(key) {
@@ -288,7 +323,7 @@ function makeFakeIndexedDB(options) {
       },
       getAll() {
         return enqueue(() =>
-          orderedKeys(storeState).map((k) => JSON.parse(JSON.stringify(storeState.data[k])))
+          orderedKeys(storeState).map((k) => platformClone(storeState.data[k]))
         );
       },
     };
@@ -402,6 +437,30 @@ function makeFakeIndexedDB(options) {
         log.closes += 1;
       },
     };
+  }
+
+  /* Stand a database up at an earlier version, as a previous release left it.
+   * Done before the first open() so the very next open sees an EXISTING
+   * database with an oldVersion, not a fresh one. */
+  if (opts.seed) {
+    const seedName = opts.seed.name || 'sunoprompt';
+    const seeded = { name: seedName, version: opts.seed.version || 1, stores: Object.create(null) };
+    const tables = opts.seed.stores || {};
+    for (const storeName of Object.keys(tables)) {
+      const table = {
+        name: storeName,
+        keyPath: 'id',
+        indexes: Object.create(null),
+        data: Object.create(null),
+      };
+      // The v1 handler declared a ts index on every store it created.
+      table.indexes.ts = { keyPath: 'ts', unique: false };
+      for (const record of tables[storeName] || []) {
+        table.data[record.id] = platformClone(record);
+      }
+      seeded.stores[storeName] = table;
+    }
+    databases[seedName] = seeded;
   }
 
   return {
@@ -668,13 +727,37 @@ s.test('the persistence layer is reachable as top-level function declarations', 
 
 s.test('the schema constants match the §6.4 contract', () => {
   assert.strictEqual(IDB_NAME, 'sunoprompt');
-  assert.strictEqual(IDB_VERSION, 1);
+  // CONSCIOUSLY RAISED TO 2 (0.17.0): three additive stores for the on-device
+  // model and the opt-in key vault. Additive means an existing v1 database
+  // keeps presets, history and the autosave through the upgrade. The proof is
+  // the "a v1 database FULL OF RECORDS survives the upgrade to v2" test in
+  // this file, which seeds a v1 database and reopens it at v2; the tests
+  // immediately below this one only cover a database created fresh at v2, and
+  // an earlier version of this comment claimed otherwise.
+  assert.strictEqual(IDB_VERSION, 2);
   assert.strictEqual(IDB_PRESETS, 'presets');
   assert.strictEqual(IDB_HISTORY, 'prompt_history');
   // A THIRD store for the autosave, documented: an autosave is not a preset,
   // and keeping it out of `presets` keeps it out of every JSON export.
   assert.strictEqual(IDB_SESSION, 'session');
   assert.notStrictEqual(IDB_SESSION, IDB_PRESETS);
+  // …and the three the v2 upgrade added. `secrets` is deliberately NOT one of
+  // the names: the unknown-store negative test below uses that literal, and a
+  // store answering to it would quietly turn that test into a no-op.
+  assert.strictEqual(IDB_KEYS, 'api_keys');
+  assert.strictEqual(IDB_DEVICE_KEY, 'device_key');
+  assert.strictEqual(IDB_MODEL_CACHE, 'model_cache');
+  deepEqual(IDB_STORES, [
+    'presets',
+    'prompt_history',
+    'session',
+    'api_keys',
+    'device_key',
+    'model_cache',
+  ]);
+  // The raw lane is exactly the two stores whose values JSON cannot carry.
+  deepEqual(IDB_RAW_STORES, ['device_key', 'model_cache']);
+  assert.strictEqual(IDB_STORES.indexOf('secrets'), -1);
   assert.strictEqual(HISTORY_CAP, 100, 'ASSUMPTIONS.md caps the history bank at 100');
   assert.strictEqual(WORKSPACE_VERSION, 1);
   // §6.2 names this key verbatim.
@@ -698,6 +781,80 @@ s.test('the upgrade path creates both tables plus the session store and a ts ind
     assert.ok(db.stores[name].indexes[IDB_TS_INDEX], `"${name}" is missing the ${IDB_TS_INDEX} index`);
     assert.strictEqual(db.stores[name].indexes[IDB_TS_INDEX].keyPath, 'ts');
   }
+});
+
+s.test('a v1 database FULL OF RECORDS survives the upgrade to v2, byte for byte', async () => {
+  /*
+   * The upgrade a real user meets: 0.16.0 left a v1 database holding their
+   * presets, their copied-prompt history and their autosave, and 0.17.0 opens
+   * it at v2 to add three stores. "Additive" is a claim about THEIR data, so
+   * it is tested with their data in place rather than against an empty
+   * database created fresh at v2 (which is all the tests around this one do).
+   *
+   * Records are compared field for field after the reopen: a v2 upgrade that
+   * recreated a store instead of leaving it alone would still produce a
+   * database with the right store NAMES, and would have silently deleted
+   * everything in them.
+   */
+  const seededPresets = [
+    { id: 'p-1', name: 'Neon Rain', ts: 111, favorite: true, tags: ['techno', 'dark'], sliders: { energy: 86 } },
+    { id: 'p-2', name: 'Tape Room', ts: 222, favorite: false, tags: [], sliders: { warmth: 12 } },
+  ];
+  const seededHistory = [
+    { id: 'h-1', ts: 333, text: 'techno, dark, tr-909 kick', favorite: false },
+    { id: 'h-2', ts: 444, text: 'french electro, neon rain', favorite: true },
+  ];
+  const seededSession = [{ id: 'autosave', ts: 555, snapshot: { version: 1, prompt: ['techno'] } }];
+
+  const fake = makeFakeIndexedDB({
+    seed: {
+      name: IDB_NAME,
+      version: 1,
+      stores: { presets: seededPresets, prompt_history: seededHistory, session: seededSession },
+    },
+  });
+
+  // The database really is at v1 with records in it before anything opens it.
+  assert.strictEqual(fake._databases[IDB_NAME].version, 1);
+  assert.strictEqual(Object.keys(fake._databases[IDB_NAME].stores).length, 3, 'v1 had exactly three stores');
+  assert.strictEqual(fake._log.upgrades, 0, 'the seed must not count as an upgrade');
+
+  const store = createIdbStore({ indexedDB: fake });
+  const state = await store.ready();
+  assert.strictEqual(state.persistent, true, 'the upgrade must not degrade the store to memory');
+  assert.strictEqual(fake._log.upgrades, 1, 'v1 -> v2 must run the upgrade handler exactly once');
+
+  const db = fake._databases[IDB_NAME];
+  assert.strictEqual(db.version, 2);
+
+  // 1. Every seeded record is still there, unchanged.
+  deepEqual(await store.getAll(IDB_PRESETS), [...seededPresets].reverse(), 'a preset was lost or altered by the upgrade');
+  deepEqual(await store.getAll(IDB_HISTORY), [...seededHistory].reverse(), 'a history entry was lost or altered by the upgrade');
+  deepEqual(await store.getAll(IDB_SESSION), seededSession, 'the autosave was lost or altered by the upgrade');
+  deepEqual(await store.get(IDB_PRESETS, 'p-1'), seededPresets[0], 'a preset came back with different fields');
+  assert.strictEqual(await store.count(IDB_HISTORY), 2);
+
+  // 2. The three v1 stores kept their keyPath and their ts index — they were
+  //    left alone, not dropped and rebuilt.
+  for (const name of [IDB_PRESETS, IDB_HISTORY, IDB_SESSION]) {
+    assert.strictEqual(db.stores[name].keyPath, 'id', `"${name}" was rebuilt with a different keyPath`);
+    assert.ok(db.stores[name].indexes[IDB_TS_INDEX], `"${name}" lost its ${IDB_TS_INDEX} index`);
+  }
+
+  // 3. …and the three stores the upgrade exists to add are now present, with
+  //    the same shape every other store has.
+  for (const name of [IDB_KEYS, IDB_DEVICE_KEY, IDB_MODEL_CACHE]) {
+    assert.ok(db.stores[name], `the v2 upgrade did not create "${name}"`);
+    assert.strictEqual(db.stores[name].keyPath, 'id', `"${name}" must key on id`);
+    assert.strictEqual(Object.keys(db.stores[name].data).length, 0, `"${name}" was created with records in it`);
+  }
+  assert.strictEqual(Object.keys(db.stores).length, IDB_STORES.length, 'the upgrade created a store nobody declared');
+
+  // 4. The new stores work, and using them leaves the old data alone.
+  await store.put(IDB_KEYS, { id: 'openrouter::https://openrouter.ai', ts: 666, cipher: [1, 2, 3] });
+  assert.strictEqual(await store.count(IDB_KEYS), 1);
+  assert.strictEqual(await store.count(IDB_PRESETS), 2, 'writing a key disturbed the presets');
+  assert.strictEqual(fake._log.upgrades, 1, 'a later write must not trigger another upgrade');
 });
 
 s.test('a second open of the same database does not re-run the upgrade', async () => {
@@ -782,6 +939,65 @@ s.test('count and clear report real numbers', async () => {
   assert.strictEqual(await store.clear(IDB_PRESETS), 4, 'clear() reports how many it dropped');
   assert.strictEqual(await store.count(IDB_PRESETS), 0);
   assert.strictEqual(await store.clear(IDB_PRESETS), 0);
+});
+
+s.test('a rawStore record keeps values JSON cannot carry (a CryptoKey survives)', async () => {
+  /*
+   * The reason IDB_RAW_STORES exists. copy() is JSON.parse(JSON.stringify()),
+   * and a CryptoKey has no enumerable own properties, so it round-trips to
+   * `{}` — silently. A vault built on that would encrypt with nothing and
+   * report success. The raw lane detaches the RECORD without touching what is
+   * inside it, and this test is the only thing standing between the two.
+   */
+  const key = await webcrypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const buffer = new Uint8Array([1, 2, 3, 4]).buffer;
+  const store = createIdbStore({ indexedDB: makeFakeIndexedDB() });
+
+  await store.put(IDB_DEVICE_KEY, { id: 'k', key, ts: 1 });
+  const read = await store.get(IDB_DEVICE_KEY, 'k');
+  // IndexedDB structured-clones, so this is a DIFFERENT CryptoKey object with
+  // the same key material — which is exactly what the vault needs on the next
+  // page load. A JSON round-trip would have handed back `{}`.
+  assert.strictEqual(typeof read.key.algorithm, 'object', 'the CryptoKey did not survive put/get');
+  assert.strictEqual(read.key.algorithm.name, 'AES-GCM');
+  assert.strictEqual(read.key.extractable, false);
+
+  // The proof that the key material really came back: the clone decrypts what
+  // the original encrypted.
+  const iv = new Uint8Array(12);
+  const cipher = await webcrypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new Uint8Array([7, 7, 7]));
+  const plain = new Uint8Array(await webcrypto.subtle.decrypt({ name: 'AES-GCM', iv }, read.key, cipher));
+  deepEqual(Array.from(plain), [7, 7, 7], 'the restored key could not open what the original sealed');
+
+  await store.put(IDB_MODEL_CACHE, { id: 'weights', body: buffer, ts: 2 });
+  const cached = await store.get(IDB_MODEL_CACHE, 'weights');
+  assert.ok(cached.body instanceof ArrayBuffer, 'an ArrayBuffer came back as something else');
+  assert.strictEqual(cached.body.byteLength, 4, 'a JSON round-trip would have made this an object of digits');
+  deepEqual(Array.from(new Uint8Array(cached.body)), [1, 2, 3, 4]);
+
+  // The record itself is still detached: editing what came back cannot reach
+  // into the table, which is the guarantee copy() was there to provide.
+  read.id = 'mutated';
+  read.extra = 'added later';
+  const again = await store.get(IDB_DEVICE_KEY, 'k');
+  assert.strictEqual(again.id, 'k');
+  assert.strictEqual(again.extra, undefined);
+});
+
+s.test('a NORMAL store still deep-copies, so the raw lane changed nothing else', async () => {
+  const store = createIdbStore({ indexedDB: makeFakeIndexedDB() });
+  const nested = { id: 'p-1', name: 'Neon', ts: 1, workspace: { tags: ['techno'] } };
+  await store.put(IDB_PRESETS, nested);
+
+  // Mutating the object we handed in must not reach the table…
+  nested.workspace.tags.push('house');
+  const read = await store.get(IDB_PRESETS, 'p-1');
+  deepEqual(read.workspace.tags, ['techno'], 'the store kept a reference instead of a deep copy');
+  // …and mutating what came back must not reach it either.
+  read.workspace.tags.push('trance');
+  const again = await store.get(IDB_PRESETS, 'p-1');
+  deepEqual(again.workspace.tags, ['techno']);
+  assert.notStrictEqual(read.workspace, again.workspace, 'two reads shared one object');
 });
 
 s.test('an unknown object store rejects instead of inventing one', async () => {

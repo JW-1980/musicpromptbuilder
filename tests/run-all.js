@@ -23,6 +23,8 @@ const SUITES = [
   { id: 'dsp-worker', script: path.join(TESTS_DIR, 'dsp-worker.test.js') },
   { id: 'audio-capture', script: path.join(TESTS_DIR, 'audio-capture.test.js') },
   { id: 'ai-dissector', script: path.join(TESTS_DIR, 'ai-dissector.test.js') },
+  { id: 'local-llm', script: path.join(TESTS_DIR, 'local-llm.test.js') },
+  { id: 'key-vault', script: path.join(TESTS_DIR, 'key-vault.test.js') },
   { id: 'ui-layout', script: path.join(TESTS_DIR, 'ui-layout.test.js') },
   { id: 'visualizer', script: path.join(TESTS_DIR, 'visualizer.test.js') },
   { id: 'theming', script: path.join(TESTS_DIR, 'theming.test.js') },

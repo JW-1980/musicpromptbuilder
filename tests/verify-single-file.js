@@ -2,37 +2,57 @@
 /*
  * tests/verify-single-file.js — static integrity scan of index.html.
  *
- * SunoPrompt Studio's core promise is that index.html is a SINGLE, SELF-
- * CONTAINED, ZERO-DEPENDENCY file that runs correctly from a file:// URL with
- * no network at all (docs/ENGINEERING-STANDARD.md, docs/PHP-SQLITE-QUALITY-
- * CHECKLIST.md §1). Any external reference silently breaks that promise —
- * offline users just get a half-rendered app.
+ * SunoPrompt Studio's core promise used to be stated as "nothing ever loads
+ * from the network". Since the Local-LLM Mode 1 upgrade (ASSUMPTIONS.md,
+ * 2026-08-25) the promise is stated in three clauses, and this file is what
+ * holds each of them to account:
+ *
+ *     ONE FILE. NOTHING LOADS UNTIL THE USER ASKS.
+ *     CODE FETCHED AT RUNTIME IS HASH-PINNED.
+ *
+ * index.html is still a SINGLE, SELF-CONTAINED, ZERO-DEPENDENCY file that
+ * renders and runs correctly from a file:// URL with no network at all
+ * (docs/ENGINEERING-STANDARD.md, docs/PHP-SQLITE-QUALITY-CHECKLIST.md §1). What
+ * changed is that a user may now *opt in*, with an explicit click, to
+ * downloading an on-device model — its weights AND the inference runtime that
+ * executes them. That download is code, so it is pinned by SHA-256.
  *
  * ---------------------------------------------------------------------------
- * URL POLICY (ASSUMPTIONS.md, "Network-call policy refined")
- *
- * The Tri-Mode AI Dissector must be able to POST to a user's cloud inference
- * endpoint and to a local Ollama server, so "no URLs anywhere" is no longer the
- * right rule. The refined rule separates CODE/ASSET loading from user-initiated
- * DATA calls:
+ * URL POLICY v2
  *
  *   1. RESOURCE-LOADING POSITIONS — src=, href=, srcset, poster, xlink:href,
  *      <base href>, <link rel="stylesheet">, CSS @import, CSS url(),
  *      importScripts(): ZERO absolute or protocol-relative URLs. Unchanged, and
- *      non-negotiable: this is what keeps file:// rendering identical to https.
+ *      non-negotiable: this is what keeps file:// rendering identical to https,
+ *      and it is the clause that means nothing loads AT BOOT.
  *
- *   2. JS STRING LITERALS inside #app-main / #dsp-worker-src may hold an
+ *   2. JS STRING LITERALS inside the governed inline scripts may hold an
  *      absolute http(s) URL ONLY IF it is
  *        (a) a loopback host (localhost, 127.0.0.1, [::1], *.localhost) — the
  *            Ollama hook, or
- *        (b) inside the single `var CLOUD_API_PRESETS = { ... }` declaration —
- *            the one registry where remote endpoints are declared.
+ *        (b) inside one of the ALLOWED_URL_REGISTRIES declarations:
+ *              var CLOUD_API_PRESETS  — user-initiated inference endpoints
+ *              var LOCAL_MODEL_SOURCES — opt-in on-device model assets
  *      Every other absolute URL literal FAILS. Endpoints the user types at
  *      runtime are data, never source, so they are unaffected.
  *
  *   3. A hard-coded absolute URL passed straight to fetch/XHR/WebSocket/
- *      sendBeacon still fails unless it is a loopback host: request targets
- *      come from the registry or from the user, never from an inline literal.
+ *      sendBeacon still fails unless it is a loopback host: request targets are
+ *      resolved out of a registry or typed by the user, never inlined at a call
+ *      site — not even a registry literal, which would put a request target
+ *      somewhere the registry cannot govern it.
+ *
+ *   4. WORKER URLS — `new Worker(...)` / `new SharedWorker(...)` may never take
+ *      an absolute or protocol-relative URL literal, loopback included. A
+ *      remote worker is third-party code executing at spawn time with no
+ *      consent gate and no hash check in front of it; every worker in this app
+ *      is spawned from an inline <script> block through a Blob URL.
+ *
+ *   5. PINNED CODE — every LOCAL_MODEL_SOURCES entry declaring `kind: 'code'`
+ *      must carry a non-empty `integrity: 'sha256-…'` literal in the same
+ *      entry. Weights are data and are merely large; the runtime is code, and
+ *      code fetched at runtime is only as trustworthy as the digest in front
+ *      of it.
  *
  * `scanSingleFile(htmlPath)` is exported so other harnesses (and the negative
  * tests at the bottom of this file) can point it at an arbitrary file.
@@ -50,10 +70,20 @@ const { listScripts, parseAttributes } = require('./lib/extract.js');
 const ROOT = path.resolve(__dirname, '..');
 const INDEX = path.join(ROOT, 'index.html');
 
-/** The one declaration allowed to carry remote endpoint literals. */
+/**
+ * The declarations allowed to carry remote URL literals (rule 2b).
+ *   CLOUD_API_PRESETS  — inference endpoints the user POSTs to on demand.
+ *   LOCAL_MODEL_SOURCES — the runtime/wasm/weights a user may opt into.
+ * Two registries rather than one because they answer to different rules:
+ * everything in the second one is subject to rule 5 as well.
+ */
+const ALLOWED_URL_REGISTRIES = ['CLOUD_API_PRESETS', 'LOCAL_MODEL_SOURCES'];
+/** The registry rule 5 governs. */
+const MODEL_REGISTRY = 'LOCAL_MODEL_SOURCES';
+/** Kept as the name of the endpoint registry for the messages that cite it. */
 const PRESET_REGISTRY = 'CLOUD_API_PRESETS';
 /** Inline scripts whose string literals are governed by rule 2. */
-const GOVERNED_SCRIPT_IDS = ['app-main', 'dsp-worker-src'];
+const GOVERNED_SCRIPT_IDS = ['app-main', 'dsp-worker-src', 'ai-worker-src'];
 /** Hosts a data call may legitimately hard-code. */
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0'];
 
@@ -214,28 +244,131 @@ function findDeclarationSpan(source, name, lex) {
 }
 
 /**
+ * Brace-matched spans for every allow-listed registry that this source
+ * declares, newest policy: a literal inside ANY of them satisfies rule 2b.
+ *
+ * @param {string} source
+ * @param {{strings:Array, skips:Array}} lex
+ * @returns {Array<{name:string, start:number, end:number}>}
+ */
+function findRegistrySpans(source, lex) {
+  const out = [];
+  for (const name of ALLOWED_URL_REGISTRIES) {
+    const span = findDeclarationSpan(source, name, lex);
+    if (span) out.push({ name, start: span.start, end: span.end });
+  }
+  return out;
+}
+
+/**
  * Every absolute http(s) URL that appears inside a JS string literal, tagged
  * with whether the policy allows it and why.
  *
  * @param {string} source one inline script's JavaScript
- * @returns {Array<{url:string, index:number, loopback:boolean, inRegistry:boolean}>}
+ * @returns {Array<{url:string, index:number, loopback:boolean, inRegistry:boolean,
+ *                  registry:string|null}>}
  */
 function listUrlLiterals(source) {
   const lex = lexJs(source);
-  const span = findDeclarationSpan(source, PRESET_REGISTRY, lex);
+  const spans = findRegistrySpans(source, lex);
   const out = [];
   for (let s = 0; s < lex.strings.length; s += 1) {
     const literal = lex.strings[s];
     const re = /https?:\/\/[^\s'"`\\)]+/gi;
     let m;
     while ((m = re.exec(literal.value)) !== null) {
+      const home = spans.find((span) => literal.start >= span.start && literal.end <= span.end);
       out.push({
         url: m[0],
         index: literal.start,
         loopback: isLoopbackUrl(m[0]),
-        inRegistry: !!span && literal.start >= span.start && literal.end <= span.end,
+        inRegistry: !!home,
+        registry: home ? home.name : null,
       });
     }
+  }
+  return out;
+}
+
+/**
+ * The `{ … }` object literal that directly encloses `index`, brace-matched in
+ * both directions while ignoring strings, comments and regex literals.
+ *
+ * @param {string} source
+ * @param {number} index a position known to sit inside an object literal
+ * @param {{strings:Array, skips:Array}} lex
+ * @returns {{start:number, end:number}|null}
+ */
+function enclosingObject(source, index, lex) {
+  const ranges = lex.strings.concat(lex.skips).sort((a, b) => a.start - b.start);
+  const inRange = (at) => {
+    for (let r = 0; r < ranges.length; r += 1) {
+      if (ranges[r].start > at) return false;
+      if (at < ranges[r].end) return true;
+    }
+    return false;
+  };
+
+  let depth = 0;
+  let open = -1;
+  for (let i = index; i >= 0; i -= 1) {
+    if (inRange(i)) continue;
+    const ch = source.charAt(i);
+    if (ch === '}') depth += 1;
+    else if (ch === '{') {
+      if (depth === 0) {
+        open = i;
+        break;
+      }
+      depth -= 1;
+    }
+  }
+  if (open === -1) return null;
+
+  depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    if (inRange(i)) continue;
+    const ch = source.charAt(i);
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return { start: open, end: i + 1 };
+    }
+  }
+  return null;
+}
+
+/**
+ * Rule 5. Every `kind: 'code'` entry inside LOCAL_MODEL_SOURCES must declare a
+ * non-empty `integrity: 'sha256-…'` literal in the same object.
+ *
+ * @param {string} source one inline script's JavaScript
+ * @returns {Array<{excerpt:string, reason:string}>} one entry per violation
+ */
+function listUnpinnedCodeSources(source) {
+  const lex = lexJs(source);
+  const span = findDeclarationSpan(source, MODEL_REGISTRY, lex);
+  if (!span) return [];
+  const body = source.slice(span.start, span.end);
+  const out = [];
+  const kindRe = /\bkind\s*:\s*(['"`])code\1/g;
+  let m;
+  while ((m = kindRe.exec(body)) !== null) {
+    const at = span.start + m.index;
+    const entry = enclosingObject(source, at, lex);
+    const text = entry ? source.slice(entry.start, entry.end) : '';
+    const pinned = /\bintegrity\s*:\s*(['"`])sha256-[A-Za-z0-9+/=_-]+\1/.exec(text);
+    if (pinned) continue;
+    // Name the entry if we can, so the failure says WHICH source is unpinned.
+    const label = /(['"]?)([A-Za-z0-9_$]+)\1\s*:\s*\{[^{]*$/.exec(
+      source.slice(span.start, entry ? entry.start + 1 : at)
+    );
+    out.push({
+      excerpt: `${MODEL_REGISTRY}.${label ? label[2] : '(unnamed)'} kind:'code'`,
+      reason: /\bintegrity\s*:/.test(text)
+        ? 'integrity is present but is not a non-empty sha256- literal'
+        : 'no integrity literal at all',
+    });
   }
   return out;
 }
@@ -248,7 +381,8 @@ function listUrlLiterals(source) {
  * @returns {{
  *   path: string, exists: boolean, bytes: number, hasDoctype: boolean,
  *   scriptIds: string[], workerScriptType: string|null,
- *   registryScriptIds: string[], urlLiterals: Array<object>,
+ *   registryScriptIds: string[], modelRegistryScriptIds: string[],
+ *   registriesFound: string[], urlLiterals: Array<object>,
  *   violations: Array<{rule: string, line: number, excerpt: string}>
  * }}
  */
@@ -262,6 +396,8 @@ function scanSingleFile(htmlPath) {
     scriptIds: [],
     workerScriptType: null,
     registryScriptIds: [],
+    modelRegistryScriptIds: [],
+    registriesFound: [],
     urlLiterals: [],
     violations: [],
   };
@@ -322,6 +458,12 @@ function scanSingleFile(htmlPath) {
     add('network-fetch-url', fm[0]);
   }
 
+  // Rule 4 — a worker spawned straight off a URL literal. Loopback is NOT
+  // exempt here: unlike a data POST, this executes whatever comes back.
+  const workerRe = /\bnew\s+(?:Shared)?Worker\s*\(\s*(?:"|'|`)\s*((?:https?:)?\/\/[^"'`]*)/gi;
+  let wm;
+  while ((wm = workerRe.exec(html)) !== null) add('worker-url', wm[0]);
+
   // <link rel="stylesheet"> of ANY kind — even a relative sibling .css file
   // breaks single-file distribution. Parsed structurally rather than by regex
   // so quoted attribute values can never confuse the match.
@@ -333,12 +475,19 @@ function scanSingleFile(htmlPath) {
     if (rel.includes('stylesheet')) add('link-stylesheet', lm[0]);
   }
 
-  // Rule 2 — absolute URL literals inside the governed inline scripts.
+  // Rules 2 and 5 — string literals inside the governed inline scripts.
   for (const script of scripts) {
     const id = script.attrs.id;
     if (!id || GOVERNED_SCRIPT_IDS.indexOf(id) === -1) continue;
-    if (findDeclarationSpan(script.source, PRESET_REGISTRY, lexJs(script.source))) {
-      report.registryScriptIds.push(id);
+    const spans = findRegistrySpans(script.source, lexJs(script.source));
+    for (const span of spans) {
+      if (report.registriesFound.indexOf(span.name) === -1) report.registriesFound.push(span.name);
+      if (span.name === PRESET_REGISTRY && report.registryScriptIds.indexOf(id) === -1) {
+        report.registryScriptIds.push(id);
+      }
+      if (span.name === MODEL_REGISTRY && report.modelRegistryScriptIds.indexOf(id) === -1) {
+        report.modelRegistryScriptIds.push(id);
+      }
     }
     for (const hit of listUrlLiterals(script.source)) {
       report.urlLiterals.push({
@@ -346,9 +495,13 @@ function scanSingleFile(htmlPath) {
         url: hit.url,
         loopback: hit.loopback,
         inRegistry: hit.inRegistry,
+        registry: hit.registry,
       });
       if (hit.loopback || hit.inRegistry) continue;
       add('unregistered-url-literal', `${id}: ${hit.url}`);
+    }
+    for (const unpinned of listUnpinnedCodeSources(script.source)) {
+      add('unpinned-code-source', `${id}: ${unpinned.excerpt} — ${unpinned.reason}`);
     }
   }
 
@@ -394,11 +547,21 @@ function fixture(appMainBody) {
 
 const REGISTRY_FIXTURE = [
   'var CLOUD_API_PRESETS = {',
-  "  groq: { id: 'groq', endpoint: 'https://api.groq.com/openai/v1/chat/completions' },",
-  "  gemini: { id: 'gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent' }",
+  "  openrouter: { id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1/chat/completions' },",
+  "  custom: { id: 'custom', endpoint: '', suggestions: [{ label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' }] }",
   '};',
   "var OLLAMA_ENDPOINT = 'http://localhost:11434/api/generate';",
   "var LOOPBACK_ALT = 'http://127.0.0.1:11434/api/tags';",
+].join('\n');
+
+/** A LOCAL_MODEL_SOURCES registry whose one code entry IS pinned (rule 5). */
+const MODEL_FIXTURE = [
+  'var LOCAL_MODEL_SOURCES = {',
+  "  runtime: { kind: 'code', url: 'https://cdn.example.com/dist/runtime.min.js',",
+  "    integrity: 'sha256-qlACtw54l5jaJj9fmcYr0+j80MEZJYpJPEDBgGSDZfo=', bytes: 888173 },",
+  "  wasm: { kind: 'binary', baseUrl: 'https://cdn.example.com/dist/' },",
+  "  weights: { kind: 'weights', host: 'https://models.example.com/' }",
+  '};',
 ].join('\n');
 
 /* -------------------------------------------------------------------------- */
@@ -488,11 +651,13 @@ s.test('no hard-coded absolute URL passed to fetch/XHR/WebSocket/beacon (loopbac
   if (hits.length) throw new Error(`${hits.length} network call(s):\n${describe(hits)}`);
 });
 
-s.test(`every absolute URL literal is loopback or inside var ${PRESET_REGISTRY}`, () => {
+s.test(`every absolute URL literal is loopback or inside ${ALLOWED_URL_REGISTRIES.join(' / ')}`, () => {
   const hits = scan.violations.filter((v) => v.rule === 'unregistered-url-literal');
   if (hits.length) {
     throw new Error(
-      `${hits.length} unregistered URL literal(s) — move the endpoint into ${PRESET_REGISTRY}:\n${describe(hits)}`
+      `${hits.length} unregistered URL literal(s) — move the URL into ${ALLOWED_URL_REGISTRIES.join(
+        ' or '
+      )}:\n${describe(hits)}`
     );
   }
 });
@@ -508,6 +673,57 @@ s.test(`var ${PRESET_REGISTRY} exists in #app-main and owns the remote endpoints
   const stray = remote.filter((u) => !u.inRegistry);
   if (stray.length) {
     throw new Error(`remote endpoint(s) declared outside the registry: ${stray.map((u) => u.url).join(', ')}`);
+  }
+});
+
+s.test(`var ${MODEL_REGISTRY} exists in #app-main and owns every model asset URL`, () => {
+  if (!scan.modelRegistryScriptIds.includes('app-main')) {
+    throw new Error(
+      `no \`var ${MODEL_REGISTRY} = { ... }\` declaration in #app-main — the opt-in model download has ` +
+        'nowhere to declare its runtime, wasm and weight hosts'
+    );
+  }
+  const owned = scan.urlLiterals.filter((u) => u.registry === MODEL_REGISTRY);
+  if (!owned.length) throw new Error(`${MODEL_REGISTRY} declares no asset URL at all`);
+});
+
+s.test('rule 5: every runtime-fetched code source carries a pinned sha256 digest', () => {
+  const hits = scan.violations.filter((v) => v.rule === 'unpinned-code-source');
+  if (hits.length) {
+    throw new Error(
+      `${hits.length} unpinned code source(s) — runtime-fetched CODE must be hash-verified before it ` +
+        `executes:\n${describe(hits)}`
+    );
+  }
+  // …and prove the rule had something to check, so a deleted registry cannot
+  // pass this test by making it vacuous.
+  const source = fs.readFileSync(INDEX, 'utf8');
+  const script = listScripts(source).find((sc) => sc.attrs.id === 'app-main');
+  const lex = lexJs(script.source);
+  const span = findDeclarationSpan(script.source, MODEL_REGISTRY, lex);
+  if (!span) throw new Error(`${MODEL_REGISTRY} is not declared`);
+  const body = script.source.slice(span.start, span.end);
+  if (!/\bkind\s*:\s*(['"`])code\1/.test(body)) {
+    throw new Error(`${MODEL_REGISTRY} declares no kind:'code' entry, so rule 5 checked nothing`);
+  }
+  if (!/\bintegrity\s*:\s*(['"`])sha256-[A-Za-z0-9+/=_-]{20,}\1/.test(body)) {
+    throw new Error('no real sha256 digest is pinned in the registry');
+  }
+});
+
+s.test('rule 4: no worker is spawned from a URL literal', () => {
+  const hits = scan.violations.filter((v) => v.rule === 'worker-url');
+  if (hits.length) {
+    throw new Error(
+      `${hits.length} worker(s) spawned from a remote URL — workers must come from an inline ` +
+        `<script> block via a Blob URL:\n${describe(hits)}`
+    );
+  }
+  // The two workers this app really has, both spawned the Blob way.
+  const raw = fs.readFileSync(INDEX, 'utf8');
+  const ids = listScripts(raw).map((sc) => sc.attrs.id);
+  for (const id of ['dsp-worker-src', 'ai-worker-src']) {
+    if (!ids.includes(id)) throw new Error(`inline worker source #${id} is missing`);
   }
 });
 
@@ -601,6 +817,122 @@ s.test('NEGATIVE: fetch() to a hard-coded remote URL is flagged, loopback is not
   if (hits[0].excerpt.indexOf('api.example.com') === -1) throw new Error(`wrong hit: ${hits[0].excerpt}`);
 });
 
+/* --- negative tests for URL POLICY v2 (rules 4 and 5) ---------------------- */
+
+s.test('NEGATIVE: a second registry (LOCAL_MODEL_SOURCES) also licenses its literals', () => {
+  const r = scanSingleFile(scratch('two-registries.html', fixture(REGISTRY_FIXTURE + '\n' + MODEL_FIXTURE)));
+  if (r.violations.length) throw new Error(`expected a clean scan, got:\n${describe(r.violations)}`);
+  const owned = r.urlLiterals.filter((u) => u.registry === MODEL_REGISTRY).map((u) => u.url);
+  if (owned.length !== 3) {
+    throw new Error(`expected the 3 model asset URLs to be registry-owned, saw ${owned.length}: ${owned.join(', ')}`);
+  }
+  if (r.registriesFound.length !== 2) {
+    throw new Error(`both registries should have been located, found: ${r.registriesFound.join(', ') || '(none)'}`);
+  }
+});
+
+s.test('NEGATIVE: a model URL declared outside both registries is still flagged', () => {
+  const body = REGISTRY_FIXTURE + '\n' + MODEL_FIXTURE + "\nvar EXTRA_WEIGHTS = 'https://models.example.com/rogue.onnx';";
+  const r = scanSingleFile(scratch('rogue-weights.html', fixture(body)));
+  const hits = r.violations.filter((v) => v.rule === 'unregistered-url-literal');
+  if (hits.length !== 1 || hits[0].excerpt.indexOf('rogue.onnx') === -1) {
+    throw new Error(`expected the rogue weight URL to be flagged, got:\n${describe(r.violations)}`);
+  }
+});
+
+s.test('NEGATIVE: rule 5 — a kind:"code" entry with no integrity fails', () => {
+  const unpinned = MODEL_FIXTURE.replace(
+    "    integrity: 'sha256-qlACtw54l5jaJj9fmcYr0+j80MEZJYpJPEDBgGSDZfo=', bytes: 888173 },",
+    '    bytes: 888173 },'
+  );
+  const r = scanSingleFile(scratch('unpinned.html', fixture(REGISTRY_FIXTURE + '\n' + unpinned)));
+  const hits = r.violations.filter((v) => v.rule === 'unpinned-code-source');
+  if (hits.length !== 1) {
+    throw new Error(`expected exactly 1 unpinned-code-source, got ${hits.length}:\n${describe(r.violations)}`);
+  }
+  if (hits[0].excerpt.indexOf('runtime') === -1) throw new Error(`the entry was not named: ${hits[0].excerpt}`);
+  if (hits[0].excerpt.indexOf('no integrity literal at all') === -1) {
+    throw new Error(`wrong reason: ${hits[0].excerpt}`);
+  }
+});
+
+s.test('NEGATIVE: rule 5 — an empty or non-sha256 integrity fails just as hard', () => {
+  for (const [name, bad] of [
+    ['empty', "integrity: ''"],
+    ['not a digest', "integrity: 'trust-me'"],
+    ['wrong algorithm', "integrity: 'md5-0123456789abcdef0123456789abcdef'"],
+  ]) {
+    const body = MODEL_FIXTURE.replace(
+      "integrity: 'sha256-qlACtw54l5jaJj9fmcYr0+j80MEZJYpJPEDBgGSDZfo='",
+      bad
+    );
+    const r = scanSingleFile(scratch(`integrity-${name.replace(/\s/g, '-')}.html`, fixture(REGISTRY_FIXTURE + '\n' + body)));
+    const hits = r.violations.filter((v) => v.rule === 'unpinned-code-source');
+    if (hits.length !== 1) {
+      throw new Error(`"${name}": expected 1 unpinned-code-source, got ${hits.length}:\n${describe(r.violations)}`);
+    }
+  }
+});
+
+s.test('NEGATIVE: rule 5 — a kind:"weights" entry needs no digest (weights are data)', () => {
+  const dataOnly = [
+    'var LOCAL_MODEL_SOURCES = {',
+    "  weights: { kind: 'weights', host: 'https://models.example.com/' }",
+    '};',
+  ].join('\n');
+  const r = scanSingleFile(scratch('weights-only.html', fixture(REGISTRY_FIXTURE + '\n' + dataOnly)));
+  const hits = r.violations.filter((v) => v.rule === 'unpinned-code-source');
+  if (hits.length) throw new Error(`weights must not need pinning:\n${describe(r.violations)}`);
+});
+
+s.test('NEGATIVE: rule 4 — new Worker() on a URL literal is flagged, loopback included', () => {
+  for (const [name, url] of [
+    ['remote', 'https://cdn.example.com/worker.js'],
+    ['protocol-relative', '//cdn.example.com/worker.js'],
+    ['loopback', 'http://localhost:8080/worker.js'],
+  ]) {
+    const body = `${REGISTRY_FIXTURE}\nfunction spawn() { return new Worker('${url}'); }`;
+    const r = scanSingleFile(scratch(`worker-${name}.html`, fixture(body)));
+    const hits = r.violations.filter((v) => v.rule === 'worker-url');
+    if (hits.length !== 1) {
+      throw new Error(`"${name}": expected 1 worker-url violation, got ${hits.length}:\n${describe(r.violations)}`);
+    }
+  }
+  // SharedWorker is the same hole with a different name.
+  const shared = `${REGISTRY_FIXTURE}\nvar w = new SharedWorker("https://cdn.example.com/shared.js");`;
+  const r = scanSingleFile(scratch('worker-shared.html', fixture(shared)));
+  if (!r.violations.some((v) => v.rule === 'worker-url')) {
+    throw new Error(`SharedWorker slipped through:\n${describe(r.violations)}`);
+  }
+});
+
+s.test('NEGATIVE: rule 4 — a Blob-URL worker (how this app really spawns) passes', () => {
+  const body = [
+    REGISTRY_FIXTURE,
+    'function spawn(id) {',
+    '  var url = URL.createObjectURL(new Blob([id], { type: "text/javascript" }));',
+    '  return new Worker(url, { type: "module" });',
+    '}',
+  ].join('\n');
+  const r = scanSingleFile(scratch('worker-blob.html', fixture(body)));
+  if (r.violations.length) throw new Error(`the Blob spawn pattern must scan clean:\n${describe(r.violations)}`);
+});
+
+s.test('NEGATIVE: #ai-worker-src is governed by rule 2 like the other inline scripts', () => {
+  const html = fixture(REGISTRY_FIXTURE).replace(
+    '<script id="app-main">',
+    '<script id="ai-worker-src" type="text/js-worker">\n' +
+      "var LEAK = 'https://cdn.example.com/model.onnx';\n" +
+      '</' +
+      'script>\n<script id="app-main">'
+  );
+  const r = scanSingleFile(scratch('ai-worker-url.html', html));
+  const hits = r.violations.filter((v) => v.rule === 'unregistered-url-literal');
+  if (hits.length !== 1 || hits[0].excerpt.indexOf('ai-worker-src') !== 0) {
+    throw new Error(`expected 1 ai-worker-scoped violation, got:\n${describe(r.violations)}`);
+  }
+});
+
 s.test('lexer: a regex literal holding backticks does not desync literal scanning', () => {
   const src = [
     "var fence = /```[a-zA-Z0-9_+-]*[ \\t]*\\r?\\n?/g;",
@@ -628,9 +960,15 @@ module.exports = {
   stripComments,
   lexJs,
   findDeclarationSpan,
+  findRegistrySpans,
+  enclosingObject,
   listUrlLiterals,
+  listUnpinnedCodeSources,
   isLoopbackUrl,
   PRESET_REGISTRY,
+  MODEL_REGISTRY,
+  ALLOWED_URL_REGISTRIES,
+  GOVERNED_SCRIPT_IDS,
 };
 
 if (require.main === module) {

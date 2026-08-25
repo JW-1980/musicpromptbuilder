@@ -12,6 +12,8 @@
 
   Inline script conventions (parsed by tests/lib/extract.js — keep IDs stable):
     #dsp-worker-src  type="text/js-worker"  — Web Worker source (DSP engine)
+    #ai-worker-src   type="text/js-worker"  — Web Worker source (on-device LLM,
+                                              spawned as {type:'module'})
     #app-main        (regular script)       — main-thread application code
 
   #app-main layout convention (tests/audio-capture.test.js depends on it):
@@ -24,10 +26,14 @@
   #app-main running order:
     1. capture engine (createAudioCapture and its helpers)
     2. var MUSIC_KB — the embedded offline music taxonomy knowledge base
-    3. the Tri-Mode AI Acoustic Dissector (createDissector, dissectLocal,
-       prompt builders, parseDissectorReply, createToastHost) and the single
-       var CLOUD_API_PRESETS registry, which is the ONLY place in this file
-       allowed to hold a remote URL (tests/verify-single-file.js enforces it)
+    3. the AI Acoustic Dissector (createDissector, dissectLocal, prompt
+       builders, parseDissectorReply, createToastHost, createLocalLlmEngine)
+       and the TWO registries allowed to hold a remote URL, both enforced by
+       tests/verify-single-file.js: var CLOUD_API_PRESETS (inference endpoints
+       the user POSTs to) and var LOCAL_MODEL_SOURCES (the opt-in on-device
+       model's runtime, wasm and weights — the runtime is SHA-256 pinned).
+       Whether a dissection may use CLOUD_API_PRESETS at all is decided by
+       createCloudArming, declared further down beside the key vault it serves
     4. the Layman Vibe Translators (FDD Domain C) — createPromptState, the
        shared working set every translator writes into, plus the pure
        sliderTags / sliderValueText (FEATURE-MECHANICS §4), matchScenes, the
@@ -1344,6 +1350,103 @@
   .config-row[hidden] { display: none; }
 
   .config-note {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  /* --- On-device model card + key vault (Mode 1b) --------------------------
+     Every one of these rules paints with a token, so a theme swap and Code
+     Mode reach them for free — see the token-block contract at the top. */
+
+  /* The resolved-URL echo under the endpoint field. It is monospace because it
+     is a URL being compared character by character against what was typed. */
+  .config-resolved {
+    flex-basis: 100%;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    word-break: break-all;
+    color: var(--text-dim);
+  }
+  .config-resolved strong { color: var(--text); font-weight: 600; }
+  .config-resolved.err { color: var(--danger-crimson); }
+
+  .config-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+
+  /* A checkbox that opts into something with a consequence gets a full row and
+     a hit area, not a 13px box wedged beside a label. */
+  .check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex-basis: 100%;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .check-row input { margin: 2px 0 0; accent-color: var(--accent-cyan); }
+  .check-row[hidden] { display: none; }
+
+  .local-progress {
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .local-progress[hidden] { display: none; }
+
+  /* A determinate bar: the value is real bytes over real bytes, never a
+     spinner standing in for an unknown. */
+  .local-progress-bar {
+    flex: 1 1 auto;
+    height: 8px;
+    min-width: 120px;
+    appearance: none;
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+    background: var(--field-bg);
+    overflow: hidden;
+  }
+  .local-progress-bar::-webkit-progress-bar { background: var(--field-bg); }
+  .local-progress-bar::-webkit-progress-value { background: var(--accent-cyan); }
+  .local-progress-bar::-moz-progress-bar { background: var(--accent-cyan); }
+
+  /* The "a key is loaded and Auto will use it" banner. Amber, not cyan: this
+     is a heads-up about where the user's words are about to go, and it stays
+     on screen for as long as that is true. */
+  .cloud-armed {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 12px;
+    font-size: 0.74rem;
+    color: var(--warning-amber);
+    background: var(--tint-amber);
+    border: 1px solid var(--tint-amber-border);
+    border-radius: 999px;
+  }
+  .cloud-armed[hidden] { display: none; }
+  .high-contrast .cloud-armed { background: var(--bg); border-color: var(--warning-amber); }
+
+  .vault-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .vault-row[hidden] { display: none; }
+  .vault-note {
     flex-basis: 100%;
     margin: 0;
     font-size: 0.76rem;
@@ -3032,10 +3135,12 @@
       <h4 id="dissect-heading" class="panel-heading">AI acoustic dissector</h4>
       <p class="panel-note">
         Describe a vibe, a scene or a reference sound in plain language and it is deconstructed into
-        generic, copyright-safe Suno tokens. <strong>Local</strong> runs a deterministic taxonomy
-        engine embedded in this file — no network, no download. <strong>Cloud</strong> and
-        <strong>Ollama</strong> hand the same prompt to a language model. <strong>Auto</strong> tries
-        the cloud and falls back to the local engine if it is busy, slow or unreachable.
+        generic, copyright-safe Suno tokens. <strong>On-device AI</strong> runs a real language model
+        in this tab once you download it, and answers from the taxonomy engine until then.
+        <strong>Local</strong> is that taxonomy engine on its own — embedded in this file, no network,
+        no download, fully deterministic. <strong>Cloud</strong> and <strong>Ollama</strong> hand the
+        same prompt to someone else's model. <strong>Auto</strong> tries the cloud first, then the
+        on-device model, then the taxonomy engine.
       </p>
 
       <div class="field field-grow" style="width: 100%;">
@@ -3051,7 +3156,8 @@
         <span class="field">
           <label class="field-label" for="dissect-mode">Mode</label>
           <select id="dissect-mode" class="field-select">
-            <option value="auto" selected>Auto (cloud, then local)</option>
+            <option value="auto">Auto (cloud, then on-device, then taxonomy)</option>
+            <option value="local-llm" selected>On-device AI (Qwen2.5-0.5B)</option>
             <option value="local">Local offline engine</option>
             <option value="cloud">Cloud API</option>
             <option value="ollama">Local Ollama</option>
@@ -3061,34 +3167,86 @@
           <span id="btn-dissect-label">Dissect</span>
         </button>
         <span id="dissect-mode-detail" class="capture-readout"></span>
+        <!-- Stays visible in every mode: it is the answer to "where do my
+             words go when I press Dissect?", and hiding it behind a config
+             panel would be the one time it mattered. -->
+        <span id="dissect-armed" class="cloud-armed" role="status" hidden>
+          <span id="dissect-armed-label">cloud armed</span>
+          <button type="button" id="btn-cloud-disarm" class="btn-mini">Disarm</button>
+        </span>
+      </div>
+
+      <!-- MODE 1b — the opt-in on-device model. Nothing here downloads until
+           the Download button is pressed; the panel's whole job is to say what
+           that button will cost before it is pressed. -->
+      <div id="dissect-local-config" class="config-row">
+        <p class="config-note" id="dissect-local-note"></p>
+        <span class="field">
+          <label class="field-label" for="dissect-local-model">On-device model</label>
+          <select id="dissect-local-model" class="field-select"></select>
+        </span>
+        <span class="config-actions">
+          <button type="button" id="btn-local-download" class="btn-mini">Download the model</button>
+          <button type="button" id="btn-local-cancel" class="btn-mini" hidden>Cancel</button>
+          <button type="button" id="btn-local-remove" class="btn-mini" hidden>Remove downloaded model</button>
+        </span>
+        <span id="dissect-local-progress-row" class="local-progress" hidden>
+          <progress id="dissect-local-progress" class="local-progress-bar" max="100" value="0"
+                    aria-labelledby="dissect-local-progress-text"></progress>
+          <span id="dissect-local-progress-text" class="capture-readout" role="status"
+                aria-live="polite">waiting</span>
+        </span>
+        <p id="dissect-local-status" class="dissect-status" role="status" aria-live="polite"></p>
+        <p id="dissect-local-persist" class="storage-note" hidden></p>
       </div>
 
       <div id="dissect-cloud-config" class="config-row" hidden>
         <p class="config-note">
-          The API key is used for this request only: it is held in memory, never written to
-          <code>localStorage</code>, never put in a URL and never leaves this page except as an
-          <code>Authorization</code> header on the request you trigger. Leave the endpoint blank in
-          Auto mode to stay fully offline.
+          The key travels as an <code>Authorization</code> header on the request you trigger — never
+          in a URL, never to anyone but the endpoint above. Leave the endpoint blank and Auto mode
+          stays completely offline; fill it in and <strong>Auto mode will use it</strong>.
+        </p>
+        <p class="config-note">
+          <strong>If you tick “Remember on this device”:</strong> the key is encrypted with AES-GCM
+          into this browser’s own database, under a key this browser generates and will not hand back
+          to anyone — including this page. That protects it from someone reading the database file off
+          the disk, from a browser profile synced to another machine, and from another account on this
+          computer. It does <strong>not</strong> protect against code already running on this page (a
+          malicious extension, or a tampered copy of this file), or against someone sitting at your
+          unlocked computer: both can simply ask for it to be decrypted. It is never uploaded, never
+          put in a URL, and never written into a preset export or a workspace snapshot.
         </p>
         <span class="field">
           <label class="field-label" for="dissect-preset">Provider</label>
           <select id="dissect-preset" class="field-select"></select>
         </span>
         <span class="field field-grow">
-          <label class="field-label" for="dissect-endpoint">Endpoint</label>
+          <label class="field-label" for="dissect-endpoint">Base URL or full endpoint</label>
           <input type="url" id="dissect-endpoint" class="field-input" autocomplete="off"
-                 spellcheck="false" placeholder="https://…/v1/chat/completions">
+                 spellcheck="false" list="dissect-endpoint-suggestions"
+                 placeholder="https://…/v1  or  https://…/v1/chat/completions">
+          <datalist id="dissect-endpoint-suggestions"></datalist>
         </span>
+        <p id="dissect-resolved-url" class="config-resolved"></p>
         <span class="field">
           <label class="field-label" for="dissect-key">API key</label>
           <input type="password" id="dissect-key" class="field-input" autocomplete="off"
                  spellcheck="false" placeholder="in memory only">
         </span>
-        <span class="field">
+        <span class="field field-grow">
           <label class="field-label" for="dissect-model">Model</label>
           <input type="text" id="dissect-model" class="field-input" autocomplete="off"
-                 spellcheck="false">
+                 spellcheck="false" list="dissect-model-list">
+          <datalist id="dissect-model-list"></datalist>
         </span>
+        <span class="config-actions">
+          <button type="button" id="btn-models-refresh" class="btn-mini">Refresh models</button>
+          <button type="button" id="btn-key-forget" class="btn-mini" hidden>Forget this key</button>
+        </span>
+        <label class="check-row" id="dissect-remember-row" for="dissect-remember">
+          <input type="checkbox" id="dissect-remember">
+          <span id="dissect-remember-copy"></span>
+        </label>
       </div>
 
       <div id="dissect-ollama-config" class="config-row" hidden>
@@ -3532,6 +3690,19 @@
       </details>
 
       <p id="presets-status" class="dissect-status" role="status" aria-live="polite"></p>
+
+      <!-- Remembered API keys live in this browser's database, not in any
+           export above: no backup file, no clipboard copy and no workspace
+           snapshot has ever contained one. This is where they are counted and
+           where they can all be dropped at once — including a slot orphaned by
+           an endpoint edit, which has no row of its own to forget. -->
+      <div class="vault-row" id="vault-row">
+        <p id="vault-note" class="vault-note"></p>
+        <button type="button" id="btn-vault-forget-all" class="btn-mini" hidden>
+          Forget all remembered keys
+        </button>
+      </div>
+
       <div class="draft-foot">
         <span id="presets-counts" class="draft-counts">0 presets</span>
       </div>
@@ -4587,6 +4758,762 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
 }
 </script>
 
+<script id="ai-worker-src" type="text/js-worker">
+'use strict';
+/* ==========================================================================
+ * SunoPrompt Studio — ON-DEVICE LLM WORKER (Mode 1b, FEATURE-MECHANICS §7.1).
+ *
+ * Spawned exactly like #dsp-worker-src — inline text -> Blob -> Worker — but
+ * with {type:'module'}, because the inference runtime is an ES module.
+ *
+ * WHY A SECOND WORKER AND NOT THE DSP ONE. This thread holds ~500 MB of model
+ * weights for as long as the tab lives, across many dissections. The DSP
+ * worker is spawned and terminated per capture session, and it runs a 60 fps
+ * realtime path; a 20-second token loop sharing that thread would stall the
+ * pitch meter. Two jobs, two threads.
+ *
+ * NOTHING HERE RUNS UNTIL THE MAIN THREAD SENDS `init`, and the main thread
+ * only does that after the user clicks Download. This file makes no network
+ * call of its own accord.
+ *
+ * PROTOCOL
+ *   in  init     {sources, variant}
+ *       generate {id, promptText, maxNewTokens, deadlineMs}
+ *       cancel   {id}
+ *       dispose  {}
+ *   out progress {phase:'runtime'|'weights'|'warmup', file, loaded, total}
+ *       ready    {device, dtype, ms}
+ *       reply    {id, text, ms}
+ *       error    {id?, stage, message}
+ *
+ * THE INTEGRITY GATE. `init` fetches the runtime as an ArrayBuffer, digests it
+ * with crypto.subtle SHA-256 and compares it to the digest pinned in
+ * LOCAL_MODEL_SOURCES *before* those bytes are handed to an import. A mismatch
+ * aborts with an error naming both digests, and nothing executes. This is the
+ * clause that lets a single-file app fetch third-party code at all.
+ *
+ * ...AND IT HAS NO BACK DOOR. Every rung of the import ladder carries the
+ * SAME verified bytes — a blob: module first, a data:text/javascript;base64
+ * module built from those bytes second (see buildRuntimeImportCandidates,
+ * which is pure and therefore testable). The pinned CDN URL is fetched exactly
+ * once, as data, and is NEVER handed to an import: a second fetch could serve
+ * a different body than the one the digest was taken over, which is precisely
+ * the substitution the gate exists to prevent. When both rungs fail the worker
+ * says so and stops. "Nothing executes on mismatch" is therefore not a promise
+ * about the happy path — it is the only path there is.
+ *
+ * IDB CONTRACT. The weight cache lives in IndexedDB, not the Cache API, which
+ * does not exist on a file:// origin (not a secure context). The constants
+ * below are a SECOND opener of the database #app-main owns; a regression test
+ * asserts the two agree, because a version skew here would block that one.
+ * ========================================================================== */
+
+/** Must match #app-main's IDB_NAME / IDB_VERSION / IDB_MODEL_CACHE exactly. */
+var AI_IDB_NAME = 'sunoprompt';
+var AI_IDB_VERSION = 2;
+var AI_IDB_MODEL_CACHE = 'model_cache';
+/** Every store #app-main declares, so an upgrade triggered from this thread
+ *  creates the same schema rather than a half one. */
+var AI_IDB_STORES = ['presets', 'prompt_history', 'session', 'api_keys', 'device_key', 'model_cache'];
+var AI_IDB_TS_INDEX = 'ts';
+
+/** Sampling contract, mirrored from #app-main (FEATURE-MECHANICS §7.1). */
+var AI_TEMPERATURE = 0.1;
+var AI_TOP_K = 10;
+var AI_MAX_NEW_TOKENS = 256;
+var AI_DEADLINE_MS = 20000;
+
+var state = {
+  sources: null,
+  variant: null,
+  runtime: null,
+  tokenizer: null,
+  model: null,
+  ready: false,
+  stage: 'idle',
+  pending: {},
+};
+
+function post(message) {
+  self.postMessage(message);
+}
+
+function errText(err) {
+  if (!err) return 'unknown error';
+  if (typeof err === 'string') return err;
+  return String(err.message || err);
+}
+
+function fail(stage, message, id) {
+  var payload = { type: 'error', stage: stage, message: message };
+  if (id !== undefined && id !== null) payload.id = id;
+  post(payload);
+}
+
+/* -------------------------------------------------------------------------- */
+/* SHA-256 gate                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Base64 without a dependency. Two callers with very different sizes: the
+ * 32-byte SHA-256 digest, and the ~1 MB runtime when the data: rung of the
+ * import ladder is reached. Hence the chunked apply() rather than a per-byte
+ * concatenation — and a chunk small enough (32 Ki) that no engine's argument
+ * limit is anywhere near being tested.
+ */
+function bytesToBase64(bytes) {
+  var view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  var binary = '';
+  var CHUNK = 0x8000;
+  for (var i = 0; i < view.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, view.subarray(i, i + CHUNK));
+  }
+  return self.btoa(binary);
+}
+
+function digestBase64(buffer) {
+  return crypto.subtle.digest('SHA-256', buffer).then(function (digest) {
+    return bytesToBase64(new Uint8Array(digest));
+  });
+}
+
+/**
+ * Refuse anything whose digest is not the pinned one. Returns the buffer so it
+ * can be chained; THROWS (rejects) otherwise, and the caller never imports.
+ */
+function verifyPinned(buffer, integrity) {
+  var pinned = typeof integrity === 'string' ? integrity : '';
+  if (pinned.indexOf('sha256-') !== 0 || pinned.length <= 7) {
+    return Promise.reject(new Error('this build pins no SHA-256 digest for the runtime, so it will not be executed'));
+  }
+  var expected = pinned.slice(7);
+  return digestBase64(buffer).then(function (actual) {
+    if (actual !== expected) {
+      throw new Error(
+        'the downloaded runtime does not match its pinned digest and was NOT executed — expected sha256-' +
+          expected +
+          ', got sha256-' +
+          actual
+      );
+    }
+    return buffer;
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Fetch with a real progress bar                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Fetch `url` as an ArrayBuffer, reporting bytes as they land.
+ *
+ * `total` comes from the response's own Content-Length when the server sends
+ * one; the registry's declared size is only the fallback, and is reported as
+ * such. A stream that cannot be read incrementally still reports 0 -> total
+ * rather than inventing intermediate values.
+ */
+function fetchWithProgress(url, phase, declaredBytes, file) {
+  return fetch(url, { credentials: 'omit', mode: 'cors' }).then(function (response) {
+    if (!response || !response.ok) {
+      throw new Error('the download failed with HTTP ' + ((response && response.status) || '(no response)'));
+    }
+    var header = response.headers && response.headers.get ? response.headers.get('content-length') : null;
+    var total = header ? Number(header) : declaredBytes || 0;
+    if (!isFinite(total) || total < 0) total = 0;
+
+    post({ type: 'progress', phase: phase, file: file, loaded: 0, total: total });
+
+    var body = response.body;
+    if (!body || typeof body.getReader !== 'function') {
+      // No streaming here: report honestly at the two points we actually know.
+      return response.arrayBuffer().then(function (buffer) {
+        post({ type: 'progress', phase: phase, file: file, loaded: buffer.byteLength, total: total || buffer.byteLength });
+        return buffer;
+      });
+    }
+
+    var reader = body.getReader();
+    var chunks = [];
+    var loaded = 0;
+    function pump() {
+      return reader.read().then(function (step) {
+        if (step.done) {
+          var out = new Uint8Array(loaded);
+          var at = 0;
+          for (var i = 0; i < chunks.length; i += 1) {
+            out.set(chunks[i], at);
+            at += chunks[i].length;
+          }
+          post({ type: 'progress', phase: phase, file: file, loaded: loaded, total: total || loaded });
+          return out.buffer;
+        }
+        chunks.push(step.value);
+        loaded += step.value.length;
+        post({ type: 'progress', phase: phase, file: file, loaded: loaded, total: total || 0 });
+        return pump();
+      });
+    }
+    return pump();
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* The weight cache — IndexedDB, because file:// has no Cache API             */
+/* -------------------------------------------------------------------------- */
+
+function openDatabase() {
+  return new Promise(function (resolve, reject) {
+    var request;
+    try {
+      request = indexedDB.open(AI_IDB_NAME, AI_IDB_VERSION);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    request.onupgradeneeded = function () {
+      var db = request.result;
+      if (!db || typeof db.createObjectStore !== 'function') return;
+      for (var i = 0; i < AI_IDB_STORES.length; i += 1) {
+        var name = AI_IDB_STORES[i];
+        if (db.objectStoreNames && db.objectStoreNames.contains(name)) continue;
+        var created = db.createObjectStore(name, { keyPath: 'id' });
+        if (created && typeof created.createIndex === 'function') {
+          created.createIndex(AI_IDB_TS_INDEX, 'ts', { unique: false });
+        }
+      }
+    };
+    request.onsuccess = function () {
+      resolve(request.result);
+    };
+    request.onerror = function () {
+      reject(request.error || new Error('IndexedDB open failed'));
+    };
+    request.onblocked = function () {
+      reject(new Error('IndexedDB is blocked by another tab of this app'));
+    };
+  });
+}
+
+/**
+ * A Cache-API-shaped object over one IndexedDB store, which is exactly what
+ * env.customCache asks for: `match(key) -> Response|undefined` and
+ * `put(key, Response)`.
+ */
+function createIdbCache() {
+  var dbPromise = null;
+  function db() {
+    if (!dbPromise) dbPromise = openDatabase();
+    return dbPromise;
+  }
+  return {
+    match: function (key) {
+      return db()
+        .then(function (database) {
+          return new Promise(function (resolve, reject) {
+            var tx = database.transaction(AI_IDB_MODEL_CACHE, 'readonly');
+            var request = tx.objectStore(AI_IDB_MODEL_CACHE).get(String(key));
+            request.onsuccess = function () {
+              resolve(request.result || null);
+            };
+            tx.onerror = function () {
+              reject(tx.error || new Error('cache read failed'));
+            };
+          });
+        })
+        .then(function (record) {
+          if (!record || !record.body) return undefined;
+          var headers = {};
+          if (record.contentType) headers['Content-Type'] = record.contentType;
+          return new Response(record.body, { status: 200, headers: headers });
+        })
+        .catch(function () {
+          // A cache that cannot be read is a cache miss, never a hard failure:
+          // the file is re-downloaded and the model still loads.
+          return undefined;
+        });
+    },
+    put: function (key, response) {
+      return response
+        .arrayBuffer()
+        .then(function (buffer) {
+          return db().then(function (database) {
+            return new Promise(function (resolve, reject) {
+              var tx = database.transaction(AI_IDB_MODEL_CACHE, 'readwrite');
+              tx.objectStore(AI_IDB_MODEL_CACHE).put({
+                id: String(key),
+                ts: Date.now(),
+                body: buffer,
+                contentType:
+                  response.headers && response.headers.get ? response.headers.get('content-type') : null,
+              });
+              tx.oncomplete = function () {
+                resolve();
+              };
+              tx.onerror = function () {
+                reject(tx.error || new Error('cache write failed'));
+              };
+              tx.onabort = function () {
+                reject(tx.error || new Error('cache write aborted'));
+              };
+            });
+          });
+        })
+        .catch(function (err) {
+          // Out of quota is the common case. Report it once; do not fail the
+          // load, which can still finish from memory.
+          post({ type: 'progress', phase: 'weights', file: String(key), loaded: 0, total: 0, cached: false });
+          throw err;
+        });
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* init — download, verify, import, configure, load                           */
+/* -------------------------------------------------------------------------- */
+
+/** Isolated so the import ladder is readable, and so tests can see the rungs. */
+function importModule(url) {
+  return import(url);
+}
+
+/**
+ * THE IMPORT LADDER, AS DATA. Pure: no fetch, no import, no object URL, no
+ * state — it only *describes* the ways this worker is willing to execute bytes
+ * that have already passed verifyPinned(). Being pure is what lets a test
+ * assert the shape of the ladder without a browser, and the assertion that
+ * matters is a negative one: no rung is a network URL.
+ *
+ *   Rung 1, blob:  — the verified bytes wrapped in a Blob module. Nothing can
+ *                    substitute a different body between the digest and the
+ *                    execution.
+ *   Rung 2, data:  — THE SAME BYTES, base64-encoded into the module URL
+ *                    itself. Some engines refuse a blob: module that contains
+ *                    a dynamic import of its own; a data: module is a second
+ *                    way to hand over an identical body, not a second body.
+ *
+ * WHAT IS DELIBERATELY NOT A RUNG: a dynamic import of the pinned CDN URL the
+ * source registry declares. It was one until it was noticed that such an
+ * import executes bytes NOBODY VERIFIED — a second
+ * fetch can return a different body than the first, which is the exact
+ * substitution the digest gate exists to refuse. A fallback that re-downloads
+ * and hopes is not a fallback; it is the hole with a polite name on it.
+ *
+ * @param {Uint8Array|ArrayBuffer} verifiedBytes bytes that passed verifyPinned
+ * @returns {Array<{kind:string, label:string, mime:string, bytes:Uint8Array, base64?:string}>}
+ */
+function buildRuntimeImportCandidates(verifiedBytes) {
+  var view =
+    verifiedBytes instanceof Uint8Array ? verifiedBytes : new Uint8Array(verifiedBytes || 0);
+  return [
+    { kind: 'blob', label: 'blob: module', mime: 'text/javascript', bytes: view },
+    {
+      kind: 'data',
+      label: 'data: module',
+      mime: 'text/javascript',
+      bytes: view,
+      base64: bytesToBase64(view),
+    },
+  ];
+}
+
+/**
+ * Turn one descriptor into a URL an import can take. The ONLY impure step of
+ * the ladder, and the only place an object URL is minted; `release` hands it
+ * straight back so a failed rung leaks nothing.
+ */
+function materializeCandidate(candidate) {
+  if (candidate.kind === 'blob') {
+    var objectUrl = URL.createObjectURL(new Blob([candidate.bytes], { type: candidate.mime }));
+    return {
+      url: objectUrl,
+      release: function () {
+        URL.revokeObjectURL(objectUrl);
+      },
+    };
+  }
+  return {
+    url: 'data:' + candidate.mime + ';base64,' + candidate.base64,
+    release: function () {},
+  };
+}
+
+/**
+ * Execute the verified bytes: each rung in turn, and an honest stop at the end.
+ *
+ * Takes NO url parameter any more. That absence is the fix — there is nothing
+ * in scope here that could be re-fetched, so the "one more try over the wire"
+ * shortcut cannot be reintroduced by accident.
+ */
+function importRuntime(verifiedBuffer) {
+  var candidates = buildRuntimeImportCandidates(new Uint8Array(verifiedBuffer));
+  var failures = [];
+
+  function attempt(index) {
+    if (index >= candidates.length) {
+      return Promise.reject(
+        new Error(
+          'the verified runtime could not be imported (' +
+            failures.join('; ') +
+            '). The pinned URL was NOT re-fetched: this build executes only bytes that passed its ' +
+            'digest check, and a second download is not those bytes.'
+        )
+      );
+    }
+    var candidate = candidates[index];
+    var handle;
+    try {
+      handle = materializeCandidate(candidate);
+    } catch (err) {
+      failures.push(candidate.label + ': ' + errText(err));
+      return attempt(index + 1);
+    }
+    return importModule(handle.url).then(
+      function (mod) {
+        handle.release();
+        return mod;
+      },
+      function (err) {
+        handle.release();
+        failures.push(candidate.label + ': ' + errText(err));
+        return attempt(index + 1);
+      }
+    );
+  }
+
+  return attempt(0);
+}
+
+function configureEnv(mod) {
+  var env = mod.env;
+  if (!env) throw new Error('the runtime exposed no env to configure');
+  // Nothing may be read off the local disk, and nothing may be fetched from
+  // anywhere but the host this build declares.
+  env.allowLocalModels = false;
+  env.allowRemoteModels = true;
+  env.remoteHost = state.sources.weights.host;
+  // The Cache API needs a secure context; file:// is not one. IndexedDB is.
+  env.useBrowserCache = false;
+  env.useCustomCache = true;
+  env.customCache = createIdbCache();
+  var backends = env.backends && env.backends.onnx;
+  if (backends && backends.wasm) {
+    // The bundle derives this from import.meta.url, which under a blob: module
+    // URL points at nothing. Without it the .wasm kernels 404.
+    backends.wasm.wasmPaths = state.sources.wasm.baseUrl;
+    // Cross-origin isolation is unavailable from file://, so threads are not
+    // an option here; asking for one avoids a misleading console warning.
+    backends.wasm.numThreads = 1;
+  }
+  return mod;
+}
+
+function onModelProgress(data) {
+  if (!data) return;
+  if (data.status !== 'progress' && data.status !== 'done' && data.status !== 'initiate') return;
+  post({
+    type: 'progress',
+    phase: 'weights',
+    file: data.file || data.name || '',
+    loaded: typeof data.loaded === 'number' ? data.loaded : 0,
+    total: typeof data.total === 'number' ? data.total : 0,
+  });
+}
+
+function loadModel(mod) {
+  var variant = state.variant;
+  state.stage = 'weights';
+  return mod.AutoTokenizer.from_pretrained(variant.repo, { progress_callback: onModelProgress })
+    .then(function (tokenizer) {
+      state.tokenizer = tokenizer;
+      return mod.AutoModelForCausalLM.from_pretrained(variant.repo, {
+        dtype: variant.dtype,
+        device: variant.device,
+        progress_callback: onModelProgress,
+      });
+    })
+    .then(function (model) {
+      state.model = model;
+      return mod;
+    });
+}
+
+/**
+ * One throwaway token through the whole path. Without it the first real
+ * dissection pays for shader compilation and kernel warm-up, and `ready` would
+ * be a claim the next 10 seconds contradict.
+ */
+function warmUp() {
+  state.stage = 'warmup';
+  post({ type: 'progress', phase: 'warmup', file: 'first token', loaded: 0, total: 1 });
+  var inputs;
+  try {
+    inputs = state.tokenizer.apply_chat_template([{ role: 'user', content: 'hi' }], {
+      add_generation_prompt: true,
+      return_dict: true,
+    });
+  } catch (err) {
+    return Promise.resolve();
+  }
+  return state.model
+    .generate(mergeInto({ max_new_tokens: 1, do_sample: false }, inputs))
+    .then(
+      function () {
+        post({ type: 'progress', phase: 'warmup', file: 'first token', loaded: 1, total: 1 });
+      },
+      function () {
+        // A warm-up that fails is not a load that failed; the real generate
+        // call will report its own error with a real prompt behind it.
+        post({ type: 'progress', phase: 'warmup', file: 'first token', loaded: 1, total: 1 });
+      }
+    );
+}
+
+/** Object.assign without assuming it exists in this realm. */
+function mergeInto(target, source) {
+  if (!source) return target;
+  var keys = Object.keys(source);
+  for (var i = 0; i < keys.length; i += 1) target[keys[i]] = source[keys[i]];
+  return target;
+}
+
+function init(msg) {
+  if (state.ready) {
+    post({ type: 'ready', device: state.variant.device, dtype: state.variant.dtype, ms: 0 });
+    return;
+  }
+  state.sources = msg.sources;
+  state.variant = msg.variant;
+  if (!state.sources || !state.sources.runtime || !state.variant) {
+    fail('init', 'the worker was started without a source registry or a chosen variant');
+    return;
+  }
+  var started = Date.now();
+  state.stage = 'runtime';
+  fetchWithProgress(state.sources.runtime.url, 'runtime', state.sources.runtime.bytes, state.sources.runtime.label)
+    .then(function (buffer) {
+      state.stage = 'integrity';
+      return verifyPinned(buffer, state.sources.runtime.integrity);
+    })
+    .then(function (buffer) {
+      state.stage = 'import';
+      // Only the verified buffer crosses this line. The URL it came from is
+      // deliberately not passed on: see buildRuntimeImportCandidates.
+      return importRuntime(buffer);
+    })
+    .then(function (mod) {
+      state.stage = 'configure';
+      state.runtime = configureEnv(mod);
+      return loadModel(state.runtime);
+    })
+    .then(function () {
+      return warmUp();
+    })
+    .then(function () {
+      state.ready = true;
+      state.stage = 'ready';
+      post({
+        type: 'ready',
+        device: state.variant.device,
+        dtype: state.variant.dtype,
+        repo: state.variant.repo,
+        ms: Date.now() - started,
+      });
+    })
+    .catch(function (err) {
+      fail(state.stage, errText(err));
+    });
+}
+
+/* -------------------------------------------------------------------------- */
+/* generate                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** An interruptible stopper when the runtime offers one, else a no-op handle. */
+function makeStopper() {
+  var Interruptable = state.runtime && state.runtime.InterruptableStoppingCriteria;
+  if (typeof Interruptable !== 'function') return null;
+  try {
+    return new Interruptable();
+  } catch (err) {
+    return null;
+  }
+}
+
+function decodeReply(output, promptLength) {
+  var tokenizer = state.tokenizer;
+  try {
+    var trimmed = output.slice(null, [promptLength, null]);
+    return tokenizer.batch_decode(trimmed, { skip_special_tokens: true })[0];
+  } catch (err) {
+    // Falling back to the whole sequence is safe: parseDissectorReply reads the
+    // JSON object out of surrounding prose, which is what the prompt echo is.
+    return tokenizer.batch_decode(output, { skip_special_tokens: true })[0];
+  }
+}
+
+function generate(msg) {
+  var id = msg && msg.id;
+  if (!state.ready) {
+    fail('generate', 'the on-device model is not loaded in this worker', id);
+    return;
+  }
+  var started = Date.now();
+  var stopper = makeStopper();
+  var timer = null;
+  var settled = false;
+  var timedOut = false;
+
+  function settle(fn) {
+    if (settled) return;
+    settled = true;
+    if (timer !== null) clearTimeout(timer);
+    delete state.pending[id];
+    fn();
+  }
+
+  state.pending[id] = {
+    stop: function (reason) {
+      timedOut = reason === 'timeout';
+      if (stopper && typeof stopper.interrupt === 'function') stopper.interrupt();
+      else settle(function () { fail('cancelled', reason === 'timeout' ? 'the on-device model ran past its deadline' : 'cancelled', id); });
+    },
+  };
+
+  var deadline = typeof msg.deadlineMs === 'number' && msg.deadlineMs > 0 ? msg.deadlineMs : AI_DEADLINE_MS;
+  timer = setTimeout(function () {
+    var pending = state.pending[id];
+    if (pending) pending.stop('timeout');
+  }, deadline);
+
+  var inputs;
+  try {
+    inputs = state.tokenizer.apply_chat_template([{ role: 'user', content: String(msg.promptText || '') }], {
+      add_generation_prompt: true,
+      return_dict: true,
+    });
+  } catch (err) {
+    settle(function () {
+      fail('prompt', 'the chat template could not be applied: ' + errText(err), id);
+    });
+    return;
+  }
+
+  var promptLength = 0;
+  try {
+    var dims = inputs.input_ids.dims;
+    promptLength = dims[dims.length - 1];
+  } catch (err) {
+    promptLength = 0;
+  }
+
+  var options = mergeInto(
+    {
+      // §7.1's temperature/top_k are only consulted under sampling; greedy
+      // decoding ignores both, so do_sample must be true for the contract to
+      // mean anything. The cost is that this mode is near-deterministic
+      // rather than bit-identical, unlike the taxonomy engine.
+      max_new_tokens:
+        typeof msg.maxNewTokens === 'number' && msg.maxNewTokens > 0 ? msg.maxNewTokens : AI_MAX_NEW_TOKENS,
+      do_sample: true,
+      temperature: AI_TEMPERATURE,
+      top_k: AI_TOP_K,
+    },
+    inputs
+  );
+  if (stopper) options.stopping_criteria = stopper;
+
+  var pending;
+  try {
+    pending = state.model.generate(options);
+  } catch (err) {
+    settle(function () {
+      fail('generate', errText(err), id);
+    });
+    return;
+  }
+
+  pending.then(
+    function (output) {
+      settle(function () {
+        if (timedOut) {
+          fail('timeout', 'the on-device model ran past its ' + deadline + 'ms deadline', id);
+          return;
+        }
+        var text;
+        try {
+          text = decodeReply(output, promptLength);
+        } catch (err) {
+          fail('decode', 'the reply could not be decoded: ' + errText(err), id);
+          return;
+        }
+        post({ type: 'reply', id: id, text: typeof text === 'string' ? text : '', ms: Date.now() - started });
+      });
+    },
+    function (err) {
+      settle(function () {
+        fail(timedOut ? 'timeout' : 'generate', errText(err), id);
+      });
+    }
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Message pump                                                               */
+/* -------------------------------------------------------------------------- */
+
+function dispose() {
+  var ids = Object.keys(state.pending);
+  for (var i = 0; i < ids.length; i += 1) {
+    var entry = state.pending[ids[i]];
+    if (entry && typeof entry.stop === 'function') entry.stop('dispose');
+  }
+  state.pending = {};
+  try {
+    if (state.model && typeof state.model.dispose === 'function') state.model.dispose();
+  } catch (err) {
+    /* disposing a half-built session must not throw out of the pump */
+  }
+  state.model = null;
+  state.tokenizer = null;
+  state.ready = false;
+  state.stage = 'idle';
+}
+
+function handleMessage(msg) {
+  if (!msg || typeof msg !== 'object') return;
+  if (msg.type === 'init') {
+    init(msg);
+    return;
+  }
+  if (msg.type === 'generate') {
+    generate(msg);
+    return;
+  }
+  if (msg.type === 'cancel') {
+    var entry = state.pending[msg.id];
+    if (entry && typeof entry.stop === 'function') entry.stop('cancel');
+    return;
+  }
+  if (msg.type === 'dispose') {
+    dispose();
+    return;
+  }
+  fail('protocol', 'unknown message type "' + String(msg.type) + '"');
+}
+
+if (typeof self !== 'undefined') {
+  self.onmessage = function (event) {
+    try {
+      handleMessage(event && event.data);
+    } catch (err) {
+      // The pump itself must never die: a dead worker cannot report why.
+      fail('worker', errText(err));
+    }
+  };
+}
+</script>
+
 <script id="app-main">
 'use strict';
 /*
@@ -4598,7 +5525,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.16.0';
+const APP_VERSION = '0.17.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -6436,34 +7363,48 @@ var MUSIC_KB = {
  * TRI-MODE AI ACOUSTIC DISSECTOR — docs/FDD.md §3, FEATURE-MECHANICS.md §7,
  * ASSUMPTIONS.md "Tri-Mode AI Dissector — resolved spec conflicts".
  *
- * Three interchangeable providers behind one interface:
- *   local  — the deterministic, fully-embedded taxonomy engine below. NO model
- *            download, NO WebGPU, NO network. Real logic: phrase matching over
- *            MUSIC_KB, weighted merge, deterministic JSON. This is the offline
- *            floor the whole app can always stand on.
- *   cloud  — a generic JSON-over-fetch adapter. Every provider-specific detail
- *            (URL shape, auth header, request body, where the text lives in the
- *            reply) is isolated in CLOUD_API_PRESETS; the adapter itself is
- *            provider-agnostic. The API key is passed in per call and is held
- *            in memory only — never localStorage, never a URL parameter.
- *   ollama — POST http://localhost:11434/api/generate, stream:false.
+ * Four interchangeable providers behind one interface:
+ *   local     — the deterministic, fully-embedded taxonomy engine below. NO
+ *               model download, NO WebGPU, NO network. Real logic: phrase
+ *               matching over MUSIC_KB, weighted merge, deterministic JSON.
+ *               This is the offline floor the whole app can always stand on,
+ *               and it is why nothing else here has to pretend.
+ *   local-llm — the real in-browser LLM FEATURE-MECHANICS §7.1 asks for:
+ *               transformers.js running Qwen2.5-0.5B (or SmolLM2-360M) in the
+ *               #ai-worker-src module worker. Both the runtime and the weights
+ *               are downloaded ONLY after an explicit consent click, from
+ *               LOCAL_MODEL_SOURCES, and the runtime's bytes are SHA-256
+ *               verified before they execute. Until that happens the provider
+ *               reports {configured:false} and the chain falls through to
+ *               `local` in silence — an undownloaded model is not an error.
+ *   cloud     — a generic JSON-over-fetch adapter. Every provider-specific
+ *               detail (URL shape, auth header, request body, where the text
+ *               lives in the reply) is isolated in CLOUD_API_PRESETS; the
+ *               adapter itself is provider-agnostic.
+ *   ollama    — POST http://localhost:11434/api/generate, stream:false.
  *
- * PROVIDER SLOT (reserved): FEATURE-MECHANICS §7.1 asks for a WebGPU/WASM
- * Transformers.js model as Mode 1. That needs multi-megabyte remote weights,
- * which the single-file / zero-external-reference constraint forbids
- * (ASSUMPTIONS.md). The seam is kept open: `createDissector({providers:{...}})`
- * accepts a replacement `local` (or an extra `webgpu`) provider implementing
- * the same contract —
+ * MODE IDS. 'local' still means the taxonomy engine — it is asserted by name
+ * across this suite, and renaming it would quietly rewrite what those tests
+ * prove. The LLM is 'local-llm'. 'webgpu' is deliberately unused: one test
+ * relies on it as its example of an unrecognised mode string.
+ *
+ * THE PROVIDER CONTRACT is unchanged, and still open to injection through
+ * `createDissector({providers:{...}})`:
  *     provider(ctx, request) -> Promise<
  *          {ok:true, result:<result schema>}
  *        | {ok:false, error:string, retryable?:boolean,
  *           configured?:boolean, unavailable?:boolean}>
- * — so dropping a real in-browser LLM in later touches nothing else.
+ *
+ * KEYS. The API key is passed in per call. It is held in memory for the
+ * duration of that call, and — only if the user ticks "Remember on this
+ * device" — as AES-GCM ciphertext in IndexedDB under a non-extractable key
+ * (createKeyVault). It never reaches localStorage, a URL, a preset export or a
+ * workspace snapshot.
  *
  * RESULT SCHEMA (every mode returns exactly this shape):
  *   { genre_tokens: [{tag:string, weight:0..1}], bpm_range:[lo,hi]|null,
  *     instruments:[string], mood:[string], era:[string],
- *     confidence:0..1, source:'local'|'cloud'|'ollama' }
+ *     confidence:0..1, source:'local'|'local-llm'|'cloud'|'ollama' }
  *
  * RESILIENCY (docs/ENGINEERING-STANDARD.md §2.3): dissect() ALWAYS resolves.
  * Nothing in this section rejects, and no promise is left unhandled.
@@ -6482,24 +7423,90 @@ var OLLAMA_DEFAULT_MODEL = 'llama3.2';
 /** Verbatim toast copy from FEATURE-MECHANICS.md §7.3 step 4. */
 var DISSECTOR_FALLBACK_TOAST = 'Cloud API busy. Falling back to local offline model.';
 /** Selectable modes, in UI order. 'auto' runs the §7.3 chain. */
-var DISSECTOR_MODES = ['auto', 'local', 'cloud', 'ollama'];
+var DISSECTOR_MODES = ['auto', 'local-llm', 'local', 'cloud', 'ollama'];
+/** Token budget for one on-device generation, and its wall-clock ceiling. */
+var LOCAL_LLM_MAX_TOKENS = 256;
+var LOCAL_LLM_TIMEOUT_MS = 20000;
 /** Dissector output caps, keeping local results focused. (Not FDD #81 — the
     user-facing >15-instrument Tag Clutter Warning remains unimplemented.) */
 var LOCAL_MAX_TOKENS = 18;
 var LOCAL_MAX_LIST = 12;
 
+/** Attribution OpenRouter shows on its activity page. See the preset comment. */
+var OPENROUTER_APP_TITLE = 'SunoPrompt Studio';
+/** Path an OpenAI-compatible base URL is completed with. */
+var OPENAI_COMPLETIONS_PATH = '/chat/completions';
+
+/**
+ * Join a user-typed base URL with a preset's completions path — unless the
+ * user already typed a full endpoint.
+ *
+ * "https://api.groq.com/openai/v1"                   -> …/v1/chat/completions
+ * "https://api.groq.com/openai/v1/"                  -> …/v1/chat/completions
+ * "https://api.groq.com/openai/v1/chat/completions"  -> unchanged
+ *
+ * Both spellings are things people paste, and guessing wrong produces a 404
+ * the user cannot see the cause of. The UI shows the resolved URL for exactly
+ * this reason (the read-only line under the endpoint field).
+ *
+ * @param {string} endpoint
+ * @param {string} basePath
+ * @returns {string}
+ */
+function resolveCompletionsUrl(endpoint, basePath) {
+  var base = typeof endpoint === 'string' ? endpoint.trim() : '';
+  if (!base) return '';
+  var path = typeof basePath === 'string' && basePath ? basePath : OPENAI_COMPLETIONS_PATH;
+  // Compare on the path only: a query string or fragment is the user's business.
+  var cut = base.length;
+  var q = base.indexOf('?');
+  var h = base.indexOf('#');
+  if (q !== -1) cut = Math.min(cut, q);
+  if (h !== -1) cut = Math.min(cut, h);
+  var head = base.slice(0, cut);
+  var tail = base.slice(cut);
+  var trimmed = head.replace(/\/+$/, '');
+  // Already a completions endpoint (ours, or any of the OpenAI-shaped ones a
+  // gateway might expose) — leave it exactly as typed.
+  if (/\/(?:chat\/)?completions$/i.test(trimmed) || /\/responses$/i.test(trimmed)) {
+    return trimmed + tail;
+  }
+  return trimmed + path + tail;
+}
+
 /*
- * Cloud endpoint registry — THE single place in this file that may hold an
- * absolute remote URL (enforced by tests/verify-single-file.js). Adding a
- * provider means adding an entry here, never touching the adapter.
+ * Cloud endpoint registry — one of the two declarations in this file that may
+ * hold an absolute remote URL (tests/verify-single-file.js, URL POLICY v2 rule
+ * 2b). Adding a provider means adding an entry here, never touching the
+ * adapter.
  *
  * Contract per preset:
- *   endpoint     default URL; the user may override it in the UI.
- *   defaultModel pre-filled model id.
- *   buildUrl     (endpoint, model) -> string   [optional: path-templated APIs]
- *   buildHeaders (key) -> object               auth + content type
- *   buildBody    (promptText, model) -> object request payload
- *   extractText  (json) -> string|null         where the model's text lives
+ *   endpoint       default URL; the user may override it in the UI.
+ *   defaultModel   pre-filled model id.
+ *   modelsEndpoint [optional] GET-able model list, fetched only when the user
+ *                  presses "Refresh models" — never on load, never implicitly.
+ *   basePath       [optional] path a bare base URL is completed with.
+ *   suggestions    [optional] base URLs to offer as a <datalist>.
+ *   buildUrl       (endpoint, model) -> string   [optional]
+ *   buildHeaders   (key) -> object               auth + content type
+ *   buildBody      (promptText, model) -> object request payload
+ *   extractText    (json) -> string|null         where the model's text lives
+ *
+ * WHY THESE THREE (ASSUMPTIONS.md, owner correction 2026-08-25).
+ *   openrouter — first-class: attribution header, an optional model list.
+ *   gemini     — kept as the one deliberately NON-OpenAI-shaped preset. It is
+ *                the reason this registry holds adapters rather than URLs: its
+ *                model goes in the PATH, its key in an `x-goog-api-key` header
+ *                and its sampling knobs inside `generationConfig`. Nothing
+ *                about it can be expressed as "a base URL plus a bearer
+ *                token", and the fact that it drops in as one more entry is
+ *                what proves the adapter seam is real.
+ *   custom     — every OpenAI-shaped host, which is most of them. Groq's
+ *                adapter was byte-identical to this one, so it folds in as a
+ *                base-URL suggestion rather than a duplicate entry.
+ * An unknown preset id falls back to `custom` in resolveCloudConfig(), which
+ * is right for an OpenAI-shaped host and would be wrong for a Gemini one —
+ * which is precisely why gemini keeps its own id instead of being remapped.
  *
  * NOTE: `temperature` / `top_k` are mandated by FEATURE-MECHANICS.md §7.1 for
  * deterministic JSON, so every preset sends them in its own dialect. A strict
@@ -6507,11 +7514,93 @@ var LOCAL_MAX_LIST = 12;
  * surfaces to the user as a non-retryable error rather than being swallowed.
  */
 var CLOUD_API_PRESETS = {
+  openrouter: {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    // GET, no auth, and only when the user asks for it (see refreshModelList).
+    modelsEndpoint: 'https://openrouter.ai/api/v1/models',
+    defaultModel: 'meta-llama/llama-3.2-3b-instruct:free',
+    buildHeaders: function (key) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (key) headers.Authorization = 'Bearer ' + key;
+      // OpenRouter reads X-Title for the app name on its activity page.
+      // HTTP-Referer, its companion header, is DELIBERATELY not sent: from a
+      // file:// origin the referrer is the user's own local path, and shipping
+      // that to a third party to earn a leaderboard credit is not a trade this
+      // app makes on the user's behalf.
+      headers['X-Title'] = OPENROUTER_APP_TITLE;
+      return headers;
+    },
+    buildBody: function (promptText, model) {
+      return {
+        model: model || 'meta-llama/llama-3.2-3b-instruct:free',
+        messages: [{ role: 'user', content: promptText }],
+        temperature: DISSECTOR_TEMPERATURE,
+        top_k: DISSECTOR_TOP_K,
+        stream: false,
+      };
+    },
+    extractText: function (json) {
+      return openAiChatText(json);
+    },
+  },
+  gemini: {
+    id: 'gemini',
+    label: 'Google Gemini',
+    // {model} is substituted by buildUrl. The key travels in a HEADER, never
+    // as a ?key= query parameter: secrets do not belong in URLs, and a URL is
+    // the one part of a request that ends up in logs and history by default.
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+    defaultModel: 'gemini-2.0-flash',
+    buildUrl: function (endpoint, model) {
+      return String(endpoint).replace('{model}', model || 'gemini-2.0-flash');
+    },
+    buildHeaders: function (key) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (key) headers['x-goog-api-key'] = key;
+      return headers;
+    },
+    buildBody: function (promptText, model) {
+      return {
+        model: model || 'gemini-2.0-flash',
+        contents: [{ role: 'user', parts: [{ text: promptText }] }],
+        // §7.1's sampling contract in Gemini's own dialect: topK, not top_k,
+        // and nested rather than top-level. responseMimeType asks the model
+        // for JSON directly, which is the whole point of the prompt.
+        generationConfig: {
+          temperature: DISSECTOR_TEMPERATURE,
+          topK: DISSECTOR_TOP_K,
+          responseMimeType: 'application/json',
+        },
+      };
+    },
+    extractText: function (json) {
+      if (!json || !isArrayLike(json.candidates) || !json.candidates.length) return null;
+      var content = json.candidates[0] && json.candidates[0].content;
+      if (!content || !isArrayLike(content.parts) || !content.parts.length) return null;
+      var text = content.parts[0] && content.parts[0].text;
+      return typeof text === 'string' ? text : null;
+    },
+  },
   custom: {
     id: 'custom',
-    label: 'Custom (OpenAI-compatible)',
+    label: 'OpenAI-compatible (any base URL)',
     endpoint: '',
     defaultModel: '',
+    basePath: OPENAI_COMPLETIONS_PATH,
+    // Hosts whose API is OpenAI-shaped, offered as a datalist on the endpoint
+    // field. Two are loopback (a local server is a first-class target, not an
+    // afterthought) and two are remote.
+    suggestions: [
+      { label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' },
+      { label: 'Together', baseUrl: 'https://api.together.xyz/v1' },
+      { label: 'LM Studio (local)', baseUrl: 'http://localhost:1234/v1' },
+      { label: 'vLLM (local)', baseUrl: 'http://localhost:8000/v1' },
+    ],
+    buildUrl: function (endpoint, model) {
+      return resolveCompletionsUrl(endpoint, OPENAI_COMPLETIONS_PATH);
+    },
     buildHeaders: function (key) {
       var headers = { 'Content-Type': 'application/json' };
       if (key) headers.Authorization = 'Bearer ' + key;
@@ -6530,87 +7619,734 @@ var CLOUD_API_PRESETS = {
       return openAiChatText(json);
     },
   },
-  groq: {
-    id: 'groq',
-    label: 'Groq (free tier)',
-    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    defaultModel: 'llama-3.1-8b-instant',
-    buildHeaders: function (key) {
-      var headers = { 'Content-Type': 'application/json' };
-      if (key) headers.Authorization = 'Bearer ' + key;
-      return headers;
-    },
-    buildBody: function (promptText, model) {
-      return {
-        model: model || 'llama-3.1-8b-instant',
-        messages: [{ role: 'user', content: promptText }],
-        temperature: DISSECTOR_TEMPERATURE,
-        top_k: DISSECTOR_TOP_K,
-        stream: false,
-      };
-    },
-    extractText: function (json) {
-      return openAiChatText(json);
-    },
+};
+
+/* ==========================================================================
+ * MODE 1b — THE ON-DEVICE LLM (FEATURE-MECHANICS.md §7.1)
+ *
+ * The second of the two declarations allowed to hold remote URLs. Everything
+ * here is fetched ONLY after an explicit consent click (createLocalLlmEngine's
+ * ensureReady({consent:true}) is the single door), and the one entry that is
+ * CODE rather than data is pinned by SHA-256 and verified before it executes.
+ * tests/verify-single-file.js rule 5 fails the build if that pin goes missing.
+ *
+ * The digest and byte counts below were taken from the real artefacts:
+ *   - the runtime hash was computed twice, from two independent downloads of
+ *     the immutable versioned CDN path;
+ *   - the weight sizes are the actual blob sizes the model repositories
+ *     report, so the consent card can state a real number rather than a guess.
+ * The progress bar still reports the server's own Content-Length as it runs,
+ * because a registry number is a promise and the bar is an observation.
+ *
+ * DEVIATION FROM THE ORIGINAL SPEC SHAPE: `weights` carries a `models` map
+ * rather than one `repo`, because the owner asked for a picker with the FDD's
+ * two candidates (Qwen2.5-0.5B as the default, SmolLM2-360M as the lighter
+ * option). Everything else — kind/host/variants — is unchanged.
+ * ========================================================================== */
+var LOCAL_MODEL_SOURCES = {
+  runtime: {
+    kind: 'code',
+    label: 'transformers.js 3.8.1 (browser ESM build)',
+    url: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js',
+    integrity: 'sha256-qlACtw54l5jaJj9fmcYr0+j80MEZJYpJPEDBgGSDZfo=',
+    bytes: 888173,
   },
-  openrouter: {
-    id: 'openrouter',
-    label: 'OpenRouter (free models)',
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    defaultModel: 'meta-llama/llama-3.2-3b-instruct:free',
-    buildHeaders: function (key) {
-      var headers = { 'Content-Type': 'application/json' };
-      if (key) headers.Authorization = 'Bearer ' + key;
-      return headers;
-    },
-    buildBody: function (promptText, model) {
-      return {
-        model: model || 'meta-llama/llama-3.2-3b-instruct:free',
-        messages: [{ role: 'user', content: promptText }],
-        temperature: DISSECTOR_TEMPERATURE,
-        top_k: DISSECTOR_TOP_K,
-        stream: false,
-      };
-    },
-    extractText: function (json) {
-      return openAiChatText(json);
-    },
+  wasm: {
+    kind: 'binary',
+    label: 'onnxruntime-web kernels',
+    // The ONNX runtime resolves ort-wasm-*.wasm / .mjs against this prefix.
+    // It must be set explicitly: the bundle normally derives it from
+    // import.meta.url, which under a blob: module URL points at nothing.
+    baseUrl: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/',
   },
-  gemini: {
-    id: 'gemini',
-    label: 'Google Gemini (free tier)',
-    // {model} is substituted by buildUrl. The key travels in a HEADER, never
-    // as a ?key= query parameter: secrets do not belong in URLs.
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
-    defaultModel: 'gemini-2.0-flash',
-    buildUrl: function (endpoint, model) {
-      return String(endpoint).replace('{model}', model || 'gemini-2.0-flash');
-    },
-    buildHeaders: function (key) {
-      var headers = { 'Content-Type': 'application/json' };
-      if (key) headers['x-goog-api-key'] = key;
-      return headers;
-    },
-    buildBody: function (promptText, model) {
-      return {
-        model: model || 'gemini-2.0-flash',
-        contents: [{ role: 'user', parts: [{ text: promptText }] }],
-        generationConfig: {
-          temperature: DISSECTOR_TEMPERATURE,
-          topK: DISSECTOR_TOP_K,
-          responseMimeType: 'application/json',
+  weights: {
+    kind: 'weights',
+    host: 'https://huggingface.co/',
+    defaultModelId: 'qwen2.5-0.5b',
+    models: {
+      'qwen2.5-0.5b': {
+        id: 'qwen2.5-0.5b',
+        label: 'Qwen2.5-0.5B-Instruct',
+        note: 'the stronger of the two — better at holding the JSON shape',
+        repo: 'onnx-community/Qwen2.5-0.5B-Instruct',
+        variants: {
+          q4f16: { dtype: 'q4f16', device: 'webgpu', bytes: 483003582, label: '4-bit weights, fp16 maths (WebGPU)' },
+          int8: { dtype: 'int8', device: 'wasm', bytes: 512096557, label: '8-bit integer (WASM)' },
         },
-      };
-    },
-    extractText: function (json) {
-      if (!json || !isArrayLike(json.candidates) || !json.candidates.length) return null;
-      var content = json.candidates[0] && json.candidates[0].content;
-      if (!content || !isArrayLike(content.parts) || !content.parts.length) return null;
-      var text = content.parts[0] && content.parts[0].text;
-      return typeof text === 'string' ? text : null;
+      },
+      'smollm2-360m': {
+        id: 'smollm2-360m',
+        label: 'SmolLM2-360M-Instruct',
+        note: 'lighter and faster to download; weaker at long instructions',
+        repo: 'HuggingFaceTB/SmolLM2-360M-Instruct',
+        variants: {
+          q4f16: { dtype: 'q4f16', device: 'webgpu', bytes: 272737275, label: '4-bit weights, fp16 maths (WebGPU)' },
+          int8: { dtype: 'int8', device: 'wasm', bytes: 364564558, label: '8-bit integer (WASM)' },
+        },
+      },
     },
   },
 };
+
+/** Ids of the offerable on-device models, in picker order. */
+function localModelIds() {
+  return Object.keys(LOCAL_MODEL_SOURCES.weights.models);
+}
+
+/**
+ * Probe this browser for a WebGPU adapter that can actually run fp16 maths.
+ *
+ * ALWAYS resolves — a probe that rejected would turn "no GPU" into an error
+ * path, and no GPU is a completely normal answer. The reason string is written
+ * for the user, not the log: it is what the download card prints next to the
+ * variant it chose.
+ *
+ * @param {object} nav a navigator-alike (injected, so tests can fake it)
+ * @returns {Promise<{webgpu:boolean, features:string[], shaderF16:boolean, reason:string}>}
+ */
+function probeWebGpu(nav) {
+  return new Promise(function (resolve) {
+    var caps = { webgpu: false, features: [], shaderF16: false, reason: '' };
+    function done(reason) {
+      caps.reason = reason;
+      caps.shaderF16 = caps.features.indexOf('shader-f16') !== -1;
+      resolve(caps);
+    }
+    var gpu;
+    try {
+      gpu = nav && nav.gpu;
+    } catch (err) {
+      done('WebGPU could not be reached in this context');
+      return;
+    }
+    if (!gpu || typeof gpu.requestAdapter !== 'function') {
+      done('this browser exposes no WebGPU adapter');
+      return;
+    }
+    var pending;
+    try {
+      pending = gpu.requestAdapter();
+    } catch (err) {
+      done('the WebGPU adapter request threw: ' + errorMessage(err));
+      return;
+    }
+    if (!pending || typeof pending.then !== 'function') {
+      done('requestAdapter() did not return a promise');
+      return;
+    }
+    pending.then(
+      function (adapter) {
+        if (!adapter) {
+          done('WebGPU exists here but no adapter was granted');
+          return;
+        }
+        caps.webgpu = true;
+        try {
+          var features = adapter.features;
+          if (features && typeof features.forEach === 'function') {
+            features.forEach(function (name) {
+              caps.features.push(String(name));
+            });
+          } else if (isArrayLike(features)) {
+            for (var i = 0; i < features.length; i += 1) caps.features.push(String(features[i]));
+          }
+        } catch (err) {
+          /* an adapter that will not enumerate its features is a WASM adapter */
+        }
+        done(
+          caps.features.indexOf('shader-f16') !== -1
+            ? 'a WebGPU adapter with shader-f16'
+            : 'a WebGPU adapter without shader-f16'
+        );
+      },
+      function (err) {
+        done('the WebGPU adapter request failed: ' + errorMessage(err));
+      }
+    );
+  });
+}
+
+/**
+ * Choose the one quantization to download. PURE — no network, no globals but
+ * the registry constant, so it is unit-testable against faked caps.
+ *
+ * fp16 arithmetic is what makes the q4f16 build correct, and only a WebGPU
+ * adapter that reports the 'shader-f16' feature can do it. Anything else gets
+ * the int8/WASM build. The probe runs BEFORE the choice for one reason: a
+ * wrong guess here is a ~500 MB download the user has to do twice.
+ *
+ * @param {{webgpu?:boolean, features?:string[]}} caps from probeWebGpu()
+ * @param {string} [modelId]
+ * @returns {{modelId:string, modelLabel:string, repo:string, dtype:string,
+ *            device:string, bytes:number, label:string, reason:string}}
+ */
+function pickModelVariant(caps, modelId) {
+  var weights = LOCAL_MODEL_SOURCES.weights;
+  var id =
+    typeof modelId === 'string' && Object.prototype.hasOwnProperty.call(weights.models, modelId)
+      ? modelId
+      : weights.defaultModelId;
+  var model = weights.models[id];
+  var c = caps || {};
+  var features = isArrayLike(c.features) ? Array.prototype.slice.call(c.features) : [];
+  var f16 = c.webgpu === true && features.indexOf('shader-f16') !== -1;
+  var variant = f16 ? model.variants.q4f16 : model.variants.int8;
+  return {
+    modelId: id,
+    modelLabel: model.label,
+    repo: model.repo,
+    dtype: variant.dtype,
+    device: variant.device,
+    bytes: variant.bytes,
+    label: variant.label,
+    reason: f16
+      ? 'WebGPU with shader-f16 is available, so the smaller 4-bit build runs on the GPU'
+      : 'no fp16-capable WebGPU adapter, so the 8-bit build runs on the CPU through WASM',
+  };
+}
+
+/** The one record in model_cache that says "this model finished downloading". */
+var LOCAL_LLM_MANIFEST_ID = '__local_llm_manifest';
+/** Refuse a download unless this much more than the variant's size is free. */
+var LOCAL_LLM_QUOTA_HEADROOM = 1.2;
+
+/**
+ * MAIN-THREAD CONTROLLER for the on-device model.
+ *
+ * Owns the worker's lifetime, the consent gate, the quota check and the
+ * readiness manifest. Knows nothing about inference: that is the worker's job,
+ * and this object is what makes it testable without one.
+ *
+ * THE CONSENT GATE IS THE WHOLE POINT. `ensureReady({consent:true})` is the
+ * ONLY path in this file that can start a model download. Called without it,
+ * ensureReady resolves {ready:false, reason:'not-downloaded'} having spawned
+ * nothing and fetched nothing. status() answers from the manifest record in
+ * IndexedDB — never from a network call, because "is it downloaded?" must be
+ * answerable offline, instantly, and without asking anyone.
+ *
+ * WHY fetchFn IS HERE AT ALL. Nothing on the main thread fetches; the worker
+ * does. It is handed to `spawn({fetchFn})` so a test double can BE the worker
+ * and record every request, which is what proves the no-consent-no-network
+ * claim end to end. The production spawn ignores it — a real Worker has its
+ * own fetch and cannot be given ours.
+ *
+ * @param {{
+ *   spawn?: (options:object) => object,   a Worker-alike: postMessage, terminate,
+ *                                         onmessage / addEventListener
+ *   fetchFn?: Function,
+ *   storage?: {get:Function, put:Function, clear:Function},   an idb store
+ *   sources?: object,                     defaults to LOCAL_MODEL_SOURCES
+ *   navigator?: object,                   for storage.estimate/persist + WebGPU
+ *   environment?: object,                 the global scope to feature-detect on
+ *   now?: () => number
+ * }} deps
+ * @returns {{status:Function, statusDetail:Function, refresh:Function,
+ *            ensureReady:Function, generate:Function, cancel:Function,
+ *            remove:Function, on:Function, variant:Function, modelId:Function,
+ *            selectModel:Function}}
+ */
+function createLocalLlmEngine(deps) {
+  var d = deps || {};
+  var spawn = typeof d.spawn === 'function' ? d.spawn : null;
+  var fetchFn = typeof d.fetchFn === 'function' ? d.fetchFn : null;
+  var storage = d.storage && typeof d.storage.get === 'function' ? d.storage : null;
+  var sources = d.sources && typeof d.sources === 'object' ? d.sources : LOCAL_MODEL_SOURCES;
+  var nav = Object.prototype.hasOwnProperty.call(d, 'navigator')
+    ? d.navigator
+    : typeof navigator !== 'undefined'
+      ? navigator
+      : null;
+  var now =
+    typeof d.now === 'function'
+      ? d.now
+      : function () {
+          return Date.now();
+        };
+
+  var listeners = { progress: [], status: [], ready: [], error: [] };
+  var worker = null;
+  var workerLoaded = false;
+  var readyWaiters = [];
+  var pending = {};
+  var nextId = 1;
+  var currentStatus = 'absent';
+  var detail = '';
+  var manifest = null;
+  var chosen = null;
+  var wantedModelId = sources.weights ? sources.weights.defaultModelId : null;
+  var lastProgress = null;
+
+  function emit(name, payload) {
+    var list = listeners[name];
+    if (!list) return;
+    for (var i = 0; i < list.length; i += 1) {
+      try {
+        list[i](payload);
+      } catch (err) {
+        /* a broken listener is the listener's problem, never the engine's */
+      }
+    }
+  }
+
+  function setStatus(next, why) {
+    currentStatus = next;
+    detail = why || '';
+    emit('status', { status: next, detail: detail });
+  }
+
+  /**
+   * Can this browser run the thing at all? Answered from capabilities, not
+   * from a trial run — an honest 'unsupported' is better than a download that
+   * cannot possibly finish.
+   *
+   * The globals are read off `deps.environment`, defaulting to the real one.
+   * That is not indirection for its own sake: the whole engine is otherwise
+   * injectable, and a test that must fake `Worker` by mutating a global to
+   * reach the consent gate would be testing the wrong thing. A test states
+   * which capabilities it is standing in for, in one object.
+   */
+  var env =
+    d.environment && typeof d.environment === 'object'
+      ? d.environment
+      : typeof globalThis !== 'undefined'
+        ? globalThis
+        : null;
+
+  function unsupportedReason() {
+    if (!storage) return 'this browser context has no usable IndexedDB to cache the model in';
+    if (!spawn) return 'no worker factory was provided';
+    if (!env) return 'this context exposes no global scope to check for Worker support';
+    if (typeof env.Worker !== 'function') return 'this browser has no Web Worker support';
+    if (typeof env.WebAssembly === 'undefined') return 'this browser has no WebAssembly support';
+    if (typeof env.Blob !== 'function' || !env.URL || typeof env.URL.createObjectURL !== 'function') {
+      return 'this browser cannot build the worker from an inline script';
+    }
+    if (!env.crypto || !env.crypto.subtle || typeof env.crypto.subtle.digest !== 'function') {
+      return 'this context has no Web Crypto, so the runtime download could not be hash-verified';
+    }
+    return null;
+  }
+
+  var blocked = unsupportedReason();
+  if (blocked) {
+    currentStatus = 'unsupported';
+    detail = blocked;
+  }
+
+  /* --- the manifest: the single source of "is it downloaded?" ------------- */
+
+  function readManifest() {
+    if (!storage) return Promise.resolve(null);
+    return storage.get(IDB_MODEL_CACHE, LOCAL_LLM_MANIFEST_ID).then(
+      function (record) {
+        return record && typeof record === 'object' ? record : null;
+      },
+      function () {
+        return null;
+      }
+    );
+  }
+
+  function writeManifest(variant, ms) {
+    if (!storage || typeof storage.put !== 'function') return Promise.resolve(null);
+    var record = {
+      id: LOCAL_LLM_MANIFEST_ID,
+      ts: now(),
+      modelId: variant.modelId,
+      modelLabel: variant.modelLabel,
+      repo: variant.repo,
+      dtype: variant.dtype,
+      device: variant.device,
+      bytes: variant.bytes,
+      runtimeIntegrity: sources.runtime.integrity,
+      loadMs: ms,
+      consentedAt: now(),
+    };
+    return storage.put(IDB_MODEL_CACHE, record).then(
+      function () {
+        manifest = record;
+        return record;
+      },
+      function () {
+        // The weights are cached even if the manifest write failed; the next
+        // boot will simply ask for consent again rather than claim readiness.
+        return null;
+      }
+    );
+  }
+
+  /* --- worker plumbing ---------------------------------------------------- */
+
+  function attach(handle) {
+    worker = handle;
+    var onMessage = function (event) {
+      handleWorkerMessage((event && event.data) || null);
+    };
+    if (typeof handle.addEventListener === 'function') handle.addEventListener('message', onMessage);
+    else handle.onmessage = onMessage;
+    if (typeof handle.addEventListener === 'function') {
+      handle.addEventListener('error', function (event) {
+        settleReady({ ready: false, reason: 'failed', detail: (event && event.message) || 'the model worker crashed' });
+      });
+    }
+  }
+
+  function settleReady(outcome) {
+    var waiters = readyWaiters;
+    readyWaiters = [];
+    for (var i = 0; i < waiters.length; i += 1) waiters[i](outcome);
+  }
+
+  function handleWorkerMessage(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'progress') {
+      lastProgress = msg;
+      emit('progress', msg);
+      return;
+    }
+    if (msg.type === 'ready') {
+      workerLoaded = true;
+      setStatus('ready', '');
+      emit('ready', msg);
+      writeManifest(chosen, msg.ms).then(function () {
+        settleReady({ ready: true, variant: chosen, ms: msg.ms });
+      });
+      return;
+    }
+    if (msg.type === 'reply') {
+      var hit = pending[msg.id];
+      if (hit) {
+        delete pending[msg.id];
+        hit.resolve({ ok: true, text: msg.text, ms: msg.ms });
+      }
+      return;
+    }
+    if (msg.type === 'error') {
+      var message = msg.message || 'the on-device model failed';
+      // A timeout or an out-of-memory abort is worth retrying with the next
+      // provider; a bad prompt or a broken runtime is not.
+      var retryable = msg.stage === 'timeout' || /out of memory|allocation failed|oom/i.test(message);
+      if (msg.id !== undefined && msg.id !== null && pending[msg.id]) {
+        var call = pending[msg.id];
+        delete pending[msg.id];
+        call.resolve({ ok: false, error: message, retryable: retryable, stage: msg.stage });
+        return;
+      }
+      workerLoaded = false;
+      setStatus('failed', message);
+      emit('error', msg);
+      settleReady({ ready: false, reason: 'failed', detail: message });
+    }
+  }
+
+  function teardown() {
+    if (worker && typeof worker.terminate === 'function') {
+      try {
+        worker.terminate();
+      } catch (err) {
+        /* terminating a dead worker is not an error worth surfacing */
+      }
+    }
+    worker = null;
+    workerLoaded = false;
+    var ids = Object.keys(pending);
+    for (var i = 0; i < ids.length; i += 1) {
+      pending[ids[i]].resolve({ ok: false, error: 'the on-device model was shut down', retryable: false });
+    }
+    pending = {};
+  }
+
+  /* --- quota and persistence --------------------------------------------- */
+
+  /**
+   * Refuse honestly rather than fill the disk and fail at 94%.
+   * An unknown quota is not a refusal: some browsers do not implement
+   * estimate(), and guessing "no" there would block a download that works.
+   */
+  function checkQuota(bytes) {
+    var api = nav && nav.storage;
+    if (!api || typeof api.estimate !== 'function') {
+      return Promise.resolve({ ok: true, known: false });
+    }
+    return api.estimate().then(
+      function (estimate) {
+        var quota = estimate && typeof estimate.quota === 'number' ? estimate.quota : 0;
+        var usage = estimate && typeof estimate.usage === 'number' ? estimate.usage : 0;
+        if (!quota) return { ok: true, known: false };
+        var free = Math.max(0, quota - usage);
+        if (free < bytes * LOCAL_LLM_QUOTA_HEADROOM) {
+          return {
+            ok: false,
+            known: true,
+            free: free,
+            needed: Math.round(bytes * LOCAL_LLM_QUOTA_HEADROOM),
+          };
+        }
+        return { ok: true, known: true, free: free };
+      },
+      function () {
+        return { ok: true, known: false };
+      }
+    );
+  }
+
+  /** Ask the browser to stop evicting this origin. A `false` is reported. */
+  function requestPersistence() {
+    var api = nav && nav.storage;
+    if (!api || typeof api.persist !== 'function') return Promise.resolve({ persisted: false, known: false });
+    var pendingCall;
+    try {
+      pendingCall = api.persist();
+    } catch (err) {
+      return Promise.resolve({ persisted: false, known: false });
+    }
+    if (!pendingCall || typeof pendingCall.then !== 'function') {
+      return Promise.resolve({ persisted: pendingCall === true, known: true });
+    }
+    return pendingCall.then(
+      function (value) {
+        return { persisted: value === true, known: true };
+      },
+      function () {
+        return { persisted: false, known: false };
+      }
+    );
+  }
+
+  /* --- the public surface -------------------------------------------------- */
+
+  var api = {
+    /** Synchronous, offline, and never a network call. */
+    status: function () {
+      return currentStatus;
+    },
+
+    statusDetail: function () {
+      return detail;
+    },
+
+    lastProgress: function () {
+      return lastProgress;
+    },
+
+    manifest: function () {
+      return manifest;
+    },
+
+    variant: function () {
+      return chosen;
+    },
+
+    modelId: function () {
+      return wantedModelId;
+    },
+
+    /** Pick which of the offered models a later download would fetch. */
+    selectModel: function (modelId) {
+      if (Object.prototype.hasOwnProperty.call(sources.weights.models, modelId)) wantedModelId = modelId;
+      return wantedModelId;
+    },
+
+    /**
+     * Read the manifest and settle into 'ready' or 'absent'. Called at boot.
+     * Touches IndexedDB only.
+     * @returns {Promise<string>} the resolved status
+     */
+    refresh: function () {
+      if (currentStatus === 'unsupported') return Promise.resolve(currentStatus);
+      return readManifest().then(function (record) {
+        manifest = record;
+        if (record && record.modelId) {
+          wantedModelId = record.modelId;
+          if (currentStatus !== 'downloading') setStatus('ready', '');
+        } else if (currentStatus !== 'downloading' && currentStatus !== 'failed') {
+          setStatus('absent', '');
+        }
+        return currentStatus;
+      });
+    },
+
+    /**
+     * The consent gate.
+     *
+     * @param {{consent?:boolean, modelId?:string}} [options]
+     * @returns {Promise<{ready:boolean, reason?:string, detail?:string,
+     *                    variant?:object, persisted?:boolean}>}
+     */
+    ensureReady: function (options) {
+      var opts = options || {};
+      if (currentStatus === 'unsupported') {
+        return Promise.resolve({ ready: false, reason: 'unsupported', detail: detail });
+      }
+      if (workerLoaded && worker) return Promise.resolve({ ready: true, variant: chosen });
+      if (typeof opts.modelId === 'string') api.selectModel(opts.modelId);
+
+      // Already downloaded on this device? Then loading it is not a new
+      // decision — the consent that produced the manifest still stands.
+      return readManifest().then(function (record) {
+        manifest = record;
+        var consented = opts.consent === true || !!record;
+        if (!consented) {
+          // THE GATE. Nothing has been spawned, nothing fetched.
+          if (currentStatus !== 'failed') setStatus('absent', '');
+          return { ready: false, reason: 'not-downloaded' };
+        }
+        if (record && record.modelId) wantedModelId = record.modelId;
+        return probeWebGpu(nav).then(function (caps) {
+          chosen = pickModelVariant(caps, wantedModelId);
+          var alreadyHave = !!record;
+          return (alreadyHave ? Promise.resolve({ ok: true, known: false }) : checkQuota(chosen.bytes)).then(
+            function (quota) {
+              if (!quota.ok) {
+                setStatus('failed', 'not enough free storage');
+                return {
+                  ready: false,
+                  reason: 'quota',
+                  detail:
+                    'this browser offers about ' +
+                    formatBytes(quota.free) +
+                    ' of free storage and the model needs about ' +
+                    formatBytes(quota.needed) +
+                    ' including working room — nothing was downloaded',
+                };
+              }
+              return requestPersistence().then(function (persistence) {
+                setStatus('downloading', '');
+                var handle;
+                try {
+                  handle = spawn({ fetchFn: fetchFn });
+                } catch (err) {
+                  setStatus('failed', errorMessage(err));
+                  return { ready: false, reason: 'failed', detail: errorMessage(err) };
+                }
+                if (!handle || typeof handle.postMessage !== 'function') {
+                  setStatus('failed', 'the model worker could not be started');
+                  return { ready: false, reason: 'failed', detail: 'the model worker could not be started' };
+                }
+                attach(handle);
+                return new Promise(function (resolve) {
+                  readyWaiters.push(function (outcome) {
+                    outcome.persisted = persistence.persisted;
+                    outcome.persistenceKnown = persistence.known;
+                    resolve(outcome);
+                  });
+                  worker.postMessage({ type: 'init', sources: sources, variant: chosen });
+                });
+              });
+            }
+          );
+        });
+      });
+    },
+
+    /**
+     * One generation. Resolves — never rejects.
+     * @param {{promptText:string, maxNewTokens?:number, deadlineMs?:number}} request
+     * @returns {Promise<{ok:boolean, text?:string, error?:string, retryable?:boolean}>}
+     */
+    generate: function (request) {
+      var req = request || {};
+      return api.ensureReady({}).then(function (state) {
+        if (!state.ready) {
+          return {
+            ok: false,
+            error:
+              state.reason === 'not-downloaded'
+                ? 'the on-device model is not downloaded yet'
+                : state.detail || 'the on-device model is not available',
+            retryable: false,
+            configured: state.reason === 'not-downloaded' ? false : undefined,
+          };
+        }
+        var id = 'g' + nextId;
+        nextId += 1;
+        return new Promise(function (resolve) {
+          pending[id] = { resolve: resolve };
+          worker.postMessage({
+            type: 'generate',
+            id: id,
+            promptText: String(req.promptText || ''),
+            maxNewTokens:
+              typeof req.maxNewTokens === 'number' && req.maxNewTokens > 0
+                ? req.maxNewTokens
+                : LOCAL_LLM_MAX_TOKENS,
+            deadlineMs:
+              typeof req.deadlineMs === 'number' && req.deadlineMs > 0 ? req.deadlineMs : LOCAL_LLM_TIMEOUT_MS,
+          });
+        });
+      });
+    },
+
+    /** Stop one in-flight generation, or all of them. */
+    cancel: function (id) {
+      if (!worker) return;
+      var ids = id ? [id] : Object.keys(pending);
+      for (var i = 0; i < ids.length; i += 1) {
+        try {
+          worker.postMessage({ type: 'cancel', id: ids[i] });
+        } catch (err) {
+          /* a dead worker cannot be asked to stop; teardown covers it */
+        }
+      }
+      if (!id && currentStatus === 'downloading') {
+        teardown();
+        setStatus('absent', 'the download was cancelled');
+      }
+    },
+
+    /**
+     * Delete every cached byte and go back to 'absent'. The user asked for the
+     * space back; the next use asks for consent again.
+     * @returns {Promise<{removed:boolean, detail?:string}>}
+     */
+    remove: function () {
+      teardown();
+      manifest = null;
+      chosen = null;
+      if (!storage || typeof storage.clear !== 'function') {
+        setStatus(currentStatus === 'unsupported' ? 'unsupported' : 'absent', '');
+        return Promise.resolve({ removed: false, detail: 'there was no cache to clear' });
+      }
+      return storage.clear(IDB_MODEL_CACHE).then(
+        function (dropped) {
+          setStatus(currentStatus === 'unsupported' ? 'unsupported' : 'absent', '');
+          return { removed: true, dropped: dropped };
+        },
+        function (err) {
+          return { removed: false, detail: errorMessage(err) };
+        }
+      );
+    },
+
+    /** @param {'progress'|'status'|'ready'|'error'} name */
+    on: function (name, fn) {
+      if (!listeners[name] || typeof fn !== 'function') {
+        return function () {};
+      }
+      listeners[name].push(fn);
+      return function () {
+        var at = listeners[name].indexOf(fn);
+        if (at !== -1) listeners[name].splice(at, 1);
+      };
+    },
+  };
+
+  return api;
+}
+
+/**
+ * Bytes as a person reads them. Deliberately decimal MB/GB, because that is
+ * what a download progress bar and a storage quota both report.
+ * @param {number} bytes
+ * @returns {string}
+ */
+function formatBytes(bytes) {
+  var n = typeof bytes === 'number' && isFinite(bytes) && bytes > 0 ? bytes : 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + ' GB';
+  if (n >= 1e6) return Math.round(n / 1e6) + ' MB';
+  if (n >= 1e3) return Math.round(n / 1e3) + ' KB';
+  return n + ' bytes';
+}
 
 /* -------------------------------------------------------------------------- */
 /* Small shared helpers                                                       */
@@ -7428,6 +9164,66 @@ function cloudDissectorProvider(ctx, request) {
   });
 }
 
+/**
+ * MODE 1b provider — the on-device LLM.
+ *
+ * THE SILENT-FALLTHROUGH CONTRACT. With no weights downloaded this returns
+ * {configured:false}, which runDissectorChain already treats as NEVER
+ * ATTEMPTED: the chain moves to the taxonomy engine, `fellBack` stays false
+ * and no "cloud busy" toast fires. That is what makes 'local-llm' safe as the
+ * default mode — a fresh install answers instantly from the embedded KB and
+ * says so, instead of stalling on a 500 MB download nobody asked for.
+ *
+ * Everything past that point is shared verbatim with cloud and ollama:
+ * the same buildDissectorPrompt text goes in, and finishRemoteReply runs the
+ * same parseDissectorReply and the same result schema over what comes back.
+ */
+function localLlmDissectorProvider(ctx, request) {
+  var engine = ctx.localLlm;
+  if (!engine || typeof engine.generate !== 'function') {
+    return Promise.resolve({
+      ok: false,
+      configured: false,
+      error: 'the on-device model is not available in this context',
+    });
+  }
+  var state = engine.status();
+  if (state !== 'ready') {
+    return Promise.resolve({
+      ok: false,
+      configured: false,
+      error:
+        state === 'unsupported'
+          ? 'this browser cannot run the on-device model: ' + engine.statusDetail()
+          : state === 'downloading'
+            ? 'the on-device model is still downloading'
+            : 'the on-device model is not downloaded yet',
+    });
+  }
+
+  function attempt(promptText) {
+    return engine.generate({ promptText: promptText }).then(function (outcome) {
+      if (!outcome.ok) {
+        return {
+          ok: false,
+          error: outcome.error,
+          retryable: outcome.retryable === true,
+          configured: outcome.configured,
+        };
+      }
+      return finishRemoteReply(outcome.text, 'local-llm');
+    });
+  }
+
+  return attempt(request.promptText).then(function (first) {
+    if (first.ok || first.configured === false) return first;
+    // A small model that wrapped the JSON in chatter gets exactly one nudge.
+    // More than one and the 20-second budget becomes 40 for no better odds.
+    if (!/not usable JSON|carried no text/.test(String(first.error))) return first;
+    return attempt(request.promptText + '\n\nReturn ONLY the JSON object.');
+  });
+}
+
 /** MODE 3 provider. localhost only; the model name comes from the UI. */
 function ollamaDissectorProvider(ctx, request) {
   var cfg = request.ollama || {};
@@ -7561,7 +9357,8 @@ function runDissectorChain(order, ctx, request, providers, toast) {
  *   timeoutMs?: number,
  *   toast?: (message:string, kind?:string) => void,
  *   setTimeoutFn?: Function, clearTimeoutFn?: Function,
- *   providers?: {local?:Function, cloud?:Function, ollama?:Function}
+ *   localLlm?: object,
+ *   providers?: {local?:Function, 'local-llm'?:Function, cloud?:Function, ollama?:Function}
  * }} deps
  * @returns {{dissect: Function, listModes: Function}}
  */
@@ -7595,11 +9392,12 @@ function createDissector(deps) {
 
   var providers = {
     local: localDissectorProvider,
+    'local-llm': localLlmDissectorProvider,
     cloud: cloudDissectorProvider,
     ollama: ollamaDissectorProvider,
   };
   if (d.providers && typeof d.providers === 'object') {
-    var names = ['local', 'cloud', 'ollama'];
+    var names = ['local', 'local-llm', 'cloud', 'ollama'];
     for (var i = 0; i < names.length; i += 1) {
       if (typeof d.providers[names[i]] === 'function') providers[names[i]] = d.providers[names[i]];
     }
@@ -7614,6 +9412,10 @@ function createDissector(deps) {
   var ctx = {
     fetchFn: fetchFn,
     now: now,
+    // The on-device engine, or null. A provider reads it from here rather than
+    // from a global, which is what lets a test drive an absent, a downloading
+    // and a ready model through the same chain.
+    localLlm: d.localLlm && typeof d.localLlm === 'object' ? d.localLlm : null,
     timing: { timeoutMs: timeoutMs, setTimeoutFn: setTimeoutFn, clearTimeoutFn: clearTimeoutFn },
   };
 
@@ -7670,7 +9472,23 @@ function createDissector(deps) {
         ollama: req.ollama || null,
       };
 
-      var order = mode === 'auto' ? ['cloud', 'local'] : [mode];
+      /*
+       * ORDER.
+       *   auto      — FEATURE-MECHANICS §7.3's cloud-first waterfall with the
+       *               new tier inserted before the floor.
+       *   local-llm — the ONE mode that is not a single-provider pin, because
+       *               its two steps are tiers of one promise (Mode 1) rather
+       *               than rival engines: the LLM when it is downloaded, the
+       *               taxonomy engine the rest of the time, silently.
+       *   everything else — pinned. Choosing a mode means wanting to know
+       *               whether THAT mode worked.
+       */
+      var order =
+        mode === 'auto'
+          ? ['cloud', 'local-llm', 'local']
+          : mode === 'local-llm'
+            ? ['local-llm', 'local']
+            : [mode];
       return runDissectorChain(order, ctx, resolved, providers, toast).then(
         function (outcome) {
           return outcome;
@@ -7696,8 +9514,13 @@ function createDissector(deps) {
     return [
       {
         id: 'auto',
-        label: 'Auto (cloud, then local)',
-        detail: 'Tries the cloud API and falls back to the offline engine.',
+        label: 'Auto (cloud, then on-device, then taxonomy)',
+        detail: 'Tries the cloud API, then the on-device model, then the offline engine.',
+      },
+      {
+        id: 'local-llm',
+        label: 'On-device AI',
+        detail: 'A real language model in this tab. Answers from the taxonomy engine until you download it.',
       },
       {
         id: 'local',
@@ -11915,11 +13738,30 @@ function buildFinalPrompt(promptState, exclusions, options) {
 var PROFILES_KEY = 'suno_profiles';
 
 var IDB_NAME = 'sunoprompt';
-var IDB_VERSION = 1;
+/* v1 -> v2 (2026-08-25): three additive stores for the on-device model and the
+ * opt-in key vault. The upgrade handler creates whatever is missing, so an
+ * existing v1 database keeps its presets, history and autosave untouched. */
+var IDB_VERSION = 2;
 var IDB_PRESETS = 'presets';
 var IDB_HISTORY = 'prompt_history';
 var IDB_SESSION = 'session';
-var IDB_STORES = [IDB_PRESETS, IDB_HISTORY, IDB_SESSION];
+/** AES-GCM {iv, ciphertext} per presetId::endpointOrigin. Never plaintext. */
+var IDB_KEYS = 'api_keys';
+/** Exactly one record: the non-extractable CryptoKey that unwraps the above. */
+var IDB_DEVICE_KEY = 'device_key';
+/** transformers.js's weight cache, plus this app's own readiness manifest. */
+var IDB_MODEL_CACHE = 'model_cache';
+var IDB_STORES = [IDB_PRESETS, IDB_HISTORY, IDB_SESSION, IDB_KEYS, IDB_DEVICE_KEY, IDB_MODEL_CACHE];
+/**
+ * Stores whose records must NOT go through copy()'s JSON round-trip.
+ *
+ * A CryptoKey survives structured cloning into IndexedDB but does NOT survive
+ * JSON.parse(JSON.stringify(…)) — it comes back as `{}`, silently, and the
+ * vault would then "work" while encrypting nothing. A 500 MB ArrayBuffer of
+ * model weights survives the round-trip only by ballooning into an array of
+ * half a billion numbers first. Both belong in the raw lane.
+ */
+var IDB_RAW_STORES = [IDB_DEVICE_KEY, IDB_MODEL_CACHE];
 /** Every store carries a `ts` index so a read has a declared order. */
 var IDB_TS_INDEX = 'ts';
 
@@ -12011,7 +13853,7 @@ function sortNewestFirst(records) {
  *
  * @param {{
  *   indexedDB?: IDBFactory|null,
- *   name?: string, version?: number, stores?: string[],
+ *   name?: string, version?: number, stores?: string[], rawStores?: string[],
  *   onDegrade?: (reason: string) => void
  * }} [deps]
  * @returns {object} {put, get, getAll, delete, count, clear, ready, persistent, isPersistent, close}
@@ -12034,6 +13876,9 @@ function createIdbStore(deps) {
       ? Math.floor(d.version)
       : IDB_VERSION;
   var storeNames = isArrayLike(d.stores) ? Array.prototype.slice.call(d.stores) : IDB_STORES.slice();
+  var rawStoreNames = isArrayLike(d.rawStores)
+    ? Array.prototype.slice.call(d.rawStores)
+    : IDB_RAW_STORES.slice();
 
   /** name -> {id -> record}. Only used once `usingMemory` is true. */
   var memory = {};
@@ -12194,6 +14039,31 @@ function createIdbStore(deps) {
     return JSON.parse(JSON.stringify(record));
   }
 
+  /** Does this store hold values JSON cannot round-trip? */
+  function isRawStore(name) {
+    return rawStoreNames.indexOf(name) !== -1;
+  }
+
+  /**
+   * The raw lane's stand-in for copy(): a NEW top-level object holding the
+   * same property values by reference. The record object itself is still
+   * detached (so a later `record.id = …` cannot reach into the store), but a
+   * CryptoKey or an ArrayBuffer inside it arrives intact, which is the whole
+   * point. IndexedDB structured-clones it on the way in regardless.
+   */
+  function shallow(record) {
+    if (record === undefined || record === null) return record;
+    var out = {};
+    var keys = Object.keys(record);
+    for (var i = 0; i < keys.length; i += 1) out[keys[i]] = record[keys[i]];
+    return out;
+  }
+
+  /** copy() for normal stores, shallow() for the raw ones. */
+  function prepare(store, record) {
+    return isRawStore(store) ? shallow(record) : copy(record);
+  }
+
   api = {
     /**
      * True while writes are durable. Flips to false the moment the store
@@ -12221,7 +14091,7 @@ function createIdbStore(deps) {
       if (!record || typeof record !== 'object' || isArrayLike(record)) {
         return Promise.reject(new Error('put() needs a record object'));
       }
-      var value = copy(record);
+      var value = prepare(store, record);
       if (value.id === undefined || value.id === null || value.id === '') {
         value.id = makeRecordId(store === IDB_HISTORY ? 'h' : store === IDB_PRESETS ? 'p' : 's');
       } else {
@@ -12255,7 +14125,8 @@ function createIdbStore(deps) {
           };
         },
         function (table) {
-          return Object.prototype.hasOwnProperty.call(table, key) ? copy(table[key]) : null;
+          if (!Object.prototype.hasOwnProperty.call(table, key)) return null;
+          return prepare(store, table[key]);
         }
       );
     },
@@ -12283,7 +14154,7 @@ function createIdbStore(deps) {
         function (table) {
           var out = [];
           var keys = Object.keys(table);
-          for (var i = 0; i < keys.length; i += 1) out.push(copy(table[keys[i]]));
+          for (var i = 0; i < keys.length; i += 1) out.push(prepare(store, table[keys[i]]));
           return sortNewestFirst(out);
         }
       );
@@ -12370,6 +14241,843 @@ function createIdbStore(deps) {
   }
 
   return api;
+}
+
+/* -------------------------------------------------------------------------- */
+/* B2. THE KEY VAULT — opt-in, device-tier, AES-GCM                           */
+/* -------------------------------------------------------------------------- */
+
+/** The single record id in the device_key store. */
+var DEVICE_KEY_ID = '__device_key';
+/** AES-GCM's nonce is 96 bits. One fresh nonce per encryption, never reused. */
+var VAULT_IV_BYTES = 12;
+
+/**
+ * Remembered API keys.
+ *
+ * WHAT THIS PROTECTS AGAINST, EXACTLY (and the UI says the same thing in the
+ * same words, because a vault that oversells itself is worse than no vault):
+ *
+ *   IT DOES protect against someone who reads the browser's database files off
+ *   the disk, a browser profile synced to another machine, or another account
+ *   on this computer poking at the profile directory. The ciphertext is
+ *   useless without the key, and the key is a non-extractable CryptoKey: the
+ *   browser will decrypt with it and will not hand its bytes to anyone,
+ *   including this page.
+ *
+ *   IT DOES NOT protect against code already running on this page — a
+ *   malicious extension, or a compromised build of this file — because that
+ *   code can simply ask the vault to decrypt. Nor against someone sitting at
+ *   your unlocked computer. Device-tier storage is a convenience with a
+ *   defined blast radius, not a secret manager.
+ *
+ * ONE SLOT PER presetId::endpointOrigin. Keys are scoped to the host they
+ * authenticate to, so editing a base URL from one provider to another can
+ * never send the first provider's key to the second one.
+ *
+ * The record's binary fields are plain number arrays, not typed arrays:
+ * `api_keys` is a normal store and still goes through createIdbStore's JSON
+ * copy(), which would flatten a Uint8Array into an object with numeric keys.
+ * `tier`, `salt` and `iterations` are reserved for the passphrase tier that is
+ * queued as a follow-up; device-tier records leave the last two null.
+ *
+ * @param {{idb:object, subtle?:SubtleCrypto, getRandomValues?:Function,
+ *          now?:Function}} deps
+ * @returns {{supported:Function, slotId:Function, remember:Function,
+ *            recall:Function, forget:Function, forgetAll:Function,
+ *            has:Function, list:Function}}
+ */
+function createKeyVault(deps) {
+  var d = deps || {};
+  var idb = d.idb || null;
+  var cryptoRef =
+    Object.prototype.hasOwnProperty.call(d, 'crypto') ? d.crypto : typeof crypto !== 'undefined' ? crypto : null;
+  var subtle = d.subtle || (cryptoRef && cryptoRef.subtle) || null;
+  var randomBytes =
+    typeof d.getRandomValues === 'function'
+      ? d.getRandomValues
+      : cryptoRef && typeof cryptoRef.getRandomValues === 'function'
+        ? function (array) {
+            return cryptoRef.getRandomValues(array);
+          }
+        : null;
+  var now =
+    typeof d.now === 'function'
+      ? d.now
+      : function () {
+          return Date.now();
+        };
+
+  var deviceKeyPromise = null;
+
+  /** Feature detection, not a try-and-see: the checkbox is hidden on false. */
+  function supported() {
+    return !!(
+      idb &&
+      typeof idb.get === 'function' &&
+      typeof idb.put === 'function' &&
+      subtle &&
+      typeof subtle.generateKey === 'function' &&
+      typeof subtle.encrypt === 'function' &&
+      typeof subtle.decrypt === 'function' &&
+      randomBytes
+    );
+  }
+
+  /**
+   * presetId + '::' + the endpoint's ORIGIN.
+   *
+   * The origin, not the whole URL: a user who adds a path or a query to the
+   * same host is still talking to the same service, and forcing them to
+   * re-enter the key would train them to stop using the vault. A DIFFERENT
+   * host is a different slot, always. An unparseable endpoint falls back to
+   * its trimmed self, which is still stable and still scoped.
+   */
+  function slotId(presetId, endpoint) {
+    var preset = typeof presetId === 'string' && presetId ? presetId : 'custom';
+    var raw = typeof endpoint === 'string' ? endpoint.trim() : '';
+    var origin = raw;
+    if (raw) {
+      try {
+        origin = new URL(raw).origin;
+      } catch (err) {
+        origin = raw;
+      }
+      if (!origin || origin === 'null') origin = raw;
+    }
+    return preset + '::' + origin;
+  }
+
+  /**
+   * The device key: AES-GCM 256, generated once, NON-EXTRACTABLE.
+   * Non-extractable is the whole design. It rides into IndexedDB by structured
+   * clone (which is why device_key is a rawStore — a JSON round-trip would
+   * reduce it to `{}` and the vault would silently encrypt with nothing).
+   */
+  function ensureDeviceKey() {
+    if (deviceKeyPromise) return deviceKeyPromise;
+    deviceKeyPromise = idb
+      .get(IDB_DEVICE_KEY, DEVICE_KEY_ID)
+      .then(function (record) {
+        if (record && record.key) return record.key;
+        return subtle
+          .generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+          .then(function (key) {
+            return idb
+              .put(IDB_DEVICE_KEY, { id: DEVICE_KEY_ID, ts: now(), key: key, tier: 'device' })
+              .then(function () {
+                return key;
+              });
+          });
+      })
+      .then(null, function (err) {
+        deviceKeyPromise = null;
+        throw err;
+      });
+    return deviceKeyPromise;
+  }
+
+  function toNumbers(bytes) {
+    var out = [];
+    for (var i = 0; i < bytes.length; i += 1) out.push(bytes[i]);
+    return out;
+  }
+
+  function toBytes(numbers) {
+    var array = new Uint8Array(isArrayLike(numbers) ? numbers.length : 0);
+    for (var i = 0; i < array.length; i += 1) array[i] = Number(numbers[i]) & 255;
+    return array;
+  }
+
+  function encodeText(text) {
+    if (typeof TextEncoder === 'function') return new TextEncoder().encode(text);
+    // A UTF-8 encoder is not optional, but neither is running where there is
+    // none: encodeURIComponent's %XX escaping IS UTF-8, byte for byte.
+    var escaped = encodeURIComponent(text);
+    var bytes = [];
+    for (var i = 0; i < escaped.length; i += 1) {
+      if (escaped.charAt(i) === '%') {
+        bytes.push(parseInt(escaped.substr(i + 1, 2), 16));
+        i += 2;
+      } else {
+        bytes.push(escaped.charCodeAt(i));
+      }
+    }
+    return new Uint8Array(bytes);
+  }
+
+  function decodeText(bytes) {
+    if (typeof TextDecoder === 'function') return new TextDecoder().decode(bytes);
+    var escaped = '';
+    for (var i = 0; i < bytes.length; i += 1) escaped += '%' + ('0' + bytes[i].toString(16)).slice(-2);
+    return decodeURIComponent(escaped);
+  }
+
+  return {
+    supported: supported,
+    slotId: slotId,
+
+    /**
+     * Encrypt one key into its slot. Overwrites whatever was there.
+     *
+     * `meta.endpoint` is the full URL the user typed. It is NOT secret — it is
+     * the address, not the credential — and it is stored beside the ciphertext
+     * so a reload can restore the endpoint the key belongs to. Without it the
+     * slot id alone would restore `https://api.groq.com` and silently drop the
+     * `/openai/v1` that makes it work, because the slot is origin-scoped on
+     * purpose (see slotId).
+     *
+     * @param {string} slot
+     * @param {string} plaintext
+     * @param {{endpoint?:string, model?:string}} [meta]
+     * @returns {Promise<{ok:boolean, error?:string}>} — never rejects
+     */
+    remember: function (slot, plaintext, meta) {
+      if (!supported()) {
+        return Promise.resolve({ ok: false, error: 'this browser cannot encrypt, so nothing was stored' });
+      }
+      var text = typeof plaintext === 'string' ? plaintext : '';
+      if (!text) return Promise.resolve({ ok: false, error: 'there is no key to remember' });
+      var parts = String(slot).split('::');
+      var iv = new Uint8Array(VAULT_IV_BYTES);
+      try {
+        randomBytes(iv);
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: 'no secure random source is available' });
+      }
+      return ensureDeviceKey()
+        .then(function (key) {
+          return subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, encodeText(text));
+        })
+        .then(function (cipher) {
+          var extra = meta || {};
+          return idb.put(IDB_KEYS, {
+            id: String(slot),
+            ts: now(),
+            presetId: parts[0] || '',
+            endpointOrigin: parts.slice(1).join('::'),
+            // The address, not the credential. Restored on the next boot.
+            endpoint: typeof extra.endpoint === 'string' ? extra.endpoint.trim() : '',
+            tier: 'device',
+            salt: null,
+            iterations: null,
+            iv: toNumbers(iv),
+            ciphertext: toNumbers(new Uint8Array(cipher)),
+          });
+        })
+        .then(
+          function () {
+            return { ok: true };
+          },
+          function (err) {
+            return { ok: false, error: errorMessage(err) };
+          }
+        );
+    },
+
+    /**
+     * Decrypt one slot.
+     *
+     * A wrong device key surfaces as AES-GCM's OperationError — the
+     * authentication tag failed — and that is reported as "could not be
+     * unlocked". It is NEVER turned into bytes: the alternative to failing
+     * here is handing the user's provider a garbage Authorization header.
+     *
+     * @returns {Promise<{ok:boolean, key?:string, error?:string}>}
+     */
+    recall: function (slot) {
+      if (!supported()) return Promise.resolve({ ok: false, error: 'the vault is unavailable here' });
+      return idb
+        .get(IDB_KEYS, String(slot))
+        .then(function (record) {
+          if (!record || !record.ciphertext) return { ok: false, absent: true };
+          return ensureDeviceKey().then(function (key) {
+            return subtle
+              .decrypt({ name: 'AES-GCM', iv: toBytes(record.iv) }, key, toBytes(record.ciphertext))
+              .then(
+                function (plain) {
+                  return { ok: true, key: decodeText(new Uint8Array(plain)), ts: record.ts };
+                },
+                function () {
+                  return {
+                    ok: false,
+                    error:
+                      'that remembered key could not be unlocked on this device — forget it and enter the key again',
+                  };
+                }
+              );
+          });
+        })
+        .then(null, function (err) {
+          return { ok: false, error: errorMessage(err) };
+        });
+    },
+
+    /** @returns {Promise<boolean>} whether a record was there to forget */
+    forget: function (slot) {
+      if (!idb || typeof idb.delete !== 'function') return Promise.resolve(false);
+      return idb.delete(IDB_KEYS, String(slot)).then(
+        function (existed) {
+          return existed === true;
+        },
+        function () {
+          return false;
+        }
+      );
+    },
+
+    /**
+     * Drop every remembered key AND the device key itself.
+     *
+     * The device key goes too, deliberately: leaving it behind would keep the
+     * thing that decrypts secrets on disk after the user asked for the secrets
+     * to be gone. It is also the only cure for a slot orphaned by an endpoint
+     * edit, which is why the control lives in the storage card where it can be
+     * found without knowing which slot went missing.
+     *
+     * @returns {Promise<{ok:boolean, dropped:number, error?:string}>}
+     */
+    forgetAll: function () {
+      if (!idb || typeof idb.clear !== 'function') return Promise.resolve({ ok: false, dropped: 0 });
+      return idb
+        .clear(IDB_KEYS)
+        .then(function (dropped) {
+          deviceKeyPromise = null;
+          return idb.clear(IDB_DEVICE_KEY).then(
+            function () {
+              return { ok: true, dropped: typeof dropped === 'number' ? dropped : 0 };
+            },
+            function () {
+              return { ok: true, dropped: typeof dropped === 'number' ? dropped : 0 };
+            }
+          );
+        })
+        .then(null, function (err) {
+          return { ok: false, dropped: 0, error: errorMessage(err) };
+        });
+    },
+
+    /** @returns {Promise<boolean>} does this slot hold a record right now? */
+    has: function (slot) {
+      if (!idb || typeof idb.get !== 'function') return Promise.resolve(false);
+      return idb.get(IDB_KEYS, String(slot)).then(
+        function (record) {
+          return !!(record && record.ciphertext);
+        },
+        function () {
+          return false;
+        }
+      );
+    },
+
+    /**
+     * Every slot, WITHOUT any key material — id, preset, origin and timestamp
+     * only. This is what the UI lists, and it is deliberately impossible for
+     * it to leak a secret it never reads.
+     * @returns {Promise<Array<{id:string, presetId:string, endpointOrigin:string, ts:number}>>}
+     */
+    list: function () {
+      if (!idb || typeof idb.getAll !== 'function') return Promise.resolve([]);
+      return idb.getAll(IDB_KEYS).then(
+        function (records) {
+          var out = [];
+          for (var i = 0; i < records.length; i += 1) {
+            var record = records[i];
+            out.push({
+              id: String(record.id),
+              presetId: record.presetId || '',
+              endpointOrigin: record.endpointOrigin || '',
+              endpoint: record.endpoint || '',
+              ts: typeof record.ts === 'number' ? record.ts : 0,
+            });
+          }
+          return out;
+        },
+        function () {
+          return [];
+        }
+      );
+    },
+  };
+}
+
+/**
+ * THE ARMING GATE — the one thing that decides whether a dissection is allowed
+ * to leave this machine.
+ *
+ * WHY THIS EXISTS AS A MODULE AND NOT AS A BOOLEAN IN THE BOOT CLOSURE. It
+ * used to be the latter, and the boolean was written and never read: "Disarm"
+ * blanked the key field and hid the chip, but the ENDPOINT field — which
+ * restoreSlot() had auto-filled from the vault at boot, without the user
+ * typing a character — survived, and the cloud provider only ever checked for
+ * an endpoint. So a disarmed Auto dissection still POSTed the user's prompt to
+ * the remembered provider, now without an auth header. The indicator said one
+ * thing and the network did another.
+ *
+ * THE CONTRACT NOW, in one sentence: `config()` is the ONLY way a cloud
+ * request is assembled, and it returns null unless this gate is armed. Both
+ * the "cloud armed" chip and the resolved-URL line under the endpoint field
+ * are painted from that same predicate, so the UI cannot claim one thing while
+ * the network does another — there is nothing left to disagree with.
+ *
+ *   ARMED BY   a key recovered from the vault (armFromVault, and only while
+ *              the chain that recovered it is still the current one), or ANY
+ *              edit to the four cloud fields (armFromUserEdit — typing is
+ *              consent, and it is what makes manual re-entry after a disarm
+ *              just work).
+ *   DISARMED BY the Disarm button, Forget-this-key and Forget-all-keys, all of
+ *              which clear the fields as well: after a disarm there is no
+ *              vault-sourced value left anywhere for a later bug to pick up.
+ *   NOT ARMED BY a reload on its own, and NOT by this panel being painted.
+ *              boot() calls renderPresetUi(), which draws the datalist, the
+ *              models button and the resolved-URL line and touches neither a
+ *              field nor this flag — UI initialization is not consent, and the
+ *              version that shared one function with the preset-change handler
+ *              set the armed flag on every single reload. restoreSlot() does
+ *              re-fill the fields from the vault (the documented per-session
+ *              convenience), but the arm waits for the key to really decrypt.
+ *
+ * THE EPOCH GUARD — why every async pathway has to carry a token.
+ *
+ * Filling the fields from the vault is a CHAIN: list() the slots, fill them
+ * in, then recall() and decrypt, each step a separate turn of the microtask
+ * queue. A Disarm click landing between two of those steps used to LOSE: the
+ * continuation already in flight refilled the endpoint, the model and the
+ * plaintext key and armed the gate again, milliseconds after the user had
+ * explicitly lowered it. The indicator was back up and the network was live,
+ * against an explicit instruction to the contrary.
+ *
+ * So the gate keeps a monotonic `epoch`, bumped by the two acts that state a
+ * human intent: disarm() and armFromUserEdit(). Any pathway that writes a
+ * field or arms ASYNCHRONOUSLY captures token() when its chain STARTS and
+ * hands that token back on every write — restoreSlot(slots, token),
+ * fillFromVault(fields, token), armFromVault(token). A token from an older
+ * epoch is REFUSED: silently, returning {stale:true}, writing nothing and
+ * arming nothing.
+ *
+ * The check lives in HERE, inside the methods, and deliberately not at the
+ * call sites: a call site that forgets to check is precisely the bug this
+ * replaces, and there is no way to forget a parameter the method demands. It
+ * is also why fillFromVault() exists at all — the recall continuation used to
+ * poke `keyInput.value` directly, and a direct DOM poke is a write the gate
+ * has no opportunity to refuse.
+ *
+ * @param {{presets:object, presetSelect:object, endpointInput:object,
+ *          modelInput:object, keyInput:object, indicator?:object,
+ *          label?:object}} deps injected elements — anything with `.value`,
+ *          `.hidden` and `.textContent` will do, which is how this is tested
+ *          without a browser.
+ * @returns {{isArmed:Function, isLive:Function, token:Function,
+ *            isFresh:Function, fields:Function, armFromVault:Function,
+ *            armFromUserEdit:Function, fillFromVault:Function,
+ *            disarm:Function, config:Function, restoreSlot:Function,
+ *            render:Function}}
+ */
+function createCloudArming(deps) {
+  var d = deps || {};
+  var presets = d.presets && typeof d.presets === 'object' ? d.presets : CLOUD_API_PRESETS;
+  var presetSelect = d.presetSelect || null;
+  var endpointInput = d.endpointInput || null;
+  var modelInput = d.modelInput || null;
+  var keyInput = d.keyInput || null;
+  var indicator = d.indicator || null;
+  var label = d.label || null;
+
+  /** THE gate. Nothing else in this file holds a copy of it. */
+  var armed = false;
+
+  /**
+   * THE epoch: bumped by the two statements of human intent (disarm and
+   * armFromUserEdit), and by nothing else. Starts at 1 rather than 0 so that
+   * an omitted token — `undefined` — can never accidentally look current.
+   */
+  var epoch = 1;
+
+  /** Is a captured token still the current epoch? */
+  function fresh(token) {
+    return token === epoch;
+  }
+
+  /**
+   * The refusal. A fresh object every time, so a caller that hangs on to one
+   * cannot mutate the answer given to the next caller.
+   */
+  function refuse() {
+    return { stale: true };
+  }
+
+  function fieldValue(el) {
+    return el && typeof el.value === 'string' ? el.value : '';
+  }
+
+  function setField(el, value) {
+    if (el) el.value = value;
+  }
+
+  /**
+   * THE ONE WRITER of the four cloud fields. Every public method that changes
+   * a field goes through here, so "which code can fill the endpoint box" has
+   * exactly one answer and the epoch guard sits in front of all of it.
+   *
+   * Anything absent from `fields` is left alone — a vault recall that only
+   * recovered a key must not blank the endpoint the user is looking at.
+   *
+   * @param {{preset?:string, endpoint?:string, model?:string, key?:string}} fields
+   */
+  function writeFields(fields) {
+    var f = fields && typeof fields === 'object' ? fields : {};
+    if (typeof f.preset === 'string') setField(presetSelect, f.preset);
+    if (typeof f.endpoint === 'string') setField(endpointInput, f.endpoint);
+    if (typeof f.model === 'string') setField(modelInput, f.model);
+    if (typeof f.key === 'string') setField(keyInput, f.key);
+  }
+
+  function presetId() {
+    var id = fieldValue(presetSelect);
+    return Object.prototype.hasOwnProperty.call(presets, id) ? id : 'custom';
+  }
+
+  function presetById(id) {
+    return (
+      (Object.prototype.hasOwnProperty.call(presets, id) && presets[id]) || presets.custom || {}
+    );
+  }
+
+  /**
+   * The one predicate: would pressing Dissect right now send anything to a
+   * third party? An armed gate with an empty endpoint is NOT live — and that
+   * matters, because resolveCloudConfig() substitutes the preset's built-in
+   * endpoint for an empty one. Without this clause, deleting the endpoint text
+   * would silently mean "use Gemini's default URL" while the line under the
+   * field said the app was offline.
+   */
+  function isLive() {
+    return armed && fieldValue(endpointInput).trim() !== '';
+  }
+
+  /** Repaint the chip. Called by every transition; safe to call at any time. */
+  function render() {
+    var live = isLive();
+    if (indicator) indicator.hidden = !live;
+    if (live && label) {
+      label.textContent = 'cloud armed: ' + (presetById(presetId()).label || presetId());
+    }
+  }
+
+  return {
+    isArmed: function () {
+      return armed;
+    },
+    isLive: isLive,
+
+    /**
+     * The epoch an async chain must capture BEFORE its first await, and hand
+     * back to every write it makes afterwards.
+     */
+    token: function () {
+      return epoch;
+    },
+
+    /**
+     * Is a captured token still current? For COSMETIC decisions only — a
+     * status message, a button's visibility. The writes and the arm are
+     * refused by the methods below whether or not a call site remembers to
+     * ask, which is the entire point of the design.
+     */
+    isFresh: fresh,
+
+    /**
+     * The four raw field values, armed or not. This is what the vault's slot
+     * address is computed from, and it exists so that nothing outside the gate
+     * needs to reach for `presetSelect.value` on its own.
+     */
+    fields: function () {
+      return {
+        preset: presetId(),
+        endpoint: fieldValue(endpointInput),
+        model: fieldValue(modelInput),
+        key: fieldValue(keyInput),
+      };
+    },
+
+    /**
+     * A remembered key really decrypted into the field — during the chain the
+     * token came from. A Disarm (or a user edit) that landed since then has
+     * moved the epoch on, and this arm is refused.
+     *
+     * @param {number} token from token(), captured at the start of the chain
+     * @returns {{stale:boolean, armed?:boolean}}
+     */
+    armFromVault: function (token) {
+      if (!fresh(token)) return refuse();
+      armed = true;
+      render();
+      return { stale: false, armed: true };
+    },
+
+    /**
+     * Typing in a cloud field, or choosing a provider, is consent — and it is
+     * the newest word on the subject, so it MOVES THE EPOCH: any vault chain
+     * still in flight is now stale and will not be allowed to overwrite what
+     * the user just did.
+     *
+     * `fields` is optional and exists for the preset-change handler, which
+     * fills the endpoint and model from the chosen provider. Filling and
+     * arming in one call is deliberate: it makes the write and the epoch bump
+     * a single indivisible act.
+     *
+     * @param {{preset?:string, endpoint?:string, model?:string, key?:string}} [fields]
+     * @returns {{stale:boolean, armed:boolean}}
+     */
+    armFromUserEdit: function (fields) {
+      epoch += 1;
+      if (fields) writeFields(fields);
+      armed = true;
+      render();
+      return { stale: false, armed: true };
+    },
+
+    /**
+     * The ONLY way a vault-sourced value reaches a cloud field. The recall
+     * continuation used to assign `keyInput.value` directly, which is what
+     * let a decrypted plaintext key land in the box milliseconds after the
+     * user pressed Disarm. Routed through here it carries a token, and a
+     * stale token writes nothing.
+     *
+     * @param {{preset?:string, endpoint?:string, model?:string, key?:string}} fields
+     * @param {number} token from token(), captured at the start of the chain
+     * @returns {{stale:boolean}}
+     */
+    fillFromVault: function (fields, token) {
+      if (!fresh(token)) return refuse();
+      writeFields(fields);
+      render();
+      return { stale: false };
+    },
+
+    /**
+     * One click and the cloud config is gone: not merely ignored, GONE. The
+     * key, the endpoint and the model all go, because after a disarm the only
+     * safe amount of vault-sourced state to keep is none.
+     *
+     * It also moves the epoch, which is the half that makes it stick: every
+     * vault chain in flight at this instant is now carrying a stale token and
+     * will be refused when it tries to put any of that state back.
+     */
+    disarm: function () {
+      epoch += 1;
+      armed = false;
+      setField(keyInput, '');
+      setField(endpointInput, '');
+      setField(modelInput, '');
+      render();
+    },
+
+    /**
+     * The ONLY assembler of a cloud request. null means "there is no cloud
+     * config" — and null is deliberate rather than an empty object, because an
+     * empty object still carries a preset id that resolveCloudConfig() would
+     * expand into that provider's default endpoint.
+     */
+    config: function () {
+      if (!isLive()) return null;
+      return {
+        preset: presetId(),
+        endpoint: fieldValue(endpointInput),
+        model: fieldValue(modelInput),
+        key: fieldValue(keyInput),
+      };
+    },
+
+    /**
+     * Per-session repopulation from the vault.
+     *
+     * A remembered key is addressed by presetId::endpointOrigin, and after a
+     * reload the endpoint field is empty — so there is nothing to unlock
+     * against until the user retypes the URL they already told us once. The
+     * cure is NOT a new localStorage key (§6.4 forbids one, and an endpoint is
+     * not lightweight UI state): the slot record already carries its own
+     * preset and origin, so the endpoint is restored FROM THE VAULT.
+     *
+     * Only when there is exactly ONE remembered slot. With two, picking one
+     * would be guessing which provider the user meant, and guessing wrong
+     * arms the wrong endpoint — the one outcome this whole feature must not
+     * produce. With several, the fields stay blank and each key unlocks the
+     * moment its endpoint is selected or typed.
+     *
+     * It fills fields; it does NOT arm. The arm waits for the key to decrypt.
+     *
+     * It is also the first write of an async chain (keyVault.list() has just
+     * resolved), so it takes the chain's token: a Disarm that landed while the
+     * database was being read refuses this restore outright, and the caller
+     * sees {stale:true} instead of an applied slot.
+     *
+     * @param {Array<object>} slots keyVault.list() output
+     * @param {number} token from token(), captured at the start of the chain
+     * @returns {null|{stale:true}|{presetId:string, preset:object,
+     *            endpoint:string, stale:false}}
+     */
+    restoreSlot: function (slots, token) {
+      if (!fresh(token)) return refuse();
+      if (!isArrayLike(slots) || slots.length !== 1) return null;
+      var slot = slots[0] || {};
+      var id = presetId();
+      if (slot.presetId && Object.prototype.hasOwnProperty.call(presets, slot.presetId)) {
+        id = slot.presetId;
+        writeFields({ preset: id });
+      }
+      var preset = presetById(id);
+      // Prefer the preset's own full endpoint when it names the same host —
+      // it carries the path (and, for Gemini, the {model} template) that a
+      // bare origin would lose.
+      var endpoint = preset.endpoint || '';
+      var origin = '';
+      try {
+        origin = endpoint ? new URL(endpoint).origin : '';
+      } catch (err) {
+        origin = '';
+      }
+      if (!endpoint || origin !== slot.endpointOrigin) {
+        endpoint = slot.endpoint || slot.endpointOrigin || '';
+      }
+      writeFields({ endpoint: endpoint });
+      render();
+      return { presetId: id, preset: preset, endpoint: endpoint, stale: false };
+    },
+
+    render: render,
+  };
+}
+
+/**
+ * THE VAULT RESTORE CHAIN — boot-time and slot-change auto-unlock, as a unit
+ * a test can interleave a Disarm click with.
+ *
+ * WHY IT IS OUT HERE AND NOT IN boot(). It used to be two closures inside the
+ * boot IIFE, reachable only through a real browser with a real IndexedDB and a
+ * real clock — which is to say not reachable by any test in this repo at all.
+ * Both of the blocking races found in review lived in the gaps between its
+ * awaits, and no suite could even express the interleaving that produced them.
+ * Everything it needs is injected: the gate, the vault, and the two scraps of
+ * panel chrome it toggles.
+ *
+ * IT NEVER TOUCHES A FIELD DIRECTLY. Every write goes through the gate,
+ * carrying the token captured before the chain's first await, so a Disarm — or
+ * a preset change, or a keystroke — landing anywhere inside the chain wins,
+ * and the chain is abandoned rather than allowed to finish over the top of it.
+ *
+ * @param {{arming:object, vault:object|Function, rememberBox?:object,
+ *          keyForgetBtn?:object, onPreset?:Function, onSync?:Function,
+ *          onStatus?:Function}} deps `vault` may be a function, because the
+ *          vault does not exist until IndexedDB opens.
+ * @returns {{recall:Function, restore:Function}}
+ */
+function createVaultRestore(deps) {
+  var d = deps || {};
+  var arming = d.arming;
+  var rememberBox = d.rememberBox || null;
+  var keyForgetBtn = d.keyForgetBtn || null;
+  var onPreset = typeof d.onPreset === 'function' ? d.onPreset : function () {};
+  var onSync = typeof d.onSync === 'function' ? d.onSync : function () {};
+  var onStatus = typeof d.onStatus === 'function' ? d.onStatus : function () {};
+
+  /** The vault, or null where there is none or it cannot work here. */
+  function vault() {
+    var v = typeof d.vault === 'function' ? d.vault() : d.vault;
+    return v && typeof v.supported === 'function' && v.supported() ? v : null;
+  }
+
+  /** The slot the four cloud fields currently address. */
+  function slotId() {
+    var v = vault();
+    if (!v) return '';
+    var f = arming.fields();
+    return v.slotId(f.preset, f.endpoint);
+  }
+
+  /**
+   * Auto-unlock the slot the fields currently address. Runs on boot, on a
+   * preset change and when the endpoint field loses focus — the three moments
+   * the addressed slot can change.
+   *
+   * Only the SUCCESS branch touches the gate. A slot with nothing in it is not
+   * a reason to disarm an endpoint the user typed by hand; the gate is lowered
+   * by the three explicit actions that clear the fields, and by nothing else.
+   *
+   * @param {number} [token] the chain's epoch. Omitted means "this call IS the
+   *        start of the chain", which is true of the two user-gesture callers.
+   * @returns {Promise<boolean>} did a key really land in the field?
+   */
+  function recall(token) {
+    var t = typeof token === 'number' ? token : arming.token();
+    if (keyForgetBtn) keyForgetBtn.hidden = true;
+    var v = vault();
+    if (!v) return Promise.resolve(false);
+    var slot = slotId();
+    if (!slot || slot.indexOf('::') === slot.length - 2) {
+      if (rememberBox) rememberBox.checked = false;
+      arming.render();
+      return Promise.resolve(false);
+    }
+    return v.recall(slot).then(function (outcome) {
+      if (outcome && outcome.ok) {
+        // Through the gate, never onto `.value`: this is the write a Disarm
+        // landing mid-decrypt has to be able to refuse, and the plaintext key
+        // is exactly the thing that must not appear in a cleared field.
+        if (arming.fillFromVault({ key: outcome.key }, t).stale) return false;
+        if (arming.armFromVault(t).stale) return false;
+        if (rememberBox) rememberBox.checked = true;
+        if (keyForgetBtn) keyForgetBtn.hidden = false;
+        onSync();
+        return true;
+      }
+      // Cosmetics only past this point — nothing below writes a field or arms
+      // anything — but a warning about a vault the user has just disarmed is
+      // noise, so a stale chain says nothing at all.
+      if (!arming.isFresh(t)) return false;
+      if (rememberBox) rememberBox.checked = false;
+      if (outcome && !outcome.absent && outcome.error) {
+        // A slot that will not decrypt is reported, never quietly ignored: the
+        // user needs to know why their remembered key stopped working.
+        if (keyForgetBtn) keyForgetBtn.hidden = false;
+        onStatus(outcome.error, 'warn');
+      }
+      arming.render();
+      onSync();
+      return false;
+    });
+  }
+
+  /**
+   * Boot-time auto-unlock. The single-slot decision and the field-filling both
+   * live in the gate; what stays here is the panel chrome only the DOM knows
+   * about (the suggestion datalist, the model-list button). Note the ORDER:
+   * fields first, arm only if the key really decrypts, which is what recall()
+   * decides on the last line.
+   *
+   * @returns {Promise<boolean>}
+   */
+  function restore() {
+    var v = vault();
+    if (!v) return Promise.resolve(false);
+    // Captured BEFORE the first await and carried to the last write. Every
+    // refusal below is the gate's, not this function's: if this function
+    // forgot to check, the writes would still not happen.
+    var t = arming.token();
+    return v.list().then(function (slots) {
+      var applied = arming.restoreSlot(slots, t);
+      if (applied && applied.stale) return false;
+      if (!applied) return recall(t);
+      if (!arming.fields().model) {
+        arming.fillFromVault({ model: applied.preset.defaultModel || '' }, t);
+      }
+      onPreset(applied.preset);
+      onSync();
+      return recall(t);
+    });
+  }
+
+  return { recall: recall, restore: restore };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -15809,6 +18517,32 @@ function createRibbonRenderer(deps) {
     return worker;
   }
 
+  /**
+   * The on-device model's worker. Same inline-text -> Blob -> Worker pattern as
+   * the DSP one, with two deliberate differences:
+   *   {type:'module'} — the inference runtime is an ES module, so the worker
+   *     must be one to import it;
+   *   the object URL is revoked when the worker is terminated, not one line
+   *     later. A classic worker captures its script synchronously at
+   *     construction; a module worker resolves its graph asynchronously, and
+   *     revoking underneath that has been observed to fail the load.
+   */
+  function spawnAiWorker() {
+    const src = $('ai-worker-src').textContent;
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const worker = new Worker(url, { type: 'module' });
+    const terminate = worker.terminate.bind(worker);
+    worker.terminate = function () {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        /* revoking twice is harmless; failing to terminate would not be */
+      }
+      return terminate();
+    };
+    return worker;
+  }
+
   function boot() {
     $('app-version').textContent = 'v' + APP_VERSION;
 
@@ -16850,11 +19584,80 @@ function createRibbonRenderer(deps) {
     const addRow = $('dissect-add-row');
     const safeNote = $('dissect-safe-note');
 
+    /* --- Mode 1b: the on-device model card --- */
+    const localConfig = $('dissect-local-config');
+    const localNote = $('dissect-local-note');
+    const localModelSelect = $('dissect-local-model');
+    const localDownloadBtn = $('btn-local-download');
+    const localCancelBtn = $('btn-local-cancel');
+    const localRemoveBtn = $('btn-local-remove');
+    const localProgressRow = $('dissect-local-progress-row');
+    const localProgressBar = $('dissect-local-progress');
+    const localProgressText = $('dissect-local-progress-text');
+    const localStatus = $('dissect-local-status');
+    const localPersistNote = $('dissect-local-persist');
+
+    /* --- cloud config: resolved URL, model list, key vault --- */
+    const resolvedUrlLine = $('dissect-resolved-url');
+    const endpointSuggestions = $('dissect-endpoint-suggestions');
+    const cloudModelList = $('dissect-model-list');
+    const modelsRefreshBtn = $('btn-models-refresh');
+    const rememberRow = $('dissect-remember-row');
+    const rememberBox = $('dissect-remember');
+    const rememberCopy = $('dissect-remember-copy');
+    const keyForgetBtn = $('btn-key-forget');
+    const armedIndicator = $('dissect-armed');
+    const armedLabel = $('dissect-armed-label');
+    const disarmBtn = $('btn-cloud-disarm');
+    const vaultRow = $('vault-row');
+    const vaultNote = $('vault-note');
+    const vaultForgetAllBtn = $('btn-vault-forget-all');
+
     /* The last dissection, kept in both forms: what the engine said, and what
      * Safe Mode will actually let into the prompt (FDD #24). */
     let lastDissectInput = '';
     let lastResult = null;
     let lastSafeResult = null;
+
+    /* -------------------------------------------------------------------
+     * MODE 1b state.
+     *
+     * The engine and the vault both need the IndexedDB store, which is built
+     * further down in this same boot (the persistence section owns it). They
+     * are therefore created by attachAiStorage(), called from there, and until
+     * then these stay null. Everything below null-guards rather than assuming,
+     * because "not wired up yet" and "not supported here" must produce the
+     * same honest, non-throwing UI.
+     * ------------------------------------------------------------------- */
+    let localEngine = null;
+    let keyVault = null;
+    /** WebGPU capabilities, probed once. null until the probe resolves. */
+    let gpuCaps = null;
+
+    /*
+     * A stable handle the dissector holds from construction. It delegates to
+     * the real engine once there is one; before that it answers 'unsupported',
+     * which the provider reads as {configured:false} — never attempted, so the
+     * chain falls through to the taxonomy engine in silence.
+     */
+    const localLlmHandle = {
+      status: function () {
+        return localEngine ? localEngine.status() : 'unsupported';
+      },
+      statusDetail: function () {
+        return localEngine ? localEngine.statusDetail() : 'the on-device model has not started up yet';
+      },
+      generate: function (request) {
+        if (!localEngine) {
+          return Promise.resolve({
+            ok: false,
+            configured: false,
+            error: 'the on-device model has not started up yet',
+          });
+        }
+        return localEngine.generate(request);
+      },
+    };
 
     const dissector = createDissector({
       // The real fetch is injected here and ONLY here; the engine itself never
@@ -16865,6 +19668,7 @@ function createRibbonRenderer(deps) {
               return fetch(url, options);
             }
           : undefined,
+      localLlm: localLlmHandle,
       toast: function (message, kind) {
         toastHost.show(message, kind);
       },
@@ -16873,6 +19677,12 @@ function createRibbonRenderer(deps) {
     const MODE_DETAIL = {};
     const modeList = dissector.listModes();
     for (let i = 0; i < modeList.length; i += 1) MODE_DETAIL[modeList[i].id] = modeList[i].detail;
+
+    /** One place the dissector panel's status line is written. */
+    function setDissectStatus(text, tone) {
+      dissectStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      dissectStatus.textContent = text;
+    }
 
     // The provider dropdown is generated from the registry, so adding a cloud
     // provider is a single entry in CLOUD_API_PRESETS and nothing else.
@@ -16884,24 +19694,678 @@ function createRibbonRenderer(deps) {
       option.textContent = preset.label;
       presetSelect.appendChild(option);
     }
-    // Defaults to the blank custom preset: with no endpoint, Auto mode stays
-    // completely offline until the user deliberately configures a provider.
+    // Defaults to the blank OpenAI-compatible preset: with no endpoint, Auto
+    // mode stays completely offline until the user configures a provider.
     presetSelect.value = 'custom';
 
-    function applyPreset() {
-      const preset = CLOUD_API_PRESETS[presetSelect.value] || CLOUD_API_PRESETS.custom;
-      endpointInput.value = preset.endpoint || '';
-      modelInput.value = preset.defaultModel || '';
+    /** The active preset object, never undefined. */
+    function activePreset() {
+      return CLOUD_API_PRESETS[presetSelect.value] || CLOUD_API_PRESETS.custom;
     }
-    presetSelect.addEventListener('change', applyPreset);
+
+    /**
+     * THE ARMING GATE. Every cloud request in this panel is assembled by
+     * cloudArming.config() and by nothing else, so "disarmed" is a fact about
+     * the network rather than a claim made by an indicator.
+     */
+    const cloudArming = createCloudArming({
+      presets: CLOUD_API_PRESETS,
+      presetSelect: presetSelect,
+      endpointInput: endpointInput,
+      modelInput: modelInput,
+      keyInput: keyInput,
+      indicator: armedIndicator,
+      label: armedLabel,
+    });
+
+    /** Offer the preset's known base URLs on the endpoint field. */
+    function renderEndpointSuggestions(preset) {
+      endpointSuggestions.textContent = '';
+      const list = isArrayLike(preset.suggestions) ? preset.suggestions : [];
+      for (let i = 0; i < list.length; i += 1) {
+        const option = document.createElement('option');
+        option.value = list[i].baseUrl;
+        option.label = list[i].label;
+        endpointSuggestions.appendChild(option);
+      }
+    }
+
+    /**
+     * Show the URL the next request will ACTUALLY go to.
+     *
+     * A base URL and a full endpoint are both things people paste, and the
+     * difference between them is a 404 that looks like a dead provider. This
+     * line is the difference made visible before the request instead of after.
+     *
+     * It reads cloudArming.config() — the SAME assembler the request uses — so
+     * a disarmed panel says so here too, even while the endpoint field still
+     * shows the URL the vault put there.
+     */
+    function syncResolvedUrl() {
+      const live = cloudArming.config();
+      resolvedUrlLine.className = 'config-resolved';
+      if (!live) {
+        resolvedUrlLine.textContent = endpointInput.value.trim()
+          ? 'Disarmed — nothing is sent to this endpoint until you edit one of these fields.'
+          : 'No endpoint set — Auto mode stays completely offline until you fill this in.';
+        return;
+      }
+      const cfg = resolveCloudConfig(live);
+      let url = cfg.endpoint;
+      try {
+        if (typeof cfg.preset.buildUrl === 'function') url = cfg.preset.buildUrl(cfg.endpoint, cfg.model);
+      } catch (err) {
+        resolvedUrlLine.className = 'config-resolved err';
+        resolvedUrlLine.textContent = 'That endpoint could not be resolved: ' + errorMessage(err);
+        return;
+      }
+      let parsed = null;
+      try {
+        parsed = new URL(url);
+      } catch (err) {
+        parsed = null;
+      }
+      if (!parsed) {
+        resolvedUrlLine.className = 'config-resolved err';
+        resolvedUrlLine.textContent = 'Not a complete URL yet: ' + url;
+        return;
+      }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        resolvedUrlLine.className = 'config-resolved err';
+        resolvedUrlLine.textContent = 'Only http and https endpoints are called; this one is ' + parsed.protocol;
+        return;
+      }
+      resolvedUrlLine.textContent = 'Will POST to ';
+      const strong = document.createElement('strong');
+      strong.textContent = url;
+      resolvedUrlLine.appendChild(strong);
+      if (!cfg.model) {
+        resolvedUrlLine.appendChild(document.createTextNode(' — no model name yet.'));
+      }
+    }
+
+    /**
+     * Fetch the provider's model list. USER-TRIGGERED ONLY: this button is the
+     * only thing that calls it, and no code path reaches it on load.
+     */
+    function refreshModelList() {
+      const preset = activePreset();
+      // Resolved into a variable first, deliberately: a URL literal handed
+      // straight to fetch() trips verify-single-file rule 3 even when the
+      // literal itself lives inside the registry.
+      const target = typeof preset.modelsEndpoint === 'string' ? preset.modelsEndpoint : '';
+      if (!target) {
+        setDissectStatus(preset.label + ' publishes no model list — type the model name instead.', 'warn');
+        return;
+      }
+      if (typeof fetch !== 'function') {
+        setDissectStatus('this browser context has no fetch(), so the model list cannot be read.', 'warn');
+        return;
+      }
+      modelsRefreshBtn.disabled = true;
+      setDissectStatus('reading the model list from ' + preset.label + '…');
+      // No auth header: the list is public, and sending a key to fetch a
+      // catalogue would spend the user's secret on a convenience.
+      fetch(target, { method: 'GET', headers: { Accept: 'application/json' } })
+        .then(function (response) {
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          return response.json();
+        })
+        .then(function (json) {
+          const rows = json && isArrayLike(json.data) ? json.data : isArrayLike(json) ? json : [];
+          cloudModelList.textContent = '';
+          let count = 0;
+          for (let i = 0; i < rows.length; i += 1) {
+            const row = rows[i];
+            const id = row && typeof row.id === 'string' ? row.id : '';
+            if (!id) continue;
+            const option = document.createElement('option');
+            option.value = id;
+            const context = row.context_length || (row.top_provider && row.top_provider.context_length);
+            option.label = context ? id + ' — ' + context + ' token context' : id;
+            cloudModelList.appendChild(option);
+            count += 1;
+          }
+          modelsRefreshBtn.disabled = false;
+          setDissectStatus(
+            count
+              ? count + ' models offered by ' + preset.label + ' — the Model box now suggests them.'
+              : 'that model list came back empty; the Model box still takes any name.'
+          );
+        })
+        .then(null, function (err) {
+          modelsRefreshBtn.disabled = false;
+          // The free-text input stays fully usable: a failed catalogue read
+          // must never block typing a model name that works.
+          setDissectStatus(
+            'could not read the model list (' + errorMessage(err) + ') — type the model name instead.',
+            'warn'
+          );
+        });
+    }
+
+    /**
+     * Paint the panel chrome for whichever preset is selected: the endpoint
+     * suggestion datalist, the model-list button, and the resolved-URL line.
+     *
+     * IT ARMS NOTHING AND FILLS NOTHING, which is the whole reason it exists
+     * as its own function. boot() calls this — and only this. The version that
+     * shared one function with the preset-change handler below set the armed
+     * flag on EVERY reload, from UI initialization rather than from consent,
+     * flatly contradicting the gate's own documented contract.
+     */
+    function renderPresetUi() {
+      const preset = activePreset();
+      renderEndpointSuggestions(preset);
+      cloudModelList.textContent = '';
+      modelsRefreshBtn.disabled = !preset.modelsEndpoint;
+      modelsRefreshBtn.title = preset.modelsEndpoint
+        ? 'GET ' + preset.modelsEndpoint + ' — only when you press this'
+        : preset.label + ' publishes no model list';
+      syncResolvedUrl();
+    }
+
+    /**
+     * The user picked a provider from the dropdown. THIS is the consent half.
+     *
+     * Picking a provider is the same act of consent as typing its URL: it
+     * fills the endpoint field, so it arms the gate — and the fill goes
+     * through the gate in the same call, so the write and the epoch bump are
+     * one indivisible act that any vault chain in flight now loses to.
+     *
+     * Reachable from the `change` event on #dissect-preset and nowhere else.
+     */
+    function onPresetChange() {
+      const preset = activePreset();
+      cloudArming.armFromUserEdit({
+        endpoint: preset.endpoint || '',
+        model: preset.defaultModel || '',
+      });
+      renderPresetUi();
+      recallKeyForSlot();
+    }
+
+    /*
+     * Typing is consent — and it is what makes a disarm recoverable without a
+     * reload: re-enter an endpoint and the gate is live again, with the chip
+     * back to say so.
+     */
+    function onCloudFieldEdit() {
+      cloudArming.armFromUserEdit();
+      syncResolvedUrl();
+    }
+    presetSelect.addEventListener('change', onPresetChange);
+    endpointInput.addEventListener('input', onCloudFieldEdit);
+    modelInput.addEventListener('input', onCloudFieldEdit);
+    keyInput.addEventListener('input', onCloudFieldEdit);
+    endpointInput.addEventListener('blur', function () {
+      syncResolvedUrl();
+      recallKeyForSlot();
+    });
+    modelsRefreshBtn.addEventListener('click', refreshModelList);
 
     function syncModeUi() {
       const mode = dissectMode.value;
       cloudConfig.hidden = !(mode === 'cloud' || mode === 'auto');
       ollamaConfig.hidden = mode !== 'ollama';
+      localConfig.hidden = !(mode === 'local-llm' || mode === 'auto');
       dissectModeDetail.textContent = MODE_DETAIL[mode] || '';
     }
     dissectMode.addEventListener('change', syncModeUi);
+
+    /* ====================================================================
+     * The on-device model card (FEATURE-MECHANICS §7.1)
+     *
+     * Its only job before the download is to be honest about the cost, and
+     * its only job after it is to be honest about the state. There is no
+     * spinner standing in for an unknown and no "ready" that means "probably".
+     * ==================================================================== */
+
+    // The picker is generated from the registry, so offering a third model is
+    // one entry in LOCAL_MODEL_SOURCES and nothing else.
+    const localModelIdList = localModelIds();
+    for (let m = 0; m < localModelIdList.length; m += 1) {
+      const model = LOCAL_MODEL_SOURCES.weights.models[localModelIdList[m]];
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = model.label;
+      option.title = model.note;
+      localModelSelect.appendChild(option);
+    }
+    localModelSelect.value = LOCAL_MODEL_SOURCES.weights.defaultModelId;
+
+    /** What pressing Download right now would actually fetch. */
+    function previewVariant() {
+      return pickModelVariant(gpuCaps, localModelSelect.value);
+    }
+
+    function phaseLabel(phase) {
+      if (phase === 'runtime') return 'inference runtime';
+      if (phase === 'warmup') return 'warming up';
+      return 'model weights';
+    }
+
+    function setLocalStatus(text, tone) {
+      localStatus.className = tone ? 'dissect-status ' + tone : 'dissect-status';
+      localStatus.textContent = text;
+    }
+
+    /**
+     * Repaint the whole card from the engine's state. Called on every status
+     * change rather than patched in pieces, so the five states cannot drift
+     * into a sixth that shows a Download button next to a Remove button.
+     */
+    function renderLocalCard() {
+      const status = localEngine ? localEngine.status() : 'absent';
+      const manifest = localEngine ? localEngine.manifest() : null;
+      const variant = previewVariant();
+      const downloaded = status === 'ready' && manifest;
+
+      localModelSelect.disabled = status === 'downloading' || status === 'ready';
+
+      if (status === 'unsupported') {
+        localNote.textContent =
+          'The on-device model cannot run in this browser: ' +
+          (localEngine ? localEngine.statusDetail() : 'no worker, WebAssembly or Web Crypto here') +
+          '. Dissections answer from the embedded taxonomy engine instead, which needs none of that.';
+        localDownloadBtn.hidden = true;
+        localCancelBtn.hidden = true;
+        localRemoveBtn.hidden = true;
+        localProgressRow.hidden = true;
+        localPersistNote.hidden = true;
+        return;
+      }
+
+      if (downloaded) {
+        localNote.textContent =
+          'Ready: ' +
+          manifest.modelLabel +
+          ', ' +
+          variant.label +
+          ', held in this browser’s storage (about ' +
+          formatBytes(manifest.bytes) +
+          '). Dissections run entirely on this machine — no API key, no request leaves the tab.';
+        localDownloadBtn.hidden = true;
+        localCancelBtn.hidden = true;
+        localRemoveBtn.hidden = false;
+        localProgressRow.hidden = true;
+        return;
+      }
+
+      if (status === 'downloading') {
+        localNote.textContent =
+          'Downloading ' +
+          variant.modelLabel +
+          ' (' +
+          variant.label +
+          '). You can keep working — dissections answer from the taxonomy engine until this finishes.';
+        localDownloadBtn.hidden = true;
+        localCancelBtn.hidden = false;
+        localRemoveBtn.hidden = true;
+        localProgressRow.hidden = false;
+        return;
+      }
+
+      // 'absent' and 'failed' both offer the download; only the wording of the
+      // status line below differs, and that is set where the failure happened.
+      localNote.textContent =
+        'Not downloaded. ' +
+        variant.modelLabel +
+        ' is about ' +
+        formatBytes(variant.bytes) +
+        ' as a one-time download (' +
+        variant.label +
+        ' — ' +
+        variant.reason +
+        '), plus ' +
+        formatBytes(LOCAL_MODEL_SOURCES.runtime.bytes) +
+        ' for the inference runtime, whose bytes are checked against a digest pinned in this file ' +
+        'before they are allowed to run. It is cached in this browser, not saved as a file you can ' +
+        'move. Nothing is fetched until you press the button.';
+      localDownloadBtn.textContent = 'Download ' + variant.modelLabel + ' (' + formatBytes(variant.bytes) + ')';
+      localDownloadBtn.hidden = false;
+      localCancelBtn.hidden = true;
+      localRemoveBtn.hidden = true;
+      localProgressRow.hidden = true;
+    }
+
+    function renderProgress(update) {
+      const total = typeof update.total === 'number' && update.total > 0 ? update.total : 0;
+      const loaded = typeof update.loaded === 'number' && update.loaded > 0 ? update.loaded : 0;
+      const label = phaseLabel(update.phase);
+      // The file name is only worth showing when it says something the phase
+      // label does not — "inference runtime · inference runtime" is noise.
+      const file = update.file && update.file !== label ? ' · ' + update.file : '';
+      localProgressRow.hidden = false;
+
+      if (update.phase === 'warmup') {
+        // The warm-up counts one token, not bytes, and "1 bytes of 1 bytes"
+        // would be a unit that is simply wrong.
+        localProgressBar.value = total ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+        localProgressText.textContent = label + (loaded >= total && total ? ' · done' : '') + file;
+        return;
+      }
+      if (total) {
+        const percent = Math.min(100, Math.round((loaded / total) * 100));
+        localProgressBar.value = percent;
+        localProgressText.textContent =
+          label + ' · ' + formatBytes(loaded) + ' of ' + formatBytes(total) + ' (' + percent + '%)' + file;
+      } else {
+        // No Content-Length: an indeterminate bar is the honest rendering of
+        // "bytes are arriving and nobody has said how many there will be".
+        localProgressBar.removeAttribute('value');
+        localProgressText.textContent = label + ' · ' + formatBytes(loaded) + ' so far' + file;
+      }
+    }
+
+    localModelSelect.addEventListener('change', function () {
+      if (localEngine) localEngine.selectModel(localModelSelect.value);
+      renderLocalCard();
+    });
+
+    localDownloadBtn.addEventListener('click', function () {
+      if (!localEngine) return;
+      setLocalStatus('');
+      localPersistNote.hidden = true;
+      localDownloadBtn.disabled = true;
+      // THE CONSENT CLICK. This is the only call in the app that passes
+      // consent:true, and the only one that can start a download.
+      localEngine.ensureReady({ consent: true, modelId: localModelSelect.value }).then(
+        function (outcome) {
+          localDownloadBtn.disabled = false;
+          if (outcome.ready) {
+            setLocalStatus('ready — ' + Math.round((outcome.ms || 0) / 1000) + 's to load.');
+            if (outcome.persistenceKnown && outcome.persisted === false) {
+              localPersistNote.hidden = false;
+              localPersistNote.textContent =
+                'This browser would not mark the storage as persistent, so it may evict the model when ' +
+                'space runs short — it would then need re-downloading. Nothing else you have saved is ' +
+                'at extra risk; the model is simply the biggest thing here.';
+            }
+          } else if (outcome.reason === 'quota') {
+            setLocalStatus(outcome.detail, 'err');
+          } else if (outcome.reason === 'unsupported') {
+            setLocalStatus(outcome.detail, 'err');
+          } else {
+            setLocalStatus(outcome.detail || 'the download did not finish.', 'err');
+          }
+          renderLocalCard();
+        },
+        function (err) {
+          localDownloadBtn.disabled = false;
+          setLocalStatus('the download failed: ' + errorMessage(err), 'err');
+          renderLocalCard();
+        }
+      );
+    });
+
+    localCancelBtn.addEventListener('click', function () {
+      if (!localEngine) return;
+      localEngine.cancel();
+      setLocalStatus('download cancelled — nothing was kept.', 'warn');
+      renderLocalCard();
+    });
+
+    localRemoveBtn.addEventListener('click', function () {
+      if (!localEngine) return;
+      localRemoveBtn.disabled = true;
+      localEngine.remove().then(function (outcome) {
+        localRemoveBtn.disabled = false;
+        setLocalStatus(
+          outcome.removed
+            ? 'removed — the space is back, and dissections answer from the taxonomy engine again.'
+            : 'nothing was removed: ' + (outcome.detail || 'the cache was already empty.'),
+          outcome.removed ? '' : 'warn'
+        );
+        renderLocalCard();
+      });
+    });
+
+    /* ====================================================================
+     * The key vault UI (opt-in, device tier)
+     * ==================================================================== */
+
+    /**
+     * The vault auto-unlock, as an injectable unit. Both of the boot-time
+     * races found in review lived in the gaps between this chain's awaits, so
+     * it is deliberately NOT a closure in here: tests/ai-dissector.test.js
+     * builds it against a vault whose promises the test resolves by hand and
+     * lands a Disarm click inside each gap.
+     */
+    const vaultRestore = createVaultRestore({
+      arming: cloudArming,
+      // Late-bound on purpose: the vault does not exist until attachAiStorage()
+      // opens the database, and the endpoint field can blur before that.
+      vault: function () {
+        return keyVault;
+      },
+      rememberBox: rememberBox,
+      keyForgetBtn: keyForgetBtn,
+      onPreset: function (preset) {
+        renderEndpointSuggestions(preset);
+        modelsRefreshBtn.disabled = !preset.modelsEndpoint;
+      },
+      onSync: syncResolvedUrl,
+      onStatus: setDissectStatus,
+    });
+
+    /** The slot the four cloud fields currently address. */
+    function currentSlot() {
+      if (!keyVault) return '';
+      const f = cloudArming.fields();
+      return keyVault.slotId(f.preset, f.endpoint);
+    }
+
+    /**
+     * Auto-unlock for the slot the fields address now. Runs on a preset change
+     * and on endpoint blur — both user gestures, so the chain starts here and
+     * takes today's epoch — and from restore(), which passes its own.
+     *
+     * @param {number} [token]
+     */
+    function recallKeyForSlot(token) {
+      return vaultRestore.recall(token);
+    }
+
+    /** Boot-time auto-unlock. @see createVaultRestore */
+    function restoreRememberedSlot() {
+      return vaultRestore.restore();
+    }
+
+    function renderVaultRow() {
+      if (!keyVault || !keyVault.supported()) {
+        vaultNote.textContent =
+          'Remembering API keys needs Web Crypto and IndexedDB, and this browser context has neither, ' +
+          'so no key has ever been stored here.';
+        vaultForgetAllBtn.hidden = true;
+        return Promise.resolve();
+      }
+      return keyVault.list().then(function (slots) {
+        vaultForgetAllBtn.hidden = slots.length === 0;
+        if (!slots.length) {
+          vaultNote.textContent =
+            'No API keys are remembered on this device. When you tick “Remember on this device” in the ' +
+            'dissector, the key is encrypted into this browser’s database — never into an export or a backup.';
+          return;
+        }
+        const names = [];
+        for (let i = 0; i < slots.length; i += 1) {
+          names.push(slots[i].endpointOrigin || slots[i].presetId || slots[i].id);
+        }
+        vaultNote.textContent =
+          slots.length +
+          (slots.length === 1 ? ' API key is' : ' API keys are') +
+          ' remembered on this device (' +
+          names.join(', ') +
+          '), encrypted in this browser’s database. No export, backup or workspace snapshot contains them.';
+      });
+    }
+
+    rememberBox.addEventListener('change', function () {
+      if (!keyVault || !keyVault.supported()) return;
+      const slot = currentSlot();
+      // Storing is async, so the arm below is a CHAIN too: capture the epoch
+      // now, before the database write, and hand it back afterwards. A Disarm
+      // landing while IndexedDB is busy would otherwise be undone by this
+      // handler's own success branch — the same race, one door along.
+      const token = cloudArming.token();
+      if (rememberBox.checked) {
+        if (!keyInput.value) {
+          rememberBox.checked = false;
+          setDissectStatus('enter the API key first, then tick the box to remember it.', 'warn');
+          return;
+        }
+        keyVault.remember(slot, keyInput.value, { endpoint: endpointInput.value }).then(function (outcome) {
+          if (!outcome.ok) {
+            rememberBox.checked = false;
+            setDissectStatus(outcome.error || 'that key could not be stored.', 'err');
+            return;
+          }
+          // The key really is stored, which is true whether or not the panel
+          // is still armed, so it is reported either way.
+          setDissectStatus('key remembered on this device for ' + slot.split('::')[1] + '.');
+          renderVaultRow();
+          if (cloudArming.armFromVault(token).stale) return;
+          keyForgetBtn.hidden = false;
+          syncResolvedUrl();
+        });
+        return;
+      }
+      keyVault.forget(slot).then(function () {
+        keyForgetBtn.hidden = true;
+        // An untick stops STORING; it does not disarm. The key is still in the
+        // field and would still be sent, so the chip stays up saying exactly
+        // that. Disarming here would put the indicator back in the business of
+        // disagreeing with the network.
+        cloudArming.render();
+        setDissectStatus('that key is no longer remembered on this device — it is still in the field for this session.');
+        renderVaultRow();
+      });
+    });
+
+    // Re-encrypt on edit, but only while the box is ticked: an untick is a
+    // decision to stop storing, and typing afterwards must not undo it.
+    keyInput.addEventListener('blur', function () {
+      if (!keyVault || !keyVault.supported() || !rememberBox.checked || !keyInput.value) return;
+      keyVault.remember(currentSlot(), keyInput.value, { endpoint: endpointInput.value }).then(function (outcome) {
+        if (outcome.ok) {
+          keyForgetBtn.hidden = false;
+          renderVaultRow();
+        }
+      });
+    });
+
+    keyForgetBtn.addEventListener('click', function () {
+      if (!keyVault) return;
+      const slot = currentSlot();
+      keyVault.forget(slot).then(function (existed) {
+        rememberBox.checked = false;
+        keyForgetBtn.hidden = true;
+        // The stored key is gone, so everything it filled in goes with it.
+        cloudArming.disarm();
+        syncResolvedUrl();
+        setDissectStatus(
+          existed
+            ? 'forgotten — that key is gone from this device, and the cloud fields are cleared.'
+            : 'there was nothing stored for that endpoint.'
+        );
+        renderVaultRow();
+      });
+    });
+
+    /*
+     * DISARM. One click and the cloud config is gone from this session: key,
+     * endpoint AND model, because the endpoint is the field the vault fills in
+     * for you at boot and leaving it behind is how a "disarmed" panel used to
+     * keep POSTing. It is still deliberately NOT the same as Forget — the
+     * remembered key survives for the next reload, and Forget is the
+     * destructive door with different words on it.
+     */
+    disarmBtn.addEventListener('click', function () {
+      cloudArming.disarm();
+      syncResolvedUrl();
+      setDissectStatus(
+        'cloud disarmed — key, endpoint and model cleared, and no dissection will leave this machine. ' +
+          'The remembered key is still stored: reload to unlock it again, type an endpoint to re-arm now, ' +
+          'or use “Forget this key” to delete it.'
+      );
+    });
+
+    vaultForgetAllBtn.addEventListener('click', function () {
+      if (!keyVault) return;
+      vaultForgetAllBtn.disabled = true;
+      keyVault.forgetAll().then(function (outcome) {
+        vaultForgetAllBtn.disabled = false;
+        rememberBox.checked = false;
+        keyForgetBtn.hidden = true;
+        // Nothing is remembered any more, so nothing the vault filled in stays.
+        cloudArming.disarm();
+        syncResolvedUrl();
+        renderVaultRow();
+        toastHost.show(
+          outcome.ok
+            ? 'Forgot ' + outcome.dropped + ' remembered key' + (outcome.dropped === 1 ? '' : 's') + '.'
+            : 'Could not clear the vault: ' + (outcome.error || 'unknown error'),
+          outcome.ok ? 'info' : 'error'
+        );
+      });
+    });
+
+    /**
+     * Called by the persistence section once the IndexedDB store exists.
+     * Everything that needs storage is created here, in one place, and the
+     * card is painted from real state rather than from an assumption.
+     *
+     * @param {object} store the shared createIdbStore instance
+     */
+    function attachAiStorage(store) {
+      keyVault = createKeyVault({ idb: store });
+      localEngine = createLocalLlmEngine({
+        spawn: spawnAiWorker,
+        storage: store,
+        fetchFn: typeof fetch === 'function' ? fetch : null,
+      });
+
+      // The checkbox is never silently downgraded to plaintext: where the
+      // vault cannot work, the box goes and a sentence takes its place.
+      if (keyVault.supported()) {
+        rememberCopy.textContent =
+          'Remember this key on this device — it is encrypted before it is stored, and unlocked ' +
+          'automatically the next time you open this file.';
+      } else {
+        rememberBox.hidden = true;
+        rememberBox.disabled = true;
+        rememberRow.style.cursor = 'default';
+        rememberCopy.textContent =
+          'This browser context has no Web Crypto or no IndexedDB, so a key cannot be encrypted here. ' +
+          'Nothing is stored — the key stays in memory for this session only.';
+      }
+
+      localEngine.on('progress', renderProgress);
+      localEngine.on('status', function () {
+        renderLocalCard();
+      });
+      localEngine.on('error', function (event) {
+        setLocalStatus((event && event.message) || 'the on-device model failed.', 'err');
+      });
+
+      renderLocalCard();
+      renderVaultRow();
+      // Auto-unlock: reads IndexedDB, decrypts with the device key, and arms
+      // Auto only if a key was really recovered.
+      restoreRememberedSlot();
+
+      // Reads IndexedDB only. status() is answered from the manifest record,
+      // never from the network, so this cannot become an implicit download.
+      localEngine.refresh().then(function () {
+        renderLocalCard();
+      });
+
+      probeWebGpu(typeof navigator !== 'undefined' ? navigator : null).then(function (caps) {
+        gpuCaps = caps;
+        renderLocalCard();
+      });
+    }
 
     /** Non-empty lines of the textarea — 2+ of them means batch dissection. */
     function trackLines() {
@@ -17044,16 +20508,16 @@ function createRibbonRenderer(deps) {
       if (dissectBusy) return;
       const lines = trackLines();
       const request = {
+        // THE ONE ASSEMBLER. cloudArming.config() reads the four fields out of
+        // the DOM at call time — the key lives only for the duration of this
+        // request object, and nothing writes it anywhere — and returns null
+        // when the gate is down. A null cloud config is not an empty one: it
+        // carries no preset id either, so resolveCloudConfig has nothing to
+        // expand into a provider's default endpoint, and mode 'cloud' reports
+        // "no cloud endpoint configured" instead of quietly dialling out.
         text: dissectInput.value,
         mode: dissectMode.value,
-        // The key is read out of the DOM at call time and lives only for the
-        // duration of this request object. Nothing writes it anywhere.
-        cloud: {
-          preset: presetSelect.value,
-          endpoint: endpointInput.value,
-          key: keyInput.value,
-          model: modelInput.value,
-        },
+        cloud: cloudArming.config(),
         ollama: { model: ollamaModelInput.value },
       };
       if (lines.length > 1) request.tracks = lines;
@@ -17082,12 +20546,29 @@ function createRibbonRenderer(deps) {
           }
           renderDissection(outcome);
           if (outcome.result.confidence === 0) {
-            dissectStatus.className = 'dissect-status warn';
-            dissectStatus.textContent =
-              'nothing in that text matched the embedded taxonomy — name a genre, a scene or a decade.';
+            setDissectStatus(
+              'nothing in that text matched the embedded taxonomy — name a genre, a scene or a decade.',
+              'warn'
+            );
+          } else if (
+            outcome.result.source === 'local' &&
+            (request.mode === 'local-llm' || request.mode === 'auto') &&
+            localEngine &&
+            localEngine.status() === 'absent'
+          ) {
+            /*
+             * The honest version of "the fancy mode did nothing". The answer
+             * IS real — the taxonomy engine produced it — and the reason the
+             * on-device model had no part in it is stated rather than left as
+             * a silence the user has to interpret. The Download button sits
+             * directly above this line, in the card that is open in both of
+             * these modes.
+             */
+            setDissectStatus(
+              'Answered instantly by the embedded taxonomy engine — the on-device model is not downloaded yet.'
+            );
           } else {
-            dissectStatus.className = 'dissect-status';
-            dissectStatus.textContent = '';
+            setDissectStatus('');
           }
         },
         function (err) {
@@ -18779,6 +22260,11 @@ function createRibbonRenderer(deps) {
       },
     });
 
+    /* The on-device model and the key vault both live in this database, so
+     * this is the first moment either can exist. Wiring them from here rather
+     * than from the dissector section keeps ONE opener of the store. */
+    attachAiStorage(idb);
+
     const historyNote = $('history-persistence');
 
     /** The one place the two storage answers are turned into one sentence. */
@@ -19713,7 +23199,10 @@ function createRibbonRenderer(deps) {
     renderHistory();
     renderPresets();
 
-    applyPreset();
+    // renderPresetUi(), NOT the preset-CHANGE handler: painting the panel is
+    // not consent, and calling the change handler here armed the cloud gate on
+    // every reload.
+    renderPresetUi();
     syncModeUi();
     syncHint();
 

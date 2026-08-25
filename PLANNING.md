@@ -2,13 +2,10 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Local AI as default (owner request 2026-08-25): make Mode 1 (local, in-browser) the default dissector mode and upgrade it to the most powerful of the FDD-named local models — Qwen2.5-0.5B via WebGPU with WASM fallback (lazy opt-in weight download with progress bar per FDD §3; the embedded taxonomy engine stays as the instant/offline fallback). *Note: this owner request relaxes the earlier "no runtime downloads" reading for Mode 1 — record the decision in ASSUMPTIONS.md when implementing.*
-## NEXT
-*Owner requests (2026-08-25), in order:*
-- [ ] API key persistence + provider focus (owner request 2026-08-25): keep offering cloud APIs; add opt-in "remember key on this device" so users never re-enter keys — encrypted at rest via WebCrypto (AES-GCM), with honest UI copy about what browser storage can and cannot protect. Providers: OpenAI-compatible endpoints (generic base-URL + model) and OpenRouter as the first-class presets; per-provider key slots.
+- [ ] #66 Expanded Production Eras (grow 7 → 100+ signatures on the existing era path) — integrate the 124 banked entries (workflow wf_5c2842df-17a) with a selectable UI.
 
+## NEXT
 *Post-1.0 recommendations from the release audit, in order:*
-- [ ] #66 Expanded Production Eras (grow 7 → 100+ signatures on the existing era path). *(124 entries already generated and banked by workflow wf_5c2842df-17a — integration pending.)*
 - [ ] #89 PWA Offline Manifest (small, high-leverage for the offline-first promise).
 - [ ] #71 "Inspire Me" Slot Machine (reuses KB + prompt state wholesale).
 - [ ] #27 Modular Instrument "Lego Blocks" selector.
@@ -21,6 +18,7 @@
 - [ ] Consider: Code Mode violet accent at 3.52:1 on black (noted in Task 7).
 
 ## DONE
+- [x] Local AI as default + API key persistence + provider focus (owner requests, incl. Gemini-stays correction): local-llm default mode with hash-pinned opt-in Qwen2.5-0.5B/SmolLM2 engine, AES-GCM key vault with epoch-guarded arming, OpenRouter/OpenAI-compatible/Gemini presets.
 - [x] Theme suite via Stitch Pro (owner request): 7 selectable themes — Obsidian, Daylight, Studio ColorSafe (CVD-verified), Tape Deck, Null Signal, Abyssal Bloom, Studio Code (Code Mode reconciled); registry + accessible picker + dual-field persistence; AA enforced incl. the new --ink-violet text token.
 - [x] Build out the 'Prompt Editor' view (owner request): zoned workspace — shape column + sticky compile rail, jump nav, heading hierarchy, primary-weight style card, focus management.
 - [x] Refine the waveform visualization (owner request): honesty-gated twist, perceptual amplitude curve, settle-on-stop, 60fps row interpolation, analytic lighting + fog, DPR-correct sizing, vignette/footlight.

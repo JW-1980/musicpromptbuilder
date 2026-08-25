@@ -66,6 +66,8 @@ const SUITES = [
   { id: 'dsp-worker', script: path.join(TESTS_DIR, 'dsp-worker.test.js') },
   { id: 'audio-capture', script: path.join(TESTS_DIR, 'audio-capture.test.js') },
   { id: 'ai-dissector', script: path.join(TESTS_DIR, 'ai-dissector.test.js') },
+  { id: 'local-llm', script: path.join(TESTS_DIR, 'local-llm.test.js') },
+  { id: 'key-vault', script: path.join(TESTS_DIR, 'key-vault.test.js') },
   { id: 'ui-layout', script: path.join(TESTS_DIR, 'ui-layout.test.js') },
   { id: 'visualizer', script: path.join(TESTS_DIR, 'visualizer.test.js') },
   { id: 'theming', script: path.join(TESTS_DIR, 'theming.test.js') },
@@ -502,7 +504,7 @@ function validateSeededDefaults(defaults, seedDoc) {
 const PENDING_NOTES = [
   'Headless DOM interaction (slider drags, tag toggles, View Transitions) requires a browser driver; deliberately NOT stubbed — it stays out of scope until a zero-dependency driver is agreed.',
   'Tri-Mode AI fallback-chain coverage now runs in the ai-dissector suite against injected fetch fakes. A LIVE end-to-end call to a real cloud provider or a real Ollama server stays out of scope: it needs a secret and a network, which the offline-first, zero-dependency test policy forbids.',
-  'Mode 1 ships as the embedded MUSIC_KB taxonomy engine, not a downloaded WebGPU LLM (ASSUMPTIONS.md). The provider slot for a real in-browser model is open; token-probability logit extraction (FDD.md #59) activates with it.',
+  'Mode 1b (the on-device LLM) ships as of 0.17.0 and is covered by the local-llm suite: the variant picker, the consent gate under an injected fetch recorder, and the worker protocol including the SHA-256 refusal of a tampered runtime. What stays out of scope is a REAL download, import and generation — ~500 MB of weights and third-party code executing, neither of which belongs in an offline test run. Token-probability logit extraction (FDD.md #59) is still unimplemented.',
   'The persistence suite drives createIdbStore() against a hand-written fake IndexedDB (real event model: onupgradeneeded/onsuccess/onerror, real transaction completion). A REAL browser IndexedDB, a real clipboard write and a real data: download are browser-only surfaces and stay out of scope for the same reason the DOM-interaction note above does.',
 ];
 
