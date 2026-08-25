@@ -1,6 +1,6 @@
 {
   "name": "sunoprompt-studio",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "description": "Offline-capable, single-file Suno v5.5 prompt builder with a Web Worker DSP engine. Zero runtime dependencies.",
   "private": true,
   "scripts": {

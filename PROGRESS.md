@@ -157,3 +157,8 @@
 - **Queued fixes closed in the same pass:** the Task-11/14 Chrome theme-swap transition freeze — pattern-level `.theme-switching` kill class added around `repaintTheme()` (elements + pseudo-elements, released after two frames; statically enforced); the Task-7 Code Mode violet note verified already resolved by Task 17 (pin 7.12:1, ink 10.13:1).
 - **Tests:** keybinds-palette 44/44, theming +1. Total 1038 passed / 0 failed / 15 todo across 21 suites; run-all + nightly + verify-single-file GREEN (independently re-run after fixes). APP_VERSION 0.22.0.
 - **The post-1.0 queue is now EMPTY.** Next: fresh release audit → RELEASE.md → v1.1.0 tag → push.
+
+### [2026-08-25] Task 24 — v1.1.0 release
+- **Audit (read-only Opus auditor):** 40 IMPLEMENTED / 9 PARTIAL / 45 ABSENT of 94 (+9 net vs v1.0.0; 10 gained, 1 re-graded stricter, ZERO regressions). Verification battery green (1038/0/15, 43/43 integrity); golden-path browser pass with zero console messages and zero external network requests; hygiene clean (no secrets, clean tree). Verdict READY-WITH-NOTES — both notes documentation-only, both applied: RELEASE.md rewritten for v1.1.0, and the three-way version drift ended (APP_VERSION, package.json and the tag now all 1.1.0; convention recorded: per-task bumps between releases, alignment at release commits).
+- **Audit findings queued (non-blocking):** #mic-help gap on NotFoundError/NotReadableError (pre-existing), hidden-tab rAF release of `.theme-switching`. Next-queue recommendations (8 features by leverage) added to PLANNING ## NEXT.
+- **Tagged `v1.1.0-release` and pushed** with the full post-1.0 series (Tasks 14–24).

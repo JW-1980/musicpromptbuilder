@@ -2,10 +2,21 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] Post-queue release pass: fresh feature audit vs the FDD, RELEASE.md update, tag v1.1.0, push to GitHub.
+- [ ] *(queue exhausted — v1.1.0 tagged; audited next-queue below awaits owner direction)*
 
 ## NEXT
-*(queue empty — awaiting owner direction after the release pass)*
+*v1.1.0 audit recommendations, by value × leverage on existing engines:*
+- [ ] #49 Pure Instrumental Mode Lock (the conflict rule already exists, currently unreachable — one toggle activates it).
+- [ ] #81 Tag Clutter Warning (>15 instruments; counts already tracked; in-code marker names it unimplemented).
+- [ ] #83 Prompt Synergy Score (§5.1 spec; every input already computed by #73/#68).
+- [ ] #76 Batch Variation Matrix (reuse createSeededRng over the deterministic compiler).
+- [ ] #57 Prompt Diff Viewer (pure compiler + history bank already stores both sides).
+- [ ] #45 Duet & Multi-Vocalist Cues (joins the 104-persona registry to the structure sheet).
+- [ ] #12 Visual BPM Metronome (the last user-visible payoff of the onset/BPM tracker).
+- [ ] #94 Markdown/Text Exporter (data: download path proven twice already).
+- [ ] Fix: `#mic-help` never opens on NotFoundError/NotReadableError (no-microphone case; pre-existing since v1.0.0).
+- [ ] Fix: `.theme-switching` release uses rAF, which parks in hidden tabs (cosmetic; use a visibility-safe fallback).
+*Runners-up:* #46 solo cues, #19 onboarding tour, #72 A/B splitter.
 
 ## DONE
 - [x] #90 Studio Shortcut Keybinds + #16 Command Palette (central dispatcher, 537-entry palette over the real toggle paths, cheat sheet; auto-repeat + a11y review fixes).

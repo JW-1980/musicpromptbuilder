@@ -58,16 +58,11 @@ const TOKEN_BLOCK_SELECTORS = [
   '.theme-abyssal-bloom {',
   '.high-contrast {',
 ];
-/* CONSCIOUSLY UPDATED IN 0.22.0: was '0.21.0' (the model-selector + deep-link
- * release). This constant and the title of the test that reads it are the only
- * two things in this file that a version bump is allowed to touch, and both
- * moved together — the assertion itself is unchanged. The bump follows the
- * one-release-per-task cadence PROGRESS.md records for 0.10.0 through 0.21.0;
- * 0.22.0 is the paired keyboard release: FDD #90's var STUDIO_KEYBINDS behind
- * ONE capture-phase dispatcher, and FDD #16's command palette riding on it.
- * If the owner prefers it held back, index.html:APP_VERSION and this line
- * revert together and nothing else in the suite moves. */
-const EXPECTED_VERSION = '0.22.0';
+/* This constant and the title of the test that reads it are the only two
+ * things in this file a version bump may touch, and they move together.
+ * Convention since the v1.1.0 release audit: per-task bumps between releases,
+ * and the release commit aligns APP_VERSION, package.json and the git tag. */
+const EXPECTED_VERSION = '1.1.0'; // CONSCIOUSLY UPDATED IN 1.1.0: release-audit version reconciliation — APP_VERSION, package.json and the git tag align at release time; per-task bumps continue between releases.
 /* The Prompt Editor's four workflow zones, in the order they must be read. */
 const EDITOR_ZONES = ['Describe', 'Shape', 'Compile', 'Library'];
 /* Every card heading in the Prompt Editor. They are h4 under an h3 zone; see
