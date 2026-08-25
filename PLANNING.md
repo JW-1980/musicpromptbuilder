@@ -2,14 +2,15 @@
 **File:** `PLANNING.md`
 
 ## NOW
-- [ ] #90 Studio Shortcut Keybinds + #16 Command Palette — paired iteration (the palette rides the keybind layer).
+- [ ] Post-queue release pass: fresh feature audit vs the FDD, RELEASE.md update, tag v1.1.0, push to GitHub.
 
 ## NEXT
-*Post-1.0 recommendations from the release audit, in order:*
-- [ ] Fix: CSS transitions freeze paint on runtime theme swap in Chrome — affects `.btn-record` (Task 11) AND `.btn-mini` (re-confirmed in Task 14's persona toggle, nonsense 1.16:1 contrast mid-transition). Fix the pattern, not one button.
-- [ ] Consider: Code Mode violet accent at 3.52:1 on black (noted in Task 7).
+*(queue empty — awaiting owner direction after the release pass)*
 
 ## DONE
+- [x] #90 Studio Shortcut Keybinds + #16 Command Palette (central dispatcher, 537-entry palette over the real toggle paths, cheat sheet; auto-repeat + a11y review fixes).
+- [x] Fix: theme-swap transition freeze — pattern-level `.theme-switching` kill class in repaintTheme (Tasks 11/14 diagnosis closed).
+- [x] Resolved: Code Mode violet legibility — already fixed by Task 17's raised pin (#B77CED, 7.12:1) + `--ink-violet` for text (10.13:1 in Code Mode).
 - [x] #69 Suno Model Selector (conservative documented knobs, v5.5 byte-identity) + #75 URL-hash deep linking (checksummed base64url, hostile-input-proof).
 - [x] #71 "Inspire Me" (single-genre synergy guarantee, seeded RNG, never auto-adds) + #27 Instrument Lego Blocks (87-block registry derived from MUSIC_KB + curated staples).
 - [x] #89 PWA Offline Manifest + #92 Share Target parsing (honest single-file scope: data-URI manifest with theme-tracking colors, share-intent lyrics import, event-gated install affordance).

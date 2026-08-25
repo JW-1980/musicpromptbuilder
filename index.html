@@ -64,6 +64,13 @@
        formatStructureTag), createStructureState with the §2.3 auto-chorus
        refrain, and createHistoryStack plus the pure keybinding predicates
        (isTextEntryTarget, structureShortcut, structureMoveShortcut)
+    5b. the studio keyboard (FDD #90) and the command palette (FDD #16), which
+       ship together because the palette is opened from the keybind layer:
+       var STUDIO_KEYBINDS (every key this app listens for, whichever handler
+       owns it) with the pure matchStudioKeybind / isKeyActivationTarget /
+       studioKeybindGroups, then var PALETTE_COMMANDS with buildPaletteIndex
+       (one search index derived from the registries above — never a second
+       copy of them) and the pure ranker paletteMatch
     6. the Suno model registry (FDD #69) — var SUNO_MODELS and its pure
        resolvers (sunoModelById, resolveSunoModel, sunoModelOptions,
        sunoModelKnob). Every knob carries the BASIS it was chosen on, because
@@ -448,6 +455,12 @@
        interpolates colours premultiplied, so it fades out without a grey
        fringe and needs no second token. */
     --pulse-ring: color-mix(in srgb, var(--danger-crimson) 55%, transparent);
+    /* The scrim behind a modal overlay (FDD #16's palette, #90's cheat sheet).
+       Derived from the theme's own --bg rather than a fixed black, so the
+       dimming reads as "this page, pushed back" in a light theme as well as a
+       dark one; the remaining 22% lets the workspace stay faintly visible,
+       which is what tells the user the palette is a layer and not a new page. */
+    --overlay-scrim: color-mix(in srgb, var(--bg) 78%, transparent);
   }
 
   * { box-sizing: border-box; }
@@ -2686,6 +2699,217 @@
     to { opacity: 1; transform: none; }
   }
 
+  /* --- Modal overlays: the command palette (#16) and the keybind cheat sheet
+         (#90) ---------------------------------------------------------------
+
+     WHY THESE TWO LIVE OUTSIDE .app-shell IN THE MARKUP
+
+     `.app-shell` declares `container-type: inline-size`, and a container-type
+     element is a CONTAINING BLOCK for every `position: fixed` descendant —
+     the same rule `transform` and `filter` have always carried. A palette
+     nested inside it would therefore be "fixed" to a 1200px centred column
+     with 24px of padding rather than to the viewport, and would scroll with
+     the page on a narrow screen. Both overlays are consequently direct
+     children of <body>, after .app-shell, exactly as .toast-host is — that is
+     what "container-query-safe" means here, and it is a markup decision the
+     stylesheet alone cannot make.
+
+     Everything below paints from tokens only, so both overlays follow a theme
+     swap, a user recolour and Code Mode without a second rule. ------------- */
+
+  .overlay-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    justify-content: center;
+    padding: 12vh 16px 16px;
+    background: var(--overlay-scrim);
+    backdrop-filter: var(--glass-blur);
+    overflow-y: auto;
+  }
+
+  .overlay-backdrop[hidden] { display: none; }
+
+  .overlay-dialog {
+    width: min(680px, 100%);
+    max-height: 76vh;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    color: var(--text);
+    background: var(--toast-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    box-shadow: 0 24px 60px var(--shadow-color);
+    animation: overlay-in 160ms ease-out;
+  }
+
+  @keyframes overlay-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .overlay-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+
+  .overlay-lead {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  /* The palette's one input. It is a combobox over the listbox below it, so it
+     keeps focus for the whole interaction and the ACTIVE ROW travels in
+     aria-activedescendant rather than in the focus ring. */
+  .palette-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    font-family: var(--font-ui);
+    font-size: 0.95rem;
+    color: var(--text);
+    background: var(--field-bg);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+  }
+
+  .palette-input::placeholder { color: var(--text-faint); }
+
+  .palette-input:focus-visible {
+    outline: var(--focus-ring) solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  .palette-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .palette-option {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .palette-option[aria-selected="true"] {
+    background: var(--tint-cyan);
+    border-color: var(--tint-cyan-border);
+  }
+
+  .palette-kind {
+    flex: 0 0 auto;
+    min-width: 92px;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+  }
+
+  .palette-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.87rem;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+
+  .palette-detail {
+    flex: 0 1 auto;
+    font-size: 0.74rem;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
+  }
+
+  /* A toggle that is already applied says so on its own row, because the
+     palette leaves itself open for toggles and the row IS the feedback. */
+  .palette-mark {
+    flex: 0 0 auto;
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    color: var(--ink-violet);
+  }
+
+  .palette-empty,
+  .palette-status {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--text-dim);
+  }
+
+  .palette-empty[hidden] { display: none; }
+
+  .palette-foot {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  /* --- The cheat sheet: one definition list per keybind scope -------------- */
+
+  .cheat-group + .cheat-group { margin-top: 14px; }
+
+  .cheat-group-title {
+    margin: 0 0 6px;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+  }
+
+  .cheat-rows {
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+    gap: 6px 14px;
+    align-items: baseline;
+  }
+
+  .cheat-rows dt { margin: 0; }
+
+  .cheat-rows dd {
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--text);
+  }
+
+  /* A binding another handler owns is still a key the user can press, so it is
+     listed — and labelled, so the sheet is a map of the keyboard rather than a
+     map of one dispatcher. */
+  .cheat-owner {
+    margin-left: 8px;
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+  }
+
+  .cheat-foot {
+    margin: 0;
+    display: flex;
+    justify-content: flex-end;
+  }
+
   /* --- Persistence: profiles, history, presets & backup -------------------- */
   /*     docs/FDD.md #21 / #74 / #77 / #85 / #86 / #93.                        */
 
@@ -3301,7 +3525,23 @@
 
   .high-contrast .badge-weight { color: var(--text-dim); }
   .high-contrast .dissect-input::placeholder { color: var(--text-dim); }
+  .high-contrast .palette-input::placeholder { color: var(--text-dim); }
   .high-contrast .btn-record.is-live { box-shadow: none; }
+
+  /* The two modal overlays flatten with everything else: a solid ground, no
+     shadow to read the edge from, and a real border on the active row instead
+     of a translucent cyan wash that would sit at ~1.2:1 on black. */
+  .high-contrast .overlay-dialog,
+  .high-contrast .palette-input,
+  .high-contrast .palette-option[aria-selected="true"] {
+    background: var(--bg);
+    border: 1px solid var(--surface-border);
+    box-shadow: none;
+  }
+
+  .high-contrast .palette-option[aria-selected="true"] {
+    border-color: var(--accent-cyan);
+  }
 
   /* Opacity is used to encode token weight (FEATURE-MECHANICS.md §7.2); in a
      legibility mode the text must be readable, so the weight moves to the
@@ -3310,6 +3550,9 @@
 
   @media (prefers-reduced-motion: reduce) {
     .toast { animation: none; }
+    /* A palette that flies in is motion; a palette that is simply THERE is the
+       same feature. The entrance is the only thing either overlay animates. */
+    .overlay-dialog { animation: none; }
     .confidence-fill { transition: none; }
     .style-meter-fill { transition: none; }
     /* Motion off means motion off, including the view transition itself. */
@@ -3336,6 +3579,17 @@
        one rather than a 400ms glide across the whole workspace. */
     html { scroll-behavior: auto; }
   }
+
+  /* Theme-swap transition kill — the pattern fix for Chrome freezing a
+     mid-flight color/border transition when its token changes at runtime
+     (Task 11 .btn-record, Task 14 .btn-mini). repaintTheme() adds this class
+     for the swap frame and releases it two frames later, so every element
+     lands on the new palette atomically instead of animating between them. */
+  .theme-switching *,
+  .theme-switching *::before,
+  .theme-switching *::after {
+    transition: none !important;
+  }
 </style>
 </head>
 <body>
@@ -3352,6 +3606,13 @@
         <button type="button" role="tab" id="tab-editor" class="view-tab" data-view="editor"
                 aria-controls="view-editor" aria-selected="false" tabindex="-1">Prompt Editor</button>
       </div>
+      <!-- FDD #16 says "press / to open". A keyboard-only entrance would make
+           the whole tag catalogue unreachable to a pointer user, so the same
+           overlay gets one button; its accessible name carries the key, which
+           is also how the shortcut is discovered in the first place. -->
+      <button type="button" id="btn-palette" class="btn-toggle"
+              aria-haspopup="dialog" aria-controls="palette"
+              aria-label="Search tags and commands — press slash">Search</button>
       <!-- Three token-level controls, three different jobs: pick a theme,
            recolour its tokens, or override both for legibility. The visible
            label of each stays fixed so the accessible name always contains it
@@ -4349,6 +4610,70 @@
   </section>
 
   </main>
+</div>
+
+<!--
+  THE TWO MODAL OVERLAYS — docs/FDD.md #16 (Command Palette) and #90 (Studio
+  Shortcut Keybinds), and the reason they sit HERE rather than inside the shell.
+
+  `.app-shell` carries `container-type: inline-size` so every card can answer
+  to @container. A container-type element is also the containing block for its
+  `position: fixed` descendants, so an overlay nested inside it would be fixed
+  to the 1200px column instead of to the viewport. Both dialogs are therefore
+  siblings of .app-shell, like .toast-host, and are `hidden` until opened —
+  a hidden subtree is out of the accessibility tree AND out of the tab order,
+  which is what makes the focus trap below a trap rather than a suggestion.
+-->
+<div id="palette-backdrop" class="overlay-backdrop" hidden>
+  <div id="palette" class="overlay-dialog" role="dialog" aria-modal="true"
+       aria-labelledby="palette-title" aria-describedby="palette-lead">
+    <h2 id="palette-title" class="overlay-title">Command palette</h2>
+    <p id="palette-lead" class="overlay-lead">
+      Search every genre tag, scene, vocal persona, instrument block, production
+      era, exclusion and song block this studio knows, plus the commands. Arrow
+      keys move, Enter runs, Escape closes.
+    </p>
+    <!-- combobox + listbox, not a text field beside a menu: the input keeps
+         focus for the whole interaction and the ACTIVE row travels in
+         aria-activedescendant, which is what lets Enter mean "run the row" and
+         every other key still mean "type". -->
+    <input type="text" id="palette-input" class="palette-input" role="combobox"
+           aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list"
+           aria-activedescendant="" autocomplete="off" spellcheck="false"
+           placeholder="Search tags, blocks and commands…"
+           aria-label="Search tags, blocks and commands">
+    <ul id="palette-list" class="palette-list" role="listbox"
+        aria-label="Palette results"></ul>
+    <p id="palette-empty" class="palette-empty" role="status" hidden>
+      Nothing matches that. Try a genre (“amapiano”), a mood, an instrument, or
+      a command (“theme”, “copy”).
+    </p>
+    <p id="palette-status" class="palette-status" role="status" aria-live="polite"></p>
+    <p class="palette-foot">
+      <span><kbd>↑</kbd> <kbd>↓</kbd> move</span>
+      <span><kbd>Enter</kbd> run</span>
+      <span><kbd>Esc</kbd> close</span>
+      <span><kbd>?</kbd> all shortcuts</span>
+    </p>
+  </div>
+</div>
+
+<div id="cheatsheet-backdrop" class="overlay-backdrop" hidden>
+  <div id="cheatsheet" class="overlay-dialog" role="dialog" aria-modal="true"
+       aria-labelledby="cheatsheet-title" aria-describedby="cheatsheet-lead">
+    <h2 id="cheatsheet-title" class="overlay-title">Keyboard shortcuts</h2>
+    <p id="cheatsheet-lead" class="overlay-lead">
+      Every key this studio listens for, grouped by where it applies. Shortcuts
+      stand aside while you are typing — the one documented exception is
+      <kbd>Ctrl</kbd>+<kbd>Enter</kbd>, which copies from anywhere.
+    </p>
+    <!-- Rows are built from var STUDIO_KEYBINDS in #app-main, so the sheet
+         cannot fall behind the dispatcher: there is one registry. -->
+    <div id="cheatsheet-groups"></div>
+    <p class="cheat-foot">
+      <button type="button" id="btn-cheatsheet-close" class="btn-mini">Close</button>
+    </p>
+  </div>
 </div>
 
 <script id="dsp-worker-src" type="text/js-worker">
@@ -6163,7 +6488,7 @@ if (typeof self !== 'undefined') {
  * sandbox), boot IIFE last and only when a `document` exists.
  */
 
-const APP_VERSION = '0.21.0';
+const APP_VERSION = '0.22.0';
 
 /* Web Audio capture contract (docs/FEATURE-MECHANICS.md §1.2): 2048-sample
  * time-domain frames. At 44.1 kHz one frame is ~46.4 ms; the poll interval is
@@ -16743,6 +17068,848 @@ function structureMoveShortcut(event) {
 }
 
 /* ==========================================================================
+ * STUDIO SHORTCUT KEYBINDS — docs/FDD.md #90, "Pro-audio keybindings (`Space`
+ * to hum, `Ctrl+Enter` to copy)". This is also the layer FDD #16's command
+ * palette rides on, which is why the two ship together.
+ *
+ * ONE REGISTRY, THREE OWNERS
+ *   Before this section the app grew keyboard handling ad hoc: the structure
+ *   card bound its own document-level keydown for undo/redo and Alt+Arrow, and
+ *   each tab bound the WAI-ARIA arrow keys. Both of those are RIGHT where they
+ *   are — a tablist's arrows belong to the tablist, and Ctrl+Z belongs to the
+ *   card that has an undo stack — so this section does NOT absorb them. What
+ *   it fixes is that the keyboard had no single place it was written down.
+ *
+ *   STUDIO_KEYBINDS is that place. Every entry names its `owner`:
+ *
+ *     'dispatcher' — handled by the ONE capture-phase listener the boot adds.
+ *                    matchStudioKeybind() can return these and nothing else.
+ *     'structure'  — handled by the structure card's existing listener
+ *                    (structureShortcut / structureMoveShortcut).
+ *     'tablist'    — handled by the view tabs' existing listener (tabKeyTarget).
+ *
+ *   The cheat sheet renders ALL of them, because a user pressing a key does
+ *   not care which listener answers. The dispatcher handles only its own, and
+ *   tests/keybinds-palette.test.js proves the two sets are DISJOINT by
+ *   synthesising an event from every delegated entry's own match spec and
+ *   asserting matchStudioKeybind() returns null for it. A key can therefore
+ *   never be handled twice, and the proof tracks the registry rather than a
+ *   list typed out beside it.
+ *
+ * THE GUARD LADDER — "never while typing", and the one exception
+ *   Every binding declares a `guard`, and the ladder EXTENDS the predicate the
+ *   structure card already uses rather than duplicating it:
+ *
+ *     'text'             stands aside when isTextEntryTarget(target) — the
+ *                        existing rule, unchanged. This is the default.
+ *     'text+typeahead'   also stands aside inside a <select>, where a printed
+ *                        character jumps to a matching option. This is the
+ *                        guard the PRINTABLE bindings (/, ?, 1, 2) carry, and
+ *                        it is deliberately narrow: a focused <button> does
+ *                        nothing at all with "/", so "/" must still open the
+ *                        palette there — which is where focus most often is.
+ *     'text+activation'  also stands aside when isKeyActivationTarget(target),
+ *                        the wider set: everything a bare key ACTIVATES.
+ *                        Space on a focused <button> presses it; a Space
+ *                        binding that fired as well would both press the
+ *                        button and arm the microphone. Only Space carries it.
+ *     'none'             fires even inside a text field. Exactly ONE binding
+ *                        uses it — Ctrl+Enter — and that is a deliberate,
+ *                        documented exception: "commit what I am editing" is
+ *                        the pro-audio/pro-editor convention FDD #90 names,
+ *                        and a copy shortcut that stops working the moment
+ *                        you are in the lyric box is a shortcut that stops
+ *                        working when you most want it. Nothing else may take
+ *                        this guard: a bare letter or digit firing mid-word
+ *                        would corrupt the text the user is typing.
+ *
+ * LAYOUT SAFETY — `key` first, `code` only as a fallback
+ *   `event.key` is what the user's LAYOUT produced; `event.code` is which
+ *   physical key was struck. A binding on a printed character ("press slash")
+ *   must follow the character, or `/` becomes unreachable on the many layouts
+ *   that put it somewhere else — so every match spec lists `key` values and
+ *   they are consulted first, case-insensitively. `code` is read ONLY when the
+ *   engine gave us no usable key at all ('', 'Unidentified', 'Dead'), which is
+ *   the dead-key / IME-passthrough case. Two consequences worth stating:
+ *     - Shift is `null` ("don't care") on the character bindings, because
+ *       whether `/` needs Shift is a property of the layout, not of the app.
+ *       It is still unambiguous: Shift+`/` on a US layout produces the
+ *       character `?`, which is a DIFFERENT binding, matched by its own key.
+ *     - Ctrl and Cmd are one modifier here ("primary"), the same way
+ *       structureShortcut() already treats them.
+ *
+ * WHAT IS DELIBERATELY NOT BOUND
+ *   Nothing that collides with the browser: no Ctrl+S, Ctrl+P, Ctrl+W,
+ *   Ctrl+N, Ctrl+T, Ctrl+F. A shortcut that has to fight Save Page, Print or
+ *   Close Tab loses, and the user loses their page with it.
+ * ========================================================================== */
+
+/** The scopes a binding may declare, in the order the cheat sheet prints them. */
+var STUDIO_KEYBIND_SCOPES = ['global', 'hum', 'editor'];
+
+/** How each scope is NAMED to the user. */
+var STUDIO_KEYBIND_SCOPE_LABELS = {
+  global: 'Anywhere in the studio',
+  hum: 'Hum Studio',
+  editor: 'Prompt Editor',
+};
+
+/** Who answers a binding. Only 'dispatcher' entries are matched by this file. */
+var STUDIO_KEYBIND_OWNERS = ['dispatcher', 'structure', 'tablist'];
+
+/** The guard ladder, widest constraint first. See the header block. */
+var STUDIO_KEYBIND_GUARDS = ['text+activation', 'text+typeahead', 'text', 'none'];
+
+/**
+ * THE KEYBOARD, WRITTEN DOWN ONCE.
+ *
+ * @type {Array<{
+ *   id: string,          stable identity; unique across the registry
+ *   keys: string,        the DISPLAY string, unique within its scope
+ *   when: 'global'|'hum'|'editor',
+ *   action: string,      the action id the dispatcher runs (see the boot's
+ *                        studioActions map); delegated entries name the
+ *                        behaviour their own handler performs
+ *   owner: 'dispatcher'|'structure'|'tablist',
+ *   guard: 'text'|'text+typeahead'|'text+activation'|'none',
+ *   match: {key: string[], code: string[], primary: ?boolean,
+ *           alt: ?boolean, shift: ?boolean},
+ *   description: string  one sentence, shown in the cheat sheet
+ * }>}
+ */
+var STUDIO_KEYBINDS = [
+  {
+    id: 'palette-open',
+    keys: '/',
+    when: 'global',
+    action: 'open-palette',
+    owner: 'dispatcher',
+    guard: 'text+typeahead',
+    match: { key: ['/'], code: ['Slash'], primary: false, alt: false, shift: null },
+    description: 'Open the command palette — search every tag, block and command.',
+  },
+  {
+    id: 'cheatsheet-open',
+    keys: '?',
+    when: 'global',
+    action: 'open-cheatsheet',
+    owner: 'dispatcher',
+    guard: 'text+typeahead',
+    match: { key: ['?'], code: [], primary: false, alt: false, shift: null },
+    description: 'Show this keyboard shortcut sheet.',
+  },
+  {
+    /* THE documented exception to "never while typing". See the header block. */
+    id: 'copy-style-prompt',
+    keys: 'Ctrl+Enter',
+    when: 'global',
+    action: 'copy-style-prompt',
+    owner: 'dispatcher',
+    guard: 'none',
+    match: {
+      key: ['Enter'],
+      code: ['Enter', 'NumpadEnter'],
+      primary: true,
+      alt: false,
+      shift: false,
+    },
+    description: 'Copy the finished style prompt. Works while you are typing, too.',
+  },
+  {
+    id: 'view-hum',
+    keys: '1',
+    when: 'global',
+    action: 'view-hum',
+    owner: 'dispatcher',
+    guard: 'text+typeahead',
+    match: { key: ['1'], code: ['Digit1', 'Numpad1'], primary: false, alt: false, shift: null },
+    description: 'Switch to the Hum Studio view.',
+  },
+  {
+    id: 'view-editor',
+    keys: '2',
+    when: 'global',
+    action: 'view-editor',
+    owner: 'dispatcher',
+    guard: 'text+typeahead',
+    match: { key: ['2'], code: ['Digit2', 'Numpad2'], primary: false, alt: false, shift: null },
+    description: 'Switch to the Prompt Editor view.',
+  },
+  {
+    /* FDD #90 names this one: "Space to hum". Scoped to the Hum Studio,
+       because a Space that armed the microphone from the Prompt Editor would
+       be a shortcut firing in a view with no record button on screen. */
+    id: 'toggle-record',
+    keys: 'Space',
+    when: 'hum',
+    action: 'toggle-record',
+    owner: 'dispatcher',
+    guard: 'text+activation',
+    match: { key: [' ', 'Spacebar'], code: ['Space'], primary: false, alt: false, shift: false },
+    description: 'Start or stop humming into the microphone.',
+  },
+
+  /* ---- Owned by the structure card's own listener (FDD #40), listed so the
+     ---- sheet is a map of the keyboard rather than a map of one dispatcher. */
+  {
+    id: 'structure-undo',
+    keys: 'Ctrl+Z',
+    when: 'editor',
+    action: 'structure-undo',
+    owner: 'structure',
+    guard: 'text',
+    match: { key: ['z'], code: ['KeyZ'], primary: true, alt: false, shift: false },
+    description: 'Undo the last change to the song flow.',
+  },
+  {
+    id: 'structure-redo',
+    keys: 'Ctrl+Y',
+    when: 'editor',
+    action: 'structure-redo',
+    owner: 'structure',
+    guard: 'text',
+    match: { key: ['y'], code: ['KeyY'], primary: true, alt: false, shift: false },
+    description: 'Redo the change you just undid.',
+  },
+  {
+    id: 'structure-redo-alt',
+    keys: 'Ctrl+Shift+Z',
+    when: 'editor',
+    action: 'structure-redo',
+    owner: 'structure',
+    guard: 'text',
+    match: { key: ['z'], code: ['KeyZ'], primary: true, alt: false, shift: true },
+    description: 'Redo — the alias every editor also honours.',
+  },
+  {
+    id: 'structure-move',
+    keys: 'Alt+↑ / Alt+↓',
+    when: 'editor',
+    action: 'structure-move',
+    owner: 'structure',
+    guard: 'text',
+    match: {
+      key: ['ArrowUp', 'ArrowDown'],
+      code: ['ArrowUp', 'ArrowDown'],
+      primary: false,
+      alt: true,
+      shift: false,
+    },
+    description: 'Move the focused song block one position — dragging, without a mouse.',
+  },
+
+  /* ---- Owned by the view tabs (WAI-ARIA tablist keys, via tabKeyTarget). --- */
+  {
+    id: 'tablist-move',
+    keys: '← / → / Home / End',
+    when: 'global',
+    action: 'tablist-move',
+    owner: 'tablist',
+    guard: 'text',
+    match: {
+      key: ['ArrowLeft', 'ArrowRight', 'Home', 'End'],
+      code: ['ArrowLeft', 'ArrowRight', 'Home', 'End'],
+      primary: false,
+      alt: false,
+      shift: false,
+    },
+    description: 'Move between the two view tabs while one of them has focus.',
+  },
+];
+
+/**
+ * Is this event target a control where a PRINTED CHARACTER already means
+ * something? A <select> jumps to the option beginning with it, and so does a
+ * listbox built to the same pattern.
+ *
+ * The narrow guard, carried by /, ?, 1 and 2. Deliberately narrow: a focused
+ * <button> does nothing whatsoever with "/", and focus is on a button far more
+ * often than it is in a select — a wider guard here would mean "/" mysteriously
+ * failing to open the palette most of the time.
+ *
+ * @param {*} target
+ * @returns {boolean}
+ */
+function isTypeaheadTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  var tag = typeof target.tagName === 'string' ? target.tagName.toUpperCase() : '';
+  if (tag === 'SELECT' || tag === 'OPTION') return true;
+  var role = typeof target.getAttribute === 'function' ? target.getAttribute('role') : null;
+  if (typeof role !== 'string' || !role) return false;
+  return ['listbox', 'combobox', 'option'].indexOf(role.toLowerCase()) !== -1;
+}
+
+/**
+ * Is this event target a control the browser ALREADY activates with a bare key?
+ *
+ * The companion to isTextEntryTarget(), and deliberately a SECOND predicate
+ * rather than an extension of it: the two answer different questions and the
+ * structure card's Ctrl+Z contract depends on the first one keeping exactly
+ * the meaning it has. Space presses a focused <button>, ticks a checkbox,
+ * opens a <select> and a <summary>, and follows a link. A Space binding must
+ * yield here or it fires ALONGSIDE the browser's own behaviour, which is the
+ * classic "my shortcut also clicked something" bug.
+ *
+ * It SUBSUMES isTypeaheadTarget: everything a character types into is also
+ * something Space opens, so the wide guard is genuinely the wider set.
+ *
+ * @param {*} target
+ * @returns {boolean}
+ */
+function isKeyActivationTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  if (target.isContentEditable === true) return true;
+  if (isTypeaheadTarget(target)) return true;
+  var tag = typeof target.tagName === 'string' ? target.tagName.toUpperCase() : '';
+  if (tag === 'BUTTON' || tag === 'SUMMARY') return true;
+  // A bare <a> with no href is not a link and takes no keyboard activation.
+  if (tag === 'A') return typeof target.href === 'string' && target.href !== '';
+  if (tag === 'INPUT') {
+    var type = typeof target.type === 'string' ? target.type.toLowerCase() : 'text';
+    return (
+      ['checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'image', 'range', 'color'].indexOf(
+        type
+      ) !== -1
+    );
+  }
+  var role = typeof target.getAttribute === 'function' ? target.getAttribute('role') : null;
+  if (typeof role !== 'string' || !role) return false;
+  return (
+    [
+      'button',
+      'checkbox',
+      'radio',
+      'switch',
+      'link',
+      'tab',
+      'option',
+      'menuitem',
+      'menuitemradio',
+      'menuitemcheckbox',
+    ].indexOf(role.toLowerCase()) !== -1
+  );
+}
+
+/**
+ * Do the modifiers on this event match the spec EXACTLY?
+ *
+ * `true` requires it, `false` forbids it, `null` does not care. Ctrl and Cmd
+ * are one modifier ("primary"), matching structureShortcut()'s existing rule,
+ * so a Mac user's Cmd+Enter and a Windows user's Ctrl+Enter are one binding.
+ *
+ * @param {object} event
+ * @param {object} spec
+ * @returns {boolean}
+ */
+function keybindModifiersMatch(event, spec) {
+  if (!event || !spec || typeof spec !== 'object') return false;
+  var primary = event.ctrlKey === true || event.metaKey === true;
+  if (spec.primary === true && !primary) return false;
+  if (spec.primary === false && primary) return false;
+  if (spec.alt === true && event.altKey !== true) return false;
+  if (spec.alt === false && event.altKey === true) return false;
+  if (spec.shift === true && event.shiftKey !== true) return false;
+  if (spec.shift === false && event.shiftKey === true) return false;
+  return true;
+}
+
+/**
+ * Does this event's key match the spec? `key` decides; `code` is the fallback
+ * for the one case where `key` says nothing usable. See the header block on
+ * layout safety.
+ *
+ * @param {object} event
+ * @param {object} spec
+ * @returns {boolean}
+ */
+function keybindKeyMatches(event, spec) {
+  if (!event || !spec || typeof spec !== 'object') return false;
+  var key = typeof event.key === 'string' ? event.key : '';
+  var wanted = isArrayLike(spec.key) ? spec.key : [];
+  if (key && key !== 'Unidentified' && key !== 'Dead') {
+    var lower = key.toLowerCase();
+    for (var i = 0; i < wanted.length; i += 1) {
+      if (String(wanted[i]).toLowerCase() === lower) return true;
+    }
+    // The layout DID produce a character and it is not ours. Falling through
+    // to `code` here is what makes a shortcut fire on the wrong character.
+    return false;
+  }
+  var code = typeof event.code === 'string' ? event.code : '';
+  var codes = isArrayLike(spec.code) ? spec.code : [];
+  for (var c = 0; c < codes.length; c += 1) {
+    if (String(codes[c]) === code && code !== '') return true;
+  }
+  return false;
+}
+
+/**
+ * THE PURE PREDICATE the one dispatcher is built on.
+ *
+ * Returns the binding this event fires, or null. It reads the event and the
+ * showing view and nothing else — no DOM lookups, no globals beyond the
+ * registry it is handed — which is what lets the whole matrix be tested
+ * without a browser.
+ *
+ * @param {object} event      a KeyboardEvent, or anything shaped like one
+ * @param {string} view       the showing view id ('hum' | 'editor')
+ * @param {Array}  [registry] defaults to STUDIO_KEYBINDS
+ * @returns {object|null}
+ */
+function matchStudioKeybind(event, view, registry) {
+  if (!event || typeof event !== 'object') return null;
+  // One physical press = one action. OS auto-repeat re-fires keydown with
+  // event.repeat set; without this guard a held Space stacked getUserMedia
+  // calls and a held Ctrl+Enter banked one history entry per repeat tick —
+  // native button activation never repeats, and neither do we.
+  if (event.repeat === true) return null;
+  var list = isArrayLike(registry) ? registry : STUDIO_KEYBINDS;
+  var scope = typeof view === 'string' ? view : '';
+  var target = event.target;
+  var typing = isTextEntryTarget(target);
+  var typeahead = isTypeaheadTarget(target);
+  var activating = isKeyActivationTarget(target);
+
+  for (var i = 0; i < list.length; i += 1) {
+    var binding = list[i];
+    if (!binding || typeof binding !== 'object') continue;
+    // Only this file's own bindings. Everything else is another handler's.
+    if (binding.owner !== 'dispatcher') continue;
+    if (binding.when !== 'global' && binding.when !== scope) continue;
+    if (typing && binding.guard !== 'none') continue;
+    if (typeahead && binding.guard === 'text+typeahead') continue;
+    if (activating && binding.guard === 'text+activation') continue;
+    if (!keybindModifiersMatch(event, binding.match)) continue;
+    if (!keybindKeyMatches(event, binding.match)) continue;
+    return binding;
+  }
+  return null;
+}
+
+/**
+ * The registry, grouped for the cheat sheet — every entry, whoever owns it,
+ * in scope order.
+ *
+ * @param {Array} [registry]
+ * @returns {Array<{scope:string, label:string, bindings:Array<object>}>}
+ */
+function studioKeybindGroups(registry) {
+  var list = isArrayLike(registry) ? registry : STUDIO_KEYBINDS;
+  var out = [];
+  for (var s = 0; s < STUDIO_KEYBIND_SCOPES.length; s += 1) {
+    var scope = STUDIO_KEYBIND_SCOPES[s];
+    var rows = [];
+    for (var i = 0; i < list.length; i += 1) {
+      if (list[i] && list[i].when === scope) rows.push(list[i]);
+    }
+    if (!rows.length) continue;
+    out.push({
+      scope: scope,
+      label: STUDIO_KEYBIND_SCOPE_LABELS[scope] || scope,
+      bindings: rows,
+    });
+  }
+  return out;
+}
+
+/* ==========================================================================
+ * COMMAND PALETTE — docs/FDD.md #16, "Press `/` to open a Spotlight-style
+ * search overlay to inject tags".
+ *
+ * ONE INDEX, BUILT FROM WHAT ALREADY EXISTS
+ *   The palette owns no vocabulary of its own. buildPaletteIndex() walks the
+ *   registries the cards are already built from — MUSIC_KB's genre tokens and
+ *   scenes, VOCAL_REGISTRY, INSTRUMENT_REGISTRY, ERA_REGISTRY,
+ *   EXCLUSION_PRESETS, SUNO_METATAGS — and turns each datum into one entry.
+ *   Nothing is transcribed, so nothing can fall behind: add a genre to
+ *   MUSIC_KB and it is searchable the next time the index is built.
+ *
+ * AND NO SECOND WAY TO DO ANYTHING
+ *   Every entry's `action` is a thin closure over a function the boot passes
+ *   in, and each of those calls the SAME function the card's own control
+ *   calls — toggleVocalPersonaFromUi, toggleInstrumentBlockFromUi,
+ *   toggleEraSignatureFromUi, toggleExclusionFromUi, addScene, addMetatag,
+ *   addGenreTokenToDraft. A palette that re-implemented "add a persona" would
+ *   be a second definition of what a persona IS, and the two would drift the
+ *   first time the shared-tag rule changed. Each action returns the status
+ *   line its own card just wrote, which is how the palette reports what
+ *   happened in the app's existing words rather than inventing new ones.
+ *   tests/keybinds-palette.test.js asserts that wiring statically.
+ *
+ * WHAT CLOSES THE PALETTE, AND WHAT DOES NOT
+ *   An ADD or a COMMAND closes it: the gesture is finished, and the toast or
+ *   status the underlying action raised is behind the overlay. A TOGGLE
+ *   (persona, instrument block, era signature, exclusion) leaves it OPEN and
+ *   repaints the row's own on/off mark, because toggling is the one thing
+ *   users do several of in a row — "add these three personas" should not mean
+ *   opening the palette three times. PALETTE_TOGGLE_KINDS is that decision,
+ *   written down once.
+ *
+ * NO VIRTUALISATION, ON PURPOSE
+ *   paletteMatch() caps at twelve results, so twelve rows are built. The
+ *   windowed list this app uses elsewhere (createVirtualList) exists for the
+ *   hundreds-of-rows pickers; here it would be machinery guarding a dozen
+ *   <li> elements.
+ * ========================================================================== */
+
+/** The kinds an entry may be, in the order the index is built. */
+var PALETTE_KINDS = [
+  'command',
+  'genre',
+  'scene',
+  'vocal',
+  'instrument',
+  'era',
+  'exclusion',
+  'structure',
+];
+
+/** How a kind is named on its row. */
+var PALETTE_KIND_LABELS = {
+  command: 'Command',
+  genre: 'Genre tag',
+  scene: 'Scene',
+  vocal: 'Vocal',
+  instrument: 'Instrument',
+  era: 'Era',
+  exclusion: 'Exclude',
+  structure: 'Song block',
+};
+
+/** Kinds whose action toggles, and which therefore leave the palette open. */
+var PALETTE_TOGGLE_KINDS = ['vocal', 'instrument', 'era', 'exclusion'];
+
+/** How many rows the overlay ever renders. See the header block. */
+var PALETTE_DEFAULT_LIMIT = 12;
+
+/**
+ * The commands, as data. Each `id` is also the action id the boot's
+ * studioActions map answers to, so a command and a keybind that do the same
+ * thing really are the same call rather than two copies of it.
+ */
+var PALETTE_COMMANDS = [
+  { id: 'view-hum', label: 'Go to the Hum Studio', detail: 'Switch view · 1' },
+  { id: 'view-editor', label: 'Go to the Prompt Editor', detail: 'Switch view · 2' },
+  {
+    id: 'copy-style-prompt',
+    label: 'Copy the final style prompt',
+    detail: 'Compile and copy · Ctrl+Enter',
+  },
+  { id: 'code-mode', label: 'Toggle high-contrast Code Mode', detail: 'Appearance' },
+  { id: 'theme-picker', label: 'Open the theme picker', detail: 'Appearance' },
+  { id: 'inspire-spin', label: 'Spin Inspire Me', detail: 'Draw a synergistic combination' },
+  { id: 'save-preset', label: 'Save this workspace as a preset', detail: 'Library' },
+  { id: 'export-midi', label: 'Export the hummed melody as MIDI', detail: 'Hum Studio' },
+  { id: 'open-cheatsheet', label: 'Show the keyboard shortcuts', detail: 'Help · ?' },
+];
+
+/** Does running an entry of this kind leave the palette open? */
+function paletteKeepsOpen(kind) {
+  return PALETTE_TOGGLE_KINDS.indexOf(kind) !== -1;
+}
+
+/**
+ * Build the search index.
+ *
+ * @param {{
+ *   kb?: object,          defaults to MUSIC_KB
+ *   store?: object,       the prompt store, for the on/off marks
+ *   exclusions?: object,  the exclusion store, same reason
+ *   actions?: object      one function per verb; see the header block
+ * }} [deps]
+ * @returns {Array<{kind:string, id:string, label:string, detail:string,
+ *                  action:function, pressed:(function():boolean|null)}>}
+ */
+function buildPaletteIndex(deps) {
+  var d = deps || {};
+  var kb = d.kb && typeof d.kb === 'object' ? d.kb : MUSIC_KB;
+  var store = d.store || null;
+  var exclusions = d.exclusions || null;
+  var actions = d.actions && typeof d.actions === 'object' ? d.actions : {};
+  var entries = [];
+
+  /** Call an injected verb, tolerating one that was not supplied. */
+  function run(name, argument) {
+    if (typeof actions[name] !== 'function') return '';
+    var message = actions[name](argument);
+    return typeof message === 'string' ? message : '';
+  }
+
+  function push(kind, id, label, detail, action, pressed) {
+    entries.push({
+      kind: kind,
+      id: id,
+      label: String(label),
+      detail: String(detail),
+      action: action,
+      pressed: typeof pressed === 'function' ? pressed : null,
+    });
+  }
+
+  /* -- commands first: an empty query then opens on something useful -- */
+  for (var c = 0; c < PALETTE_COMMANDS.length; c += 1) {
+    (function (command) {
+      push('command', 'command:' + command.id, command.label, command.detail, function () {
+        return run('command', command);
+      });
+    })(PALETTE_COMMANDS[c]);
+  }
+
+  /* -- every genre token in the taxonomy, filed under the genre it came from,
+     -- which is also what the row's detail column says out loud -- */
+  var genres = kb && isArrayLike(kb.genres) ? kb.genres : [];
+  for (var g = 0; g < genres.length; g += 1) {
+    var genre = genres[g];
+    if (!genre || !isArrayLike(genre.tokens)) continue;
+    for (var t = 0; t < genre.tokens.length; t += 1) {
+      (function (entry, token, index) {
+        if (!token || typeof token.tag !== 'string' || !token.tag) return;
+        push(
+          'genre',
+          'genre:' + entry.id + ':' + index,
+          token.tag,
+          String(entry.label || entry.id),
+          function () {
+            return run('addGenreToken', { tag: token.tag, weight: token.weight, genre: entry });
+          }
+        );
+      })(genre, genre.tokens[t], t);
+    }
+  }
+
+  /* -- scenes, through the SAME trigger list the scene card's chips use -- */
+  var scenes = sceneTriggerList(kb);
+  for (var s = 0; s < scenes.length; s += 1) {
+    (function (scene) {
+      push('scene', 'scene:' + scene.id, scene.label, 'Cinematic scene · adds its tokens', function () {
+        return run('addScene', scene);
+      });
+    })(scenes[s]);
+  }
+
+  /* -- vocal personas (FDD #28 over the #65 registry) -- */
+  for (var v = 0; v < VOCAL_REGISTRY.length; v += 1) {
+    (function (persona) {
+      push(
+        'vocal',
+        'vocal:' + persona.id,
+        persona.label,
+        persona.familyLabel + ' · ' + persona.tags.length + ' tags',
+        function () {
+          return run('toggleVocalPersona', persona);
+        },
+        store
+          ? function () {
+              return vocalPersonaHold(store, persona).complete === true;
+            }
+          : null
+      );
+    })(VOCAL_REGISTRY[v]);
+  }
+
+  /* -- instrument blocks (FDD #27) -- */
+  for (var n = 0; n < INSTRUMENT_REGISTRY.length; n += 1) {
+    (function (block) {
+      push(
+        'instrument',
+        'instrument:' + block.id,
+        block.label,
+        block.familyLabel + ' · ' + block.tags.length + ' tags',
+        function () {
+          return run('toggleInstrumentBlock', block);
+        },
+        store
+          ? function () {
+              return instrumentBlockHold(store, block).complete === true;
+            }
+          : null
+      );
+    })(INSTRUMENT_REGISTRY[n]);
+  }
+
+  /* -- production era signatures (FDD #66) -- */
+  for (var e = 0; e < ERA_REGISTRY.length; e += 1) {
+    (function (signature) {
+      push(
+        'era',
+        'era:' + signature.id,
+        signature.label,
+        signature.groupLabel + ' · ' + signature.tags.length + ' tags',
+        function () {
+          return run('toggleEraSignature', signature);
+        },
+        store
+          ? function () {
+              return eraSignatureHold(store, signature).complete === true;
+            }
+          : null
+      );
+    })(ERA_REGISTRY[e]);
+  }
+
+  /* -- the curated exclusion shield (FDD #30) -- */
+  for (var x = 0; x < EXCLUSION_PRESETS.length; x += 1) {
+    (function (term) {
+      push(
+        'exclusion',
+        'exclusion:' + term,
+        term,
+        'Negative tag shield · [Exclude: …]',
+        function () {
+          return run('toggleExclusion', term);
+        },
+        exclusions && typeof exclusions.has === 'function'
+          ? function () {
+              return exclusions.has(term) === true;
+            }
+          : null
+      );
+    })(EXCLUSION_PRESETS[x]);
+  }
+
+  /* -- the §3.1 metatag taxonomy: append one block to the song flow -- */
+  var metaGroups = [
+    { list: SUNO_METATAGS.core, label: 'Core section' },
+    { list: SUNO_METATAGS.action, label: 'Action tag' },
+  ];
+  for (var m = 0; m < metaGroups.length; m += 1) {
+    var group = metaGroups[m];
+    if (!isArrayLike(group.list)) continue;
+    for (var k = 0; k < group.list.length; k += 1) {
+      (function (section, groupLabel) {
+        push(
+          'structure',
+          'structure:' + section,
+          formatStructureTag(section),
+          groupLabel + ' · appended to the song flow',
+          function () {
+            return run('addMetatag', section);
+          }
+        );
+      })(group.list[k], group.label);
+    }
+  }
+
+  return entries;
+}
+
+/** Fold a string the way the matcher compares them. */
+function paletteNormalize(text) {
+  if (typeof text !== 'string') return '';
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Does `query` sit at the start of a WORD inside `field`? Word boundaries are
+ * "anything that is not a letter or a digit", which is what makes "log drum"
+ * findable by typing "drum" while "amber" is not findable by typing "mbe".
+ */
+function paletteWordPrefix(field, query) {
+  var at = field.indexOf(query);
+  while (at !== -1) {
+    if (at === 0) return true;
+    if (/[^a-z0-9]/.test(field.charAt(at - 1))) return true;
+    at = field.indexOf(query, at + 1);
+  }
+  return false;
+}
+
+/**
+ * How well one field answers the query. Lower is better; -1 is "not at all".
+ *   0 exact  ·  1 field prefix  ·  2 word prefix  ·  3 substring
+ */
+function paletteFieldRank(field, query) {
+  if (!field || !query) return -1;
+  if (field === query) return 0;
+  if (field.indexOf(query) === 0) return 1;
+  if (paletteWordPrefix(field, query)) return 2;
+  if (field.indexOf(query) !== -1) return 3;
+  return -1;
+}
+
+/**
+ * The rank of a whole entry: the label decides, the detail is the fallback,
+ * and a multi-word query that matches nowhere contiguously still matches if
+ * every word of it appears somewhere.
+ *
+ * @returns {number} 0..6, or -1 for no match
+ */
+function paletteEntryRank(entry, query, words) {
+  var label = paletteNormalize(entry.label);
+  var detail = paletteNormalize(entry.detail);
+
+  var direct = paletteFieldRank(label, query);
+  if (direct !== -1) return direct;
+
+  var fallback = paletteFieldRank(detail, query);
+  if (fallback !== -1) return fallback <= 2 ? 4 : 5;
+
+  if (!isArrayLike(words) || words.length < 2) return -1;
+  var hay = label + ' ' + detail;
+  for (var i = 0; i < words.length; i += 1) {
+    if (hay.indexOf(words[i]) === -1) return -1;
+  }
+  return 6;
+}
+
+/**
+ * Rank the index against a query. PURE and TOTALLY ORDERED: rank, then the
+ * shorter label (an exact tag beats the compound that contains it), then the
+ * entry's position in the index. No two entries can tie on all three, so the
+ * result does not depend on the sort being stable and is byte-identical on
+ * every engine.
+ *
+ * An EMPTY query is not "no results" but "nothing narrowed yet": the head of
+ * the index, which is why the commands are built first.
+ *
+ * @param {string} query
+ * @param {Array} entries
+ * @param {number} [limit] defaults to PALETTE_DEFAULT_LIMIT
+ * @returns {Array} at most `limit` entries, best first
+ */
+function paletteMatch(query, entries, limit) {
+  var list = isArrayLike(entries) ? entries : [];
+  var cap =
+    typeof limit === 'number' && isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : PALETTE_DEFAULT_LIMIT;
+  var q = paletteNormalize(query);
+  var out = [];
+  var i;
+
+  if (!q) {
+    for (i = 0; i < list.length && out.length < cap; i += 1) {
+      if (list[i] && typeof list[i] === 'object') out.push(list[i]);
+    }
+    return out;
+  }
+
+  var words = q.split(' ');
+  var scored = [];
+  for (i = 0; i < list.length; i += 1) {
+    var entry = list[i];
+    if (!entry || typeof entry !== 'object') continue;
+    var rank = paletteEntryRank(entry, q, words);
+    if (rank === -1) continue;
+    scored.push({
+      entry: entry,
+      rank: rank,
+      length: paletteNormalize(entry.label).length,
+      at: i,
+    });
+  }
+
+  scored.sort(function (a, b) {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (a.length !== b.length) return a.length - b.length;
+    return a.at - b.at;
+  });
+
+  for (i = 0; i < scored.length && out.length < cap; i += 1) out.push(scored[i].entry);
+  return out;
+}
+
+/* ==========================================================================
  * SUNO MODEL SELECTOR — docs/FDD.md #69, "Adjusts syntax for Suno v5.5, v4,
  * or v3.5", over docs/FEATURE-MECHANICS.md §3.
  *
@@ -24254,6 +25421,27 @@ function createInstallCapability(deps) {
      * document, the controls and the stored preferences can never drift.
      */
     function repaintTheme() {
+      // Chrome can freeze a mid-flight color/border transition when the token
+      // it interpolates changes underneath it at runtime (diagnosed on
+      // .btn-record in Task 11 and re-confirmed on .btn-mini in Task 14 — a
+      // pressed toggle read a nonsense 1.16:1 mid-transition). The pattern
+      // fix: kill ALL transitions for the swap frame, repaint, then release
+      // after the next two frames so every element lands on its final colors
+      // instantly instead of animating between palettes.
+      const root = document.documentElement;
+      if (root && root.classList) {
+        root.classList.add('theme-switching');
+        const release = function () {
+          root.classList.remove('theme-switching');
+        };
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(function () {
+            requestAnimationFrame(release);
+          });
+        } else {
+          setTimeout(release, 50);
+        }
+      }
       // The tokens are overridden on the root element, so every var(--…) in the
       // stylesheet re-resolves at once — no per-element restyling anywhere.
       applyThemeState(themePrefs, document);
@@ -24857,7 +26045,13 @@ function createInstallCapability(deps) {
 
     let capture = makeCapture();
 
-    recordBtn.addEventListener('click', function () {
+    /**
+     * THE one place recording starts or stops. A named declaration rather than
+     * an inline handler because FDD #90's Space keybind runs exactly this —
+     * pressing Space and pressing the button are the same call, not two paths
+     * that have to be kept agreeing about what "already live" means.
+     */
+    function toggleRecording() {
       const state = capture.getState();
       if (state === 'live' || state === 'requesting') {
         capture.stop();
@@ -24869,7 +26063,9 @@ function createInstallCapability(deps) {
       // "press Record again" in #mic-help actually does.
       if (state !== 'idle' && state !== 'stopped') capture = makeCapture();
       capture.start();
-    });
+    }
+
+    recordBtn.addEventListener('click', toggleRecording);
 
     // Direct MIDI Export (FEATURE-MECHANICS.md §1.1 step 3): the SMF is built
     // in memory, base64'd and handed to the browser as a data: URL on a
@@ -25739,6 +26935,32 @@ function createInstallCapability(deps) {
       el.textContent = values && values.length ? values.join(', ') : '—';
     }
 
+    /**
+     * THE one place a single genre token reaches the draft.
+     *
+     * Two controls add one: a dissector trait badge (source 'dissector') and a
+     * command-palette row (source 'manual' — the user picked it out of the
+     * taxonomy themselves). They share this function rather than each carrying
+     * their own promptState.add + toast, so "already in the draft" is worded
+     * once and the section a genre token lands in is decided once.
+     *
+     * @returns {string} the sentence the toast just showed, for the palette to
+     *                   echo in its own status line
+     */
+    function addGenreTokenToDraft(tag, weight, source) {
+      const id = promptState.add({
+        section: 'genre',
+        tag: tag,
+        weight: weight,
+        source: source,
+      });
+      const message = id
+        ? 'Added “' + tag + '” to the draft.'
+        : '“' + tag + '” is already in the draft.';
+      toastHost.show(message, id ? 'info' : 'warn');
+      return message;
+    }
+
     function renderDissection(outcome) {
       const result = outcome.result;
 
@@ -25784,18 +27006,7 @@ function createInstallCapability(deps) {
         badge.appendChild(weight);
         if (safe) {
           badge.addEventListener('click', function () {
-            const id = promptState.add({
-              section: 'genre',
-              tag: token.tag,
-              weight: token.weight,
-              source: 'dissector',
-            });
-            toastHost.show(
-              id
-                ? 'Added “' + token.tag + '” to the draft.'
-                : '“' + token.tag + '” is already in the draft.',
-              id ? 'info' : 'warn'
-            );
+            addGenreTokenToDraft(token.tag, token.weight, 'dissector');
           });
         }
         badgeHost.appendChild(badge);
@@ -26469,6 +27680,23 @@ function createInstallCapability(deps) {
      * @type {Array<{term: string, button: HTMLButtonElement}>}
      */
     const excludePresetButtons = [];
+
+    /**
+     * THE one place a curated exclusion is switched. Shared by the shield's own
+     * chips and by the command palette, so both say the same sentence about the
+     * same store rather than each owning a copy of the wording.
+     *
+     * @returns {string} the status line just written, for the palette to echo
+     */
+    function toggleExclusionFromUi(term) {
+      const on = exclusions.toggle(term);
+      excludeStatus.className = 'dissect-status';
+      excludeStatus.textContent = on
+        ? '“' + term + '” excluded.'
+        : '“' + term + '” is no longer excluded.';
+      return excludeStatus.textContent;
+    }
+
     for (let i = 0; i < EXCLUSION_PRESETS.length; i += 1) {
       const term = EXCLUSION_PRESETS[i];
       const button = document.createElement('button');
@@ -26478,11 +27706,7 @@ function createInstallCapability(deps) {
       button.setAttribute('aria-pressed', 'false');
       button.title = 'Exclude “' + term + '” from the generation';
       button.addEventListener('click', function () {
-        const on = exclusions.toggle(term);
-        excludeStatus.className = 'dissect-status';
-        excludeStatus.textContent = on
-          ? '“' + term + '” excluded.'
-          : '“' + term + '” is no longer excluded.';
+        toggleExclusionFromUi(term);
       });
       excludePresetHost.appendChild(button);
       excludePresetButtons.push({ term: term, button: button });
@@ -26799,7 +28023,12 @@ function createInstallCapability(deps) {
     exclusions.subscribe(renderExclusions);
     exclusions.subscribe(renderStylePrompt);
 
-    styleCopyBtn.addEventListener('click', function () {
+    /**
+     * THE one style-prompt copy. A named declaration since 0.22.0 because FDD
+     * #90's Ctrl+Enter runs exactly this — one compile, one history rule, one
+     * set of failure messages, whether the gesture was a click or a keybind.
+     */
+    function copyStylePrompt() {
       // Recompiled rather than read from a cached render: the pipeline is
       // deterministic, so this is the same string the panel is showing, and
       // there is no cached copy that could ever go stale behind it.
@@ -26831,7 +28060,9 @@ function createInstallCapability(deps) {
             'error'
           );
       });
-    });
+    }
+
+    styleCopyBtn.addEventListener('click', copyStylePrompt);
 
     /* -- G2. the share link (FDD #75) --
      *
@@ -29662,6 +30893,526 @@ function createInstallCapability(deps) {
       instrumentView.refresh();
       eraView.refresh();
     }
+
+    /* ================= the studio keyboard + the command palette =============
+     *
+     * docs/FDD.md #90 (pro-audio keybindings) and #16 (the Spotlight-style
+     * palette), wired LAST because between them they reach almost every
+     * control above — and every one of those reaches is a call to the
+     * function that control's own handler calls, never a second copy of it.
+     *
+     * Three pieces:
+     *   1. studioActions — the verbs, by id. One entry per action id named in
+     *      STUDIO_KEYBINDS and in PALETTE_COMMANDS, so a key and a palette row
+     *      that mean the same thing ARE the same call.
+     *   2. two modal overlays sharing one createOverlay() contract: Escape
+     *      closes, the backdrop closes, Tab cannot leave, and focus goes back
+     *      to wherever it came from.
+     *   3. ONE capture-phase keydown listener. It is the only ad-hoc-free
+     *      entrance to the keyboard; the structure card's listener and the
+     *      tablist's listener stay exactly where they are and this one never
+     *      touches their keys (STUDIO_KEYBINDS marks those 'structure' and
+     *      'tablist', and matchStudioKeybind only ever returns 'dispatcher').
+     * ===================================================================== */
+
+    const paletteBackdrop = $('palette-backdrop');
+    const paletteDialog = $('palette');
+    const paletteInput = $('palette-input');
+    const paletteListEl = $('palette-list');
+    const paletteEmptyEl = $('palette-empty');
+    const paletteStatusEl = $('palette-status');
+    const paletteOpenBtn = $('btn-palette');
+    const cheatBackdrop = $('cheatsheet-backdrop');
+    const cheatDialog = $('cheatsheet');
+    const cheatGroupsHost = $('cheatsheet-groups');
+    const cheatCloseBtn = $('btn-cheatsheet-close');
+
+    /**
+     * One modal overlay: show, trap, restore.
+     *
+     * The trap is a real one because the backdrop carries [hidden] when it is
+     * closed — a hidden subtree is out of the tab order entirely, so there is
+     * no "behind the dialog" for Tab to reach in the first place; this only
+     * has to wrap the ends. Escape and the backdrop click are handled here so
+     * neither dialog grows its own copy of the dismissal contract.
+     */
+    function createOverlay(backdrop, dialog, options) {
+      const opts = options || {};
+      let restoreTo = null;
+
+      function focusable() {
+        const nodes = dialog.querySelectorAll(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        const out = [];
+        for (let i = 0; i < nodes.length; i += 1) {
+          if (!nodes[i].hidden) out.push(nodes[i]);
+        }
+        return out;
+      }
+
+      function onKeydown(event) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          // Nothing further may act on this Escape — not the theme menu's own
+          // capture listener, and not a parent that might read it as "cancel".
+          event.stopPropagation();
+          api.close();
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        const items = focusable();
+        if (!items.length) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey) {
+          if (active === first || !dialog.contains(active)) {
+            event.preventDefault();
+            last.focus();
+          }
+          return;
+        }
+        if (active === last || !dialog.contains(active)) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+
+      function onPointerDown(event) {
+        // Only the scrim itself dismisses; a click that started inside the
+        // dialog and drifted out must not close it mid-gesture.
+        if (event.target === backdrop) api.close();
+      }
+
+      const api = {
+        isOpen: function () {
+          return backdrop.hidden === false;
+        },
+        open: function () {
+          if (api.isOpen()) return;
+          restoreTo =
+            document.activeElement && typeof document.activeElement.focus === 'function'
+              ? document.activeElement
+              : null;
+          backdrop.hidden = false;
+          // aria-modal is only a hint some AT combinations ignore; inert on
+          // the app shell (the overlays are its siblings) actually removes the
+          // background from focus, click and the virtual cursor while open.
+          const shell = document.querySelector('.app-shell');
+          if (shell) shell.inert = true;
+          if (typeof opts.onOpen === 'function') opts.onOpen();
+          const target = typeof opts.initialFocus === 'function' ? opts.initialFocus() : null;
+          const items = focusable();
+          const landing = target || (items.length ? items[0] : dialog);
+          if (landing && typeof landing.focus === 'function') landing.focus();
+        },
+        close: function () {
+          if (!api.isOpen()) return;
+          // Take focus OFF the dialog before hiding it. focus() on a
+          // non-focusable restore target (document.body, the common case when
+          // the palette was opened from a bare "/") is a no-op that does not
+          // blur what is focused now — so without this the keyboard is left
+          // standing on a hidden input until the engine's own fixup runs.
+          const inside = document.activeElement;
+          if (inside && dialog.contains(inside) && typeof inside.blur === 'function') inside.blur();
+          backdrop.hidden = true;
+          const shell = document.querySelector('.app-shell');
+          if (shell) shell.inert = false;
+          if (typeof opts.onClose === 'function') opts.onClose();
+          // Focus lands back where the user left it. Without this the keyboard
+          // is dumped on <body> and the next Tab starts from the page top.
+          if (restoreTo && typeof restoreTo.focus === 'function') restoreTo.focus();
+          restoreTo = null;
+        },
+      };
+
+      backdrop.addEventListener('keydown', onKeydown, true);
+      backdrop.addEventListener('mousedown', onPointerDown);
+      return api;
+    }
+
+    /* ---------------- the palette ---------------- */
+
+    /** Built on first open, not at boot: 537 entries nobody may ever search. */
+    let paletteEntries = null;
+    /** What the last render painted, and which row Enter would run. */
+    let paletteResults = [];
+    let paletteActive = 0;
+
+    function paletteIndex() {
+      if (paletteEntries === null) {
+        paletteEntries = buildPaletteIndex({
+          kb: MUSIC_KB,
+          store: promptState,
+          exclusions: exclusions,
+          /*
+           * THE WIRING. Every verb below is one call to the function the
+           * corresponding card's own control calls, and returns the status
+           * line that call just wrote — so the palette reports what happened
+           * in the app's existing words instead of composing its own account
+           * of it. There is no second add path anywhere in this object.
+           */
+          actions: {
+            addGenreToken: function (pick) {
+              return addGenreTokenToDraft(pick.tag, pick.weight, 'manual');
+            },
+            addScene: function (scene) {
+              // Exactly what a scene quick-chip does: put the trigger phrase in
+              // the box and run the card's own matcher over it.
+              sceneInput.value = scene.phrase;
+              addScene();
+              return sceneStatus.textContent;
+            },
+            toggleVocalPersona: function (persona) {
+              toggleVocalPersonaFromUi(persona);
+              return vocalStatus.textContent;
+            },
+            toggleInstrumentBlock: function (block) {
+              toggleInstrumentBlockFromUi(block);
+              return instrumentStatus.textContent;
+            },
+            toggleEraSignature: function (signature) {
+              toggleEraSignatureFromUi(signature);
+              return eraStatus.textContent;
+            },
+            toggleExclusion: function (term) {
+              return toggleExclusionFromUi(term);
+            },
+            addMetatag: function (section) {
+              addMetatag(section);
+              return structureStatus.textContent;
+            },
+            command: function (command) {
+              return runStudioAction(command.id);
+            },
+          },
+        });
+      }
+      return paletteEntries;
+    }
+
+    function setPaletteStatus(text) {
+      paletteStatusEl.textContent = typeof text === 'string' ? text : '';
+    }
+
+    /** Move the active marker without rebuilding twelve rows. */
+    function paintPaletteActive() {
+      const rows = paletteListEl.children;
+      for (let i = 0; i < rows.length; i += 1) {
+        rows[i].setAttribute('aria-selected', i === paletteActive ? 'true' : 'false');
+      }
+      const current = rows[paletteActive];
+      paletteInput.setAttribute('aria-activedescendant', current ? current.id : '');
+      if (current && typeof current.scrollIntoView === 'function') {
+        current.scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    function renderPalette() {
+      paletteResults = paletteMatch(paletteInput.value, paletteIndex(), PALETTE_DEFAULT_LIMIT);
+      if (paletteActive >= paletteResults.length) paletteActive = 0;
+
+      paletteListEl.textContent = '';
+      for (let i = 0; i < paletteResults.length; i += 1) {
+        const entry = paletteResults[i];
+        const row = document.createElement('li');
+        row.className = 'palette-option';
+        row.id = 'palette-option-' + i;
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', 'false');
+
+        const kind = document.createElement('span');
+        kind.className = 'palette-kind';
+        kind.textContent = PALETTE_KIND_LABELS[entry.kind] || entry.kind;
+
+        const label = document.createElement('span');
+        label.className = 'palette-label';
+        label.textContent = entry.label;
+
+        const detail = document.createElement('span');
+        detail.className = 'palette-detail';
+        detail.textContent = entry.detail;
+
+        row.appendChild(kind);
+        row.appendChild(label);
+        row.appendChild(detail);
+
+        // A toggle that is already on says so on its own row — real text, not a
+        // colour, so it is announced as well as seen. This is the feedback that
+        // makes leaving the palette open after a toggle legible.
+        if (typeof entry.pressed === 'function' && entry.pressed()) {
+          const mark = document.createElement('span');
+          mark.className = 'palette-mark';
+          // An exclusion is a NEGATIVE statement: it is not "in the draft", it
+          // is on the shield. Saying "in draft" there would be a small lie.
+          mark.textContent = entry.kind === 'exclusion' ? 'excluded' : 'in draft';
+          row.appendChild(mark);
+        }
+
+        const index = i;
+        // mousedown default is what moves focus off the input; preventing it
+        // keeps the combobox focused so the listbox stays a listbox.
+        row.addEventListener('mousedown', function (event) {
+          event.preventDefault();
+        });
+        row.addEventListener('click', function () {
+          paletteActive = index;
+          runPaletteEntry(paletteResults[index]);
+        });
+        paletteListEl.appendChild(row);
+      }
+
+      paletteEmptyEl.hidden = paletteResults.length > 0;
+      paintPaletteActive();
+    }
+
+    /**
+     * Run one row. An ADD or a COMMAND closes the palette (the gesture is
+     * finished, and its toast is behind the overlay); a TOGGLE keeps it open
+     * and repaints, because toggling is what users do several of in a row.
+     * PALETTE_TOGGLE_KINDS is where that decision is written down.
+     */
+    function runPaletteEntry(entry) {
+      if (!entry || typeof entry.action !== 'function') return;
+      let message = '';
+      try {
+        message = entry.action();
+      } catch (err) {
+        message = 'That did not run — ' + errorMessage(err);
+      }
+      if (paletteKeepsOpen(entry.kind)) {
+        setPaletteStatus(message);
+        renderPalette();
+        return;
+      }
+      paletteOverlay.close();
+    }
+
+    const paletteOverlay = createOverlay(paletteBackdrop, paletteDialog, {
+      initialFocus: function () {
+        return paletteInput;
+      },
+      onOpen: function () {
+        // Every open starts from nothing typed: a stale query from ten minutes
+        // ago is a filter the user did not ask for.
+        paletteInput.value = '';
+        paletteActive = 0;
+        setPaletteStatus('');
+        renderPalette();
+      },
+      onClose: function () {
+        paletteInput.setAttribute('aria-activedescendant', '');
+      },
+    });
+
+    paletteInput.addEventListener('input', function () {
+      paletteActive = 0;
+      renderPalette();
+    });
+
+    paletteInput.addEventListener('keydown', function (event) {
+      if (!paletteResults.length) return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        paletteActive = (paletteActive + step + paletteResults.length) % paletteResults.length;
+        paintPaletteActive();
+        return;
+      }
+      if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        paletteActive = event.key === 'Home' ? 0 : paletteResults.length - 1;
+        paintPaletteActive();
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        runPaletteEntry(paletteResults[paletteActive]);
+      }
+    });
+
+    paletteOpenBtn.addEventListener('click', function () {
+      paletteOverlay.open();
+    });
+
+    /* ---------------- the cheat sheet ---------------- */
+
+    const cheatOverlay = createOverlay(cheatBackdrop, cheatDialog, {
+      initialFocus: function () {
+        return cheatCloseBtn;
+      },
+    });
+
+    cheatCloseBtn.addEventListener('click', function () {
+      cheatOverlay.close();
+    });
+
+    /* Painted once: STUDIO_KEYBINDS is static, and the sheet is a view of it
+       rather than a second list that could disagree with it. */
+    (function renderCheatSheet() {
+      const groups = studioKeybindGroups(STUDIO_KEYBINDS);
+      for (let g = 0; g < groups.length; g += 1) {
+        const group = groups[g];
+        const section = document.createElement('section');
+        section.className = 'cheat-group';
+
+        const title = document.createElement('h3');
+        title.className = 'cheat-group-title';
+        title.textContent = group.label;
+        section.appendChild(title);
+
+        const rows = document.createElement('dl');
+        rows.className = 'cheat-rows';
+        for (let b = 0; b < group.bindings.length; b += 1) {
+          const binding = group.bindings[b];
+          const keyCell = document.createElement('dt');
+          const keyEl = document.createElement('kbd');
+          keyEl.textContent = binding.keys;
+          keyCell.appendChild(keyEl);
+
+          const textCell = document.createElement('dd');
+          textCell.appendChild(document.createTextNode(binding.description));
+          // Say which control owns a delegated key, so "Ctrl+Z does nothing"
+          // reads as "Ctrl+Z belongs to the song flow" instead of a bug.
+          if (binding.owner !== 'dispatcher') {
+            // A real space, so a screen reader reads "…has focus. (view tabs)"
+            // rather than running the two sentences together; the margin below
+            // is what separates them for the eye.
+            textCell.appendChild(document.createTextNode(' '));
+            const owner = document.createElement('span');
+            owner.className = 'cheat-owner';
+            owner.textContent =
+              binding.owner === 'structure' ? '(song flow)' : '(view tabs)';
+            textCell.appendChild(owner);
+          }
+
+          rows.appendChild(keyCell);
+          rows.appendChild(textCell);
+        }
+        section.appendChild(rows);
+        cheatGroupsHost.appendChild(section);
+      }
+    })();
+
+    /* ---------------- the verbs ---------------- */
+
+    /**
+     * One entry per action id in STUDIO_KEYBINDS and PALETTE_COMMANDS. Each
+     * body is a call to the control's real handler — never a re-implementation
+     * — and returns the sentence the palette should echo (keybinds ignore it,
+     * because the app's own toast or status has already said it on screen).
+     */
+    const studioActions = {
+      'toggle-record': function () {
+        toggleRecording();
+        return '';
+      },
+      'copy-style-prompt': function () {
+        copyStylePrompt();
+        return '';
+      },
+      'open-palette': function () {
+        paletteOverlay.open();
+        return '';
+      },
+      'open-cheatsheet': function () {
+        cheatOverlay.open();
+        return '';
+      },
+      'view-hum': function () {
+        viewManager.switchTo('hum');
+        return 'Showing the Hum Studio.';
+      },
+      'view-editor': function () {
+        viewManager.switchTo('editor');
+        return 'Showing the Prompt Editor.';
+      },
+      'code-mode': function () {
+        setCodeMode(!themePrefs.isHighContrast());
+        return themePrefs.isHighContrast() ? 'Code Mode on.' : 'Code Mode off.';
+      },
+      'theme-picker': function () {
+        openThemeMenu();
+        return '';
+      },
+      'inspire-spin': function () {
+        viewManager.switchTo('editor');
+        runInspireSpin();
+        return inspireStatus.textContent;
+      },
+      'save-preset': function () {
+        viewManager.switchTo('editor');
+        // The real control, so the name rule, the overwrite rule and the
+        // database write are the ones the Library card already applies. An
+        // unnamed preset is refused there and the field is where the user
+        // needs to be next.
+        presetSaveBtn.click();
+        if (typeof presetNameInput.focus === 'function') presetNameInput.focus();
+        return presetsStatus.textContent;
+      },
+      'export-midi': function () {
+        // "when enabled" is the honest half of this command: the button is
+        // disabled until a hum has been captured, and clicking a disabled
+        // control silently would look like a broken command.
+        if (midiBtn.disabled) {
+          // The palette closes on a command, taking its status line with it, so
+          // a refusal has to be said somewhere that outlives the overlay.
+          const why = 'Nothing to export yet — hum something in the Hum Studio first.';
+          toastHost.show(why, 'warn');
+          return why;
+        }
+        viewManager.switchTo('hum');
+        midiBtn.click();
+        return 'Exporting ' + midiReadout.textContent + '.';
+      },
+    };
+
+    /** Run one verb by id. Unknown ids are inert rather than throwing. */
+    function runStudioAction(id) {
+      const verb = studioActions[id];
+      if (typeof verb !== 'function') return '';
+      const message = verb();
+      return typeof message === 'string' ? message : '';
+    }
+
+    /* ---------------- the one dispatcher ---------------- */
+
+    /**
+     * Is some other layer already holding the keyboard?
+     *
+     * A dialog with aria-modal="true" owns every key while it is up, and the
+     * two popovers in the header install their own capture-phase listeners
+     * when they open. This dispatcher is registered at boot, so it would run
+     * BEFORE those — pressing 1 with the theme menu open would switch views
+     * out from under it. One predicate, checked first, and the modal layers
+     * behave like modal layers.
+     */
+    function studioKeyboardHeldElsewhere() {
+      return (
+        paletteOverlay.isOpen() ||
+        cheatOverlay.isOpen() ||
+        themePanel.hidden === false ||
+        colorsPanel.hidden === false
+      );
+    }
+
+    document.addEventListener(
+      'keydown',
+      function (event) {
+        // Something nearer the target already claimed this key.
+        if (event.defaultPrevented) return;
+        // Mid-composition keystrokes belong to the IME, not to us. keyCode 229
+        // is the legacy signal for the same thing.
+        if (event.isComposing === true || event.keyCode === 229) return;
+        if (studioKeyboardHeldElsewhere()) return;
+        const binding = matchStudioKeybind(event, viewManager.current(), STUDIO_KEYBINDS);
+        if (!binding) return;
+        event.preventDefault();
+        runStudioAction(binding.action);
+      },
+      true
+    );
 
     renderStorageStatus();
     renderHistory();

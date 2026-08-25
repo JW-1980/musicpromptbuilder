@@ -38,6 +38,7 @@ const SUITES = [
   { id: 'pwa', script: path.join(TESTS_DIR, 'pwa.test.js') },
   { id: 'instruments-inspire', script: path.join(TESTS_DIR, 'instruments-inspire.test.js') },
   { id: 'model-deeplink', script: path.join(TESTS_DIR, 'model-deeplink.test.js') },
+  { id: 'keybinds-palette', script: path.join(TESTS_DIR, 'keybinds-palette.test.js') },
   { id: 'limiter-eval', script: path.join(TESTS_DIR, 'limiter-eval.js') },
 ];
 

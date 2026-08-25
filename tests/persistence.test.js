@@ -2229,8 +2229,20 @@ s.test('the three new cards ship with their ids, headings and labelled regions',
 
 s.test('a successful style-prompt copy is what appends to the history bank', () => {
   const source = app.source;
-  const handler = /styleCopyBtn\.addEventListener\([\s\S]*?\n    \}\);/.exec(source);
-  assert.ok(handler, 'the style copy handler could not be located');
+  /* CONSCIOUSLY UPDATED IN 0.22.0: the copy used to BE the click handler, and
+   * this test located it as one. FDD #90's Ctrl+Enter has to run the same copy,
+   * so the body moved into a named `function copyStylePrompt()` and the listener
+   * became `styleCopyBtn.addEventListener('click', copyStylePrompt)`. What is
+   * asserted below is unchanged, and the second half of it is what makes the
+   * move safe: appendHistoryEntry must still have exactly ONE call site in the
+   * whole script, inside the success callback. A keybind that banked a prompt of
+   * its own would fail this test, not slip past it. */
+  assert.ok(
+    /styleCopyBtn\.addEventListener\('click', copyStylePrompt\);/.test(source),
+    'the style copy button must be wired to the shared copyStylePrompt() — one copy path, not two'
+  );
+  const handler = /function copyStylePrompt\(\)[\s\S]*?\n    \}\n/.exec(source);
+  assert.ok(handler, 'the style copy function could not be located');
   assert.ok(
     /const done = function \(\)[\s\S]*?appendHistoryEntry\(final\.text, final\.tags\.length\);/.test(handler[0]),
     'the history append must sit inside the SUCCESS callback, not beside the click'

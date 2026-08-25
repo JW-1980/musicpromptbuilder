@@ -1690,6 +1690,25 @@ s.test('every glow in every theme mixes its colour from that theme’s own accen
   }
 });
 
+s.test('theme swaps kill transitions for the swap frame (Chrome freeze fix, queued since Task 11)', () => {
+  const style = readStyle();
+  const source = readIndex();
+  assert.ok(
+    /\.theme-switching \*,\s*\n\s*\.theme-switching \*::before,\s*\n\s*\.theme-switching \*::after\s*\{\s*\n\s*transition: none !important;/.test(style),
+    'the .theme-switching kill rule must cover elements and pseudo-elements'
+  );
+  const repaint = /function repaintTheme\(\)\s*\{([\s\S]*?)\n    \}/.exec(source);
+  assert.ok(repaint, 'repaintTheme not found');
+  assert.ok(
+    /classList\.add\('theme-switching'\)/.test(repaint[1]),
+    'repaintTheme must add the kill class before applying the palette'
+  );
+  assert.ok(
+    /classList\.remove\('theme-switching'\)/.test(repaint[1]),
+    'repaintTheme must release the kill class after the swap frames'
+  );
+});
+
 s.test('--ink-violet clears WCAG AA in every theme, and violet TEXT rides it, never the raw accent (0.16.x fix)', () => {
   const style = readStyle();
 
